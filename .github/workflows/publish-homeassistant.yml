@@ -1,0 +1,21 @@
+name: Publish Homeassistant Helm Chart
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - homeassistant/**
+jobs:
+  publish-homeassistant:
+    name: Publish Homeassistant Helm Chart
+    uses: ./.github/workflows/publish-helm-chart.yml
+    with:
+      chart-name: 'homeassistant'
+    secrets: inherit
+#  deploy-homeassistant-jk:
+#    name: Deploy Homeassistant JK Chart
+#    needs: publish-homeassistant
+#    uses: ./.github/workflows/deploy-helm-chart.yml
+#    with:
+#      deployment-identifier: 'homeassistant-jk'
+#      chart-version: ${{ needs.publish-homeassistant.outputs.chart-version }}
+#    secrets: inherit

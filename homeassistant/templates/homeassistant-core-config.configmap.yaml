@@ -6,4 +6,5 @@ data:
   config.yaml: |-
     http: !include http-config.yaml
 
-  http-config.yaml: "{{ .Values.homeassistant.config.httpConfig }}"
+  http-config.yaml: |-
+    {{ .Values.homeassistant.config.httpConfig }}

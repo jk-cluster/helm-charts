@@ -41,6 +41,9 @@ spec:
             - mountPath: /config/http-config.yaml
               subPath: http-config.yaml
               name: http-config
+            - mountPath: /config/recorder-config.yaml
+              subPath: recorder-config.yaml
+              name: recorder-config
       # TODO: volumes
       volumes:
         - name: core-config

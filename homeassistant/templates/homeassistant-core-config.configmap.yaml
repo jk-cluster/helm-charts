@@ -6,4 +6,5 @@ data:
   config: |-
     http: !include http-config.yaml
 
-  http-config: "{{ toYaml .Values.homeassistant.config.httpConfig | indent 2 }}"
+  http-config: |-
+    {{ toYaml .Values.homeassistant.config.httpConfig | indent 2 }}

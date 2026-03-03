@@ -12,6 +12,8 @@ spec:
       app: "{{ .Release.Name }}-{{ .Chart.Name }}"
   template:
     metadata:
+      labels:
+        app: "{{ .Release.Name }}-{{ .Chart.Name }}"
       name: "{{ .Release.Name }}-{{ .Chart.Name }}-sfs"
     spec:
       automountServiceAccountToken: false

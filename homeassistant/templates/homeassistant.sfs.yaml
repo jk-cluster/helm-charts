@@ -44,14 +44,14 @@ spec:
       # TODO: volumes
       volumes:
         - name: core-config
-          configMap:
-            name: {{ .Release.Name }}-{{ .Chart.Name }}-core-config
+          secret:
+            secretName: {{ .Release.Name }}-{{ .Chart.Name }}-config-secret
             items:
               - key: config
                 path: configuration.yaml
         - name: http-config
-          configMap:
-            name: {{ .Release.Name }}-{{ .Chart.Name }}-core-config
+          secret:
+            secretName: {{ .Release.Name }}-{{ .Chart.Name }}-config-secret
             items:
               - key: http-config
                 path: http-config.yaml

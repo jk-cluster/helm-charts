@@ -35,10 +35,10 @@ spec:
               memory: {{ .Values.resources.requests.memory }}
           # TODO: volume mounts
           volumeMounts:
-            - mountPath: /config.yaml
+            - mountPath: /config/config.yaml
               subPath: config.yaml
               name: core-config
-            - mountPath: /http-config.yaml
+            - mountPath: /config/http-config.yaml
               subPath: http-config.yaml
               name: http-config
       # TODO: volumes

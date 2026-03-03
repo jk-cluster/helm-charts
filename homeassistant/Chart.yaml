@@ -3,7 +3,7 @@ name: homeassistant
 description: A Helm chart to deploy Home Assistant on Kubernetes
 type: application
 
-version: 1.1.0-release-2026-2-3
+version: 1.1.1-release-2026-2-3
 
 appVersion: "2026.2.3"
 

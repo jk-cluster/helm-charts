@@ -72,5 +72,5 @@ spec:
                 path: recorder-config.yaml
         - name: hass-volume
           persistentVolumeClaim:
-            claimName: {{ .Chart.Name }}-{{ .Release.Name }}-pvc
+            claimName: {{ .Release.Name }}-{{ .Chart.Name }}-pvc
       # TODO: bind to local nodes

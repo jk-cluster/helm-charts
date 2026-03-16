@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: "{{ .Release.Name }}-{{ .Chart.Name }}-sf-service"
+  labels:
+    app: "{{ .Release.Name }}-{{ .Chart.Name }}-sf-service"
+spec:
+  type: NodePort
+  ports:
+    - name: "api"
+      port: {{ .Values.server.gamePort }}
+      protocol: TCP
+      nodePort: {{ .Values.server.gamePort }}
+      targetPort: {{ .Values.server.gamePort }}
+    - name: "game"
+      port: {{ .Values.server.gamePort }}
+      protocol: UDP
+      nodePort: {{ .Values.server.gamePort }}
+      targetPort: {{ .Values.server.gamePort }}
+    - name: "messaging"
+      port: {{ .Values.server.messagingPort }}
+      protocol: TCP
+      nodePort: {{ .Values.server.messagingPort }}
+      targetPort: {{ .Values.server.messagingPort }}
+  selector:
+    app: "{{ .Release.Name }}-{{ .Chart.Name }}-sf-server"

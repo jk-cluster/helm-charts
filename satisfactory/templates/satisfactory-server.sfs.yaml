@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: "{{ .Release.Name }}-{{ .Chart.Name }}-sf-server"
+spec:
+  selector:
+    matchLabels:
+      app: "{{ .Release.Name }}-{{ .Chart.Name }}-sf-server"
+  serviceName: "{{ .Release.Name }}-{{ .Chart.Name }}-sf-service"
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: "{{ .Release.Name }}-{{ .Chart.Name }}-sf-server"
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: "{{ .Release.Name }}-{{ .Chart.Name }}-sf-server"
+          image: "ghcr.io/wolveix/satisfactory-server:{{ .Chart.AppVersion }}"
+          env:
+            - name: DEBUG
+              value: "{{ .Values.dev.debug }}"
+            - name: MAXPLAYERS
+              value: "{{ .Values.game.maxPlayers }}"
+            - name: PGID
+              value: "1000"
+            - name: PUID
+              value: "1000"
+            - name: SKIPUPDATE
+              value: "false"
+            - name: STEAMBETA
+              value: "{{ .Values.game.experimental }}"
+            - name: DISABLESEASONALEVENTS
+              value: "{{ .Values.game.seasonalEvents }}"
+            - name: SERVERGAMEPORT
+              value: "{{ .Values.server.gamePort }}"
+            - name: SERVERMESSAGINGPORT
+              value: "{{ .Values.server.messagingPort }}"
+          ports:
+            - name: "api"
+              containerPort: {{ .Values.server.gamePort }}
+              protocol: TCP
+            - name: "game"
+              containerPort: {{ .Values.server.gamePort }}
+              protocol: UDP
+            - name: "messaging"
+              containerPort: {{ .Values.server.messagingPort }}
+              protocol: TCP
+          livenessProbe:
+            exec:
+              command:
+                - "/bin/sh"
+                - "-c"
+                - "/home/steam/healthcheck.sh"
+            initialDelaySeconds: 300
+            failureThreshold: 4
+            successThreshold: 1
+            periodSeconds: 30
+          resources:
+            requests:
+              memory: "4Gi"
+              cpu: "1"
+              ephemeral-storage: "5Gi"
+            limits:
+              memory: "8Gi"
+              cpu: "2"
+              ephemeral-storage: "10Gi"
+          volumeMounts:
+            - name: satisfactory-volume
+              mountPath: /config
+              subPath: config/
+            - name: satisfactory-volume
+              mountPath: /config/gamefiles
+              subPath: gameFiles/
+      volumes:
+        - name: satisfactory-volume
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-{{ .Chart.Name }}-vc

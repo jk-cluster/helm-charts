@@ -1,0 +1,8 @@
+apiVersion: v2
+name: satisfactory
+description: A Helm chart to deploy a Satisfactory Gameserver on Kubernetes
+type: application
+version: 1.2.0+upv1.9.10
+appVersion: "v1.9.10"
+maintainers:
+  - name: jklein

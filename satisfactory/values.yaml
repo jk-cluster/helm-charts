@@ -1,0 +1,12 @@
+dev:
+  debug: false
+
+game:
+  experimental: false
+  maxPlayers: 4
+  seasonalEvents: true
+
+server:
+  gamePort: 30777
+  messagingPort: 30888
+  storage: 20Gi

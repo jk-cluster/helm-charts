@@ -1,6 +1,7 @@
 matrix:
   serverName: null
   timezone: UTC
+  configSecretRef: null
 
 storage:
   amount: 10Gi

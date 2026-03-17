@@ -38,7 +38,16 @@ spec:
             - name: matrix-synapse-volume
               mountPath: /data
               subPath: matrix-synapse-data/
+            - name: matrix-synapse-config-secret
+              mountPath: /data/homeserver.yaml
+              subPath: homeserver.yaml
       volumes:
         - name: matrix-synapse-volume
           persistentVolumeClaim:
             claimName: {{ .Release.Name }}-{{ .Chart.Name }}-pvc
+        - name: matrix-synapse-config-secret
+          secret:
+            secretName: {{ .Release.Name }}-{{ .Chart.Name }}-config-secret
+            items:
+              - key: homeserver.yaml
+                path: /homeserver.yaml

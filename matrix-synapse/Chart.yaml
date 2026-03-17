@@ -2,7 +2,7 @@ apiVersion: v2
 name: matrix-synapse
 description: A Helm chart to deploy a Matrix Synapse server on Kubernetes
 type: application
-version: 0.1.0+upv1.149.1
+version: 0.2.0+upv1.149.1
 appVersion: "v1.149.1"
 maintainers:
   - name: jklein

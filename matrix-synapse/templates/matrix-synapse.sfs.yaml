@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: "{{ .Release.Name }}-{{ .Chart.Name }}-sfs"
+spec:
+  selector:
+    matchLabels:
+      app: "{{ .Release.Name }}-{{ .Chart.Name }}"
+  serviceName: "{{ .Release.Name }}-{{ .Chart.Name }}-service"
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: "{{ .Release.Name }}-{{ .Chart.Name }}"
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: "{{ .Release.Name }}-{{ .Chart.Name }}-container"
+          image: "matrixdotorg/synapse:{{ .Chart.AppVersion }}"
+          env:
+            - name: SYNAPSE_SERVER_NAME
+              value: "{{ required "You must provide a Server-Name" .Values.matrix.serverName }}"
+            - name: SYNAPSE_REPORT_STATS
+              value: "no"
+            - name: UID
+              value: "1000"
+            - name: GID
+              value: "1000"
+            - name: TZ
+              value: "{{ .Values.matrix.timezone }}"
+          ports:
+            - name: http
+              containerPort: 8008
+              protocol: TCP
+          # TODO: Add liveness and readiness probes
+          # TODO: Add resource requests and limits
+          volumeMounts:
+            - name: matrix-synapse-volume
+              mountPath: /data
+              subPath: matrix-synapse-data/
+      volumes:
+        - name: matrix-synapse-volume
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-{{ .Chart.Name }}-pvc

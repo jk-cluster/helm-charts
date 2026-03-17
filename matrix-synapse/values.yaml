@@ -1,0 +1,11 @@
+matrix:
+  serverName: null
+  timezone: UTC
+
+storage:
+  amount: 10Gi
+  storageClass: longhorn-encrypted
+
+ingress:
+  domain: null
+  clusterIssuer: null

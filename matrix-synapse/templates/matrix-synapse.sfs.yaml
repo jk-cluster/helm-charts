@@ -41,6 +41,9 @@ spec:
             - name: matrix-synapse-volume
               mountPath: /data
               subPath: matrix-synapse-data/
+            - name: matrix-synapse-volume
+              mountPath: /media_store
+              subPath: matrix-media-store/
             - name: matrix-synapse-config-secret
               mountPath: /data/homeserver.yaml
               subPath: homeserver.yaml

@@ -64,13 +64,13 @@ jobs:
           token: ${{ env.JK_CLUSTER_BOT_TOKEN }}
       - name: "Get Chart Version"
         run: |
-          CHART_VERSION=$(grep '^version:' ${{ inputs.chart-name}}/Chart.yaml | awk '{print $2}')
+          CHART_VERSION=$(grep '^version:' ${{ inputs.chart-name }}/Chart.yaml | awk '{print $2}')
           CHART_PART=$(echo $CHART_VERSION | cut -d'+' -f1)
           echo "CHART_VERSION=$CHART_PART" >> $GITHUB_ENV
         working-directory: ${{ inputs.chart-location }}
       - name: "Get new Chart Version"
         run: |
-          APP_VERSION_NORMALIZED=$(echo "" | tr '-' '.')
+          APP_VERSION_NORMALIZED=$(echo "${{ inputs.app-version }}" | tr '-' '.')
           NEW_VERSION="${CHART_VERSION}+up${APP_VERSION_NORMALIZED}"
           sed -i "s/^version:.*/version: $NEW_VERSION/" ${{ inputs.chart-name }}/Chart.yaml
           sed -i "s/^appVersion:.*/appVersion: ${{ inputs.app-version }}/" ${{ inputs.chart-name }}/Chart.yaml

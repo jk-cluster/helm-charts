@@ -24,6 +24,7 @@ spec:
             - containerPort: 80
               protocol: TCP
               name: http
+          # TODO: Add liveness and readiness probes
           resources:
             requests:
               memory: "{{ .Values.xxx.resources.requests.memory }}"

@@ -1,0 +1,22 @@
+secrets:
+  configSecretRef: null
+  redisSecretRef: null
+  dbSecretRef: null
+outline:
+  storage:
+    size: 10Gi
+    storageClass: null
+  resources:
+    requests:
+      cpu: 0.1
+      memory: 512Mi
+      ephemeralStorage: 10Mi
+    limits:
+      cpu: 1
+      memory: 768Mi
+      ephemeralStorage: 100Mi
+
+ingress:
+  enabled: true
+  clusterIssuer: letsencrypt
+  domain: null

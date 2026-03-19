@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+  labels:
+    app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+spec:
+  serviceName: {{ .Release.Name }}-{{ .Chart.Name }}-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+  template:
+    metadata:
+      name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+      labels:
+        app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 1001
+        fsGroupChangePolicy: Always
+      containers:
+        - name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+          image: "outlinewiki/outline:{{ .Chart.AppVersion }}"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PORT
+              value: "80"
+            - name: URL
+              value: "https://{{ .Values.ingress.domain }}"
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-{{ .Chart.Name }}-secret
+                  key: outline-secret-key
+            - name: UTILS_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-{{ .Chart.Name }}-secret
+                  key: outline-utils-secret
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-{{ .Chart.Name }}-db-secret
+                  key: connection-url
+            - name: PGSSLMODE
+              value: disable
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-{{ .Chart.Name }}-redis-secret
+                  key: connection-url
+            - name: FILE_STORAGE
+              value: "local"
+            - name: FILE_STORAGE_LOCAL_ROOT_DIR
+              value: "/outline-data/data"
+          ports:
+            - containerPort: 80
+              protocol: TCP
+              name: http
+          # TODO: Add liveness and readiness probes
+          resources:
+            requests:
+              memory: "{{ .Values.outline.resources.requests.memory }}"
+              cpu: "{{ .Values.outline.resources.requests.cpu }}"
+              ephemeral-storage: "{{ .Values.outline.resources.requests.ephemeralStorage }}"
+            limits:
+              memory: "{{ .Values.outline.resources.limits.memory }}"
+              cpu: "{{ .Values.outline.resources.limits.cpu }}"
+              ephemeral-storage: "{{ .Values.outline.resources.limits.ephemeralStorage }}"
+          volumeMounts:
+            - mountPath: "/outline-data/data"
+              name: outline-data
+              subPath: data
+      restartPolicy: Always
+      volumes:
+        - name: outline-data
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-{{ .Chart.Name }}-pvc

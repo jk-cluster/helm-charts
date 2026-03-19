@@ -55,6 +55,23 @@ spec:
               value: "local"
             - name: FILE_STORAGE_LOCAL_ROOT_DIR
               value: "/outline-data/data"
+            - name: OIDC_ISSUER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-{{ .Chart.Name }}-secret
+                  key: discovery-url
+            - name: OIDC_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-{{ .Chart.Name }}-secret
+                  key: client-id
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-{{ .Chart.Name }}-secret
+                  key: client-secret
+            - name: OIDC_DISPLAY_NAME
+              value: "{{ .Values.outline.oidc.displayName }}"
           ports:
             - containerPort: 80
               protocol: TCP

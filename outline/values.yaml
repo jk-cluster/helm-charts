@@ -3,6 +3,8 @@ secrets:
   redisSecretRef: null
   dbSecretRef: null
 outline:
+  oidc:
+    displayName: OIDC
   storage:
     size: 10Gi
     storageClass: null

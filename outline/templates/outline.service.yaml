@@ -4,7 +4,7 @@ metadata:
   name: {{ .Release.Name }}-{{ .Chart.Name }}-service
 spec:
   selector:
-    app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+    app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
   ports:
     - protocol: TCP
       port: 80

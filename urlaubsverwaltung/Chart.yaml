@@ -3,5 +3,5 @@ name: urlaubsverwaltung
 description: A Helm chart to deploy urlaubsverwaltung on Kubernetes
 type: application
 
-version: 1.5.0+up5.38.0
-appVersion: 5.38.0
+version: 1.5.0+up6.1.0
+appVersion: 6.1.0

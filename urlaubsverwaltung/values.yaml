@@ -7,6 +7,21 @@ ingress:
   domain: null
 
 urlaubsverwaltung:
+  # The official image is built with Cloud Native Buildpacks and runs as the
+  # non-root cnb user (uid 1002, gid 1001). /tmp is a writable emptyDir for
+  # the JVM's temp/work files.
+  securityContext:
+    pod:
+      runAsNonRoot: true
+      runAsUser: 1002
+      runAsGroup: 1001
+    container:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      capabilities:
+        drop:
+          - ALL
   resources:
     requests:
       cpu: 0.1

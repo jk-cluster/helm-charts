@@ -9,10 +9,15 @@ spec:
     spec:
       template:
         spec:
+          automountServiceAccountToken: false
+          securityContext:
+            {{- toYaml .Values.smbConnection.cron.securityContext.pod | nindent 12 }}
           containers:
             - name: paperless-consume-cronjob
               image: busybox:1.28
               imagePullPolicy: IfNotPresent
+              securityContext:
+                {{- toYaml .Values.smbConnection.cron.securityContext.container | nindent 16 }}
               command:
                 - /bin/sh
                 - -c

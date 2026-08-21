@@ -17,10 +17,14 @@ spec:
       name: "{{ .Release.Name }}-{{ .Chart.Name }}-sfs"
     spec:
       automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.securityContext.pod | nindent 8 }}
       containers:
         - name: "{{ .Release.Name }}-{{ .Chart.Name }}"
           image: "ghcr.io/home-assistant/home-assistant:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
+          securityContext:
+            {{- toYaml .Values.securityContext.container | nindent 12 }}
           env:
             - name: TZ
               value: "{{ .Values.core.timezone }}"
@@ -56,7 +60,17 @@ spec:
             - mountPath: /config
               name: hass-volume
               subPath: hass-config
+            # Writable emptyDirs so the root filesystem can stay read-only:
+            # s6-overlay needs /run, Home Assistant writes temp files to /tmp.
+            - mountPath: /tmp
+              name: tmp
+            - mountPath: /run
+              name: run
       volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
         - name: core-config
           secret:
             secretName: {{ .Release.Name }}-{{ .Chart.Name }}-config-secret

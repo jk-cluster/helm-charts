@@ -16,10 +16,19 @@ spec:
         app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
     spec:
       automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.tika.securityContext.pod | nindent 8 }}
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
           image: "apache/tika:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
+          securityContext:
+            {{- toYaml .Values.tika.securityContext.container | nindent 12 }}
+          volumeMounts:
+            # Tika writes temporary files during parsing; with a read-only
+            # root filesystem /tmp must be a writable emptyDir.
+            - name: tmp
+              mountPath: /tmp
           ports:
             - containerPort: 9998
               protocol: TCP
@@ -39,4 +48,7 @@ spec:
               memory: "{{ .Values.tika.resources.limits.memory }}"
               cpu: "{{ .Values.tika.resources.limits.cpu }}"
               ephemeral-storage: "{{ .Values.tika.resources.limits.ephemeralStorage }}"
+      volumes:
+        - name: tmp
+          emptyDir: {}
       restartPolicy: Always

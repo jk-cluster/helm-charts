@@ -16,10 +16,21 @@ spec:
         app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
     spec:
       automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.cyberchef.securityContext.pod | nindent 8 }}
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
           image: "ghcr.io/gchq/cyberchef:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
+          securityContext:
+            {{- toYaml .Values.cyberchef.securityContext.container | nindent 12 }}
+          volumeMounts:
+            # nginx needs writable cache/temp dirs and a writable pid file
+            # location when the root filesystem is read-only.
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /run
           ports:
             - containerPort: 80
               protocol: TCP
@@ -39,4 +50,9 @@ spec:
               memory: "{{ .Values.cyberchef.resources.limits.memory }}"
               cpu: "{{ .Values.cyberchef.resources.limits.cpu }}"
               ephemeral-storage: "{{ .Values.cyberchef.resources.limits.ephemeralStorage }}"
+      volumes:
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
       restartPolicy: Always

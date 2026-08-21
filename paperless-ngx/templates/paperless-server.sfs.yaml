@@ -17,10 +17,49 @@ spec:
         app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
     spec:
       automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.paperless.securityContext.pod | nindent 8 }}
+      initContainers:
+        # s6-overlay refuses to start unless /run is owned by the runtime uid,
+        # but emptyDirs are always created root-owned. This minimal init
+        # container hands /run over to the paperless uid (see
+        # paperless.securityContext in values.yaml) so the main container can
+        # run fully hardened (non-root, no privilege escalation).
+        - name: init-run-ownership
+          image: busybox:1.28
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - chown {{ .Values.paperless.securityContext.pod.runAsUser }}:{{ .Values.paperless.securityContext.pod.runAsGroup }} /run
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+          volumeMounts:
+            - mountPath: /run
+              name: run
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+              ephemeral-storage: 1Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
+              ephemeral-storage: 10Mi
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
           image: "ghcr.io/paperless-ngx/paperless-ngx:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
+          securityContext:
+            {{- toYaml .Values.paperless.securityContext.container | nindent 12 }}
           ports:
             - containerPort: 8000
               protocol: TCP
@@ -153,6 +192,12 @@ spec:
               subPath: export/
             - mountPath: "/usr/src/paperless/consume"
               name: "paperless-consume-volume"
+            # Writable emptyDirs so the root filesystem can stay read-only:
+            # s6-overlay needs /run, OCR/consumption uses /tmp for scratch files.
+            - mountPath: /tmp
+              name: tmp
+            - mountPath: /run
+              name: run
           resources:
             requests:
               memory: "{{ .Values.paperless.resources.requests.memory }}"
@@ -189,6 +234,10 @@ spec:
             timeoutSeconds: 5
       restartPolicy: Always
       volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
         - name: paperless-volume
           persistentVolumeClaim:
             claimName: {{ .Release.Name }}-{{ .Chart.Name }}-volume-claim

@@ -28,14 +28,14 @@ samba:
     timeoutSeconds: 5
     failureThreshold: 30
   resources:
+    # Limits are optional: memory and ephemeral-storage limits default to
+    # limitFactor x the request, an explicitly set limit always wins, and a
+    # CPU limit is only set when configured explicitly under "limits".
+    limitFactor: 3
     requests:
       memory: 50Mi
       cpu: 0.1
       ephemeralStorage: 50Mi
-    limits:
-      memory: 100Mi
-      cpu: 1
-      ephemeralStorage: 100Mi
 
   globalConfig: null
   storageClass: longhorn

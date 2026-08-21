@@ -36,14 +36,7 @@ spec:
             - name: tmp
               mountPath: /tmp
           resources:
-            limits:
-              memory: "{{ .Values.matrix.delegation.resources.limits.memory }}"
-              cpu: "{{ .Values.matrix.delegation.resources.limits.cpu }}"
-              ephemeral-storage: "{{ .Values.matrix.delegation.resources.limits.ephemeralStorage }}"
-            requests:
-              memory: "{{ .Values.matrix.delegation.resources.requests.memory }}"
-              cpu: "{{ .Values.matrix.delegation.resources.requests.cpu }}"
-              ephemeral-storage: "{{ .Values.matrix.delegation.resources.requests.ephemeralStorage }}"
+            {{- include "matrix-synapse.resources" .Values.matrix.delegation.resources | nindent 12 }}
           readinessProbe:
             httpGet:
               path: /.well-known/matrix/server

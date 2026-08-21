@@ -65,14 +65,7 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 30
           resources:
-            requests:
-              memory: "{{ .Values.matrix.resources.requests.memory }}"
-              cpu: "{{ .Values.matrix.resources.requests.cpu }}"
-              ephemeral-storage: "{{ .Values.matrix.resources.requests.ephemeralStorage }}"
-            limits:
-              memory: "{{ .Values.matrix.resources.limits.memory }}"
-              cpu: "{{ .Values.matrix.resources.limits.cpu }}"
-              ephemeral-storage: "{{ .Values.matrix.resources.limits.ephemeralStorage }}"
+            {{- include "matrix-synapse.resources" .Values.matrix.resources | nindent 12 }}
           volumeMounts:
             - name: matrix-synapse-volume
               mountPath: /data

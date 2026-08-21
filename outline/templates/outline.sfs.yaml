@@ -108,14 +108,7 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 30
           resources:
-            requests:
-              memory: "{{ .Values.outline.resources.requests.memory }}"
-              cpu: "{{ .Values.outline.resources.requests.cpu }}"
-              ephemeral-storage: "{{ .Values.outline.resources.requests.ephemeralStorage }}"
-            limits:
-              memory: "{{ .Values.outline.resources.limits.memory }}"
-              cpu: "{{ .Values.outline.resources.limits.cpu }}"
-              ephemeral-storage: "{{ .Values.outline.resources.limits.ephemeralStorage }}"
+            {{- include "outline.resources" .Values.outline.resources | nindent 12 }}
           volumeMounts:
             - mountPath: "/outline-data/data"
               name: outline-data

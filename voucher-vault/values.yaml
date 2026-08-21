@@ -5,14 +5,14 @@ secrets:
 
 voucherVault:
   resources:
+    # Limits are optional: memory and ephemeral-storage limits default to
+    # limitFactor x the request, an explicitly set limit always wins, and a
+    # CPU limit is only set when configured explicitly under "limits".
+    limitFactor: 3
     requests:
       cpu: 0.1
       memory: 256Mi
       ephemeral-storage: 10Mi
-    limits:
-      cpu: 1
-      memory: 384Mi
-      ephemeral-storage: 100Mi
   # "/" answers with a redirect for anonymous users, which httpGet treats as
   # success. The Host header must be set to 127.0.0.1 because Django's
   # ALLOWED_HOSTS only accepts 127.0.0.1 and the configured DOMAIN — probing

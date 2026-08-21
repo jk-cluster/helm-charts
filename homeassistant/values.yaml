@@ -43,14 +43,14 @@ securityContext:
         - NET_RAW
 
 resources:
-   limits:
-     cpu: 1
-     memory: 1Gi
-     ephemeralStorage: 1Gi
-   requests:
-     cpu: 0.2
-     memory: 512Mi
-     ephemeralStorage: 128Mi
+  # Limits are optional: memory and ephemeral-storage limits default to
+  # limitFactor x the request, an explicitly set limit always wins, and a
+  # CPU limit is only set when configured explicitly under "limits".
+  limitFactor: 3
+  requests:
+    cpu: 0.2
+    memory: 512Mi
+    ephemeralStorage: 128Mi
 
 # This is to setup the liveness, readiness and startup probes more information can be found here: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
 livenessProbe:

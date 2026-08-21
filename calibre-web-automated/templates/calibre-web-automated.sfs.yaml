@@ -62,14 +62,7 @@ spec:
           startupProbe:
             {{- toYaml .Values.cwa.startupProbe | nindent 12 }}
           resources:
-            requests:
-              memory: "{{ .Values.cwa.resources.requests.memory }}"
-              cpu: "{{ .Values.cwa.resources.requests.cpu }}"
-              ephemeral-storage: "{{ .Values.cwa.resources.requests.ephemeralStorage }}"
-            limits:
-              memory: "{{ .Values.cwa.resources.limits.memory }}"
-              cpu: "{{ .Values.cwa.resources.limits.cpu }}"
-              ephemeral-storage: "{{ .Values.cwa.resources.limits.ephemeralStorage }}"
+            {{- include "calibre-web-automated.resources" .Values.cwa.resources | nindent 12 }}
       automountServiceAccountToken: false
       securityContext:
         fsGroup: 1000

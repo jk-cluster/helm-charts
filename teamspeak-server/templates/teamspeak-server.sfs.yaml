@@ -57,14 +57,7 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 30
           resources:
-            requests:
-              cpu: "0.2"
-              memory: "100Mi"
-              ephemeral-storage: "100Mi"
-            limits:
-              cpu: "0.5"
-              memory: "200Mi"
-              ephemeral-storage: "200Mi"
+            {{- include "teamspeak-server.resources" .Values.resources | nindent 12 }}
           volumeMounts:
             - name: "teamspeak-volume"
               mountPath: /var/tsserver/

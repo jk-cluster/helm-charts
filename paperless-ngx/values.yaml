@@ -34,14 +34,14 @@ paperless:
     postConsumptionScripts: []
     preConsumptionScripts: []
   resources:
+    # Limits are optional: memory and ephemeral-storage limits default to
+    # limitFactor x the request, an explicitly set limit always wins, and a
+    # CPU limit is only set when configured explicitly under "limits".
+    limitFactor: 3
     requests:
       cpu: 0.2
       memory: 1024Mi
       ephemeralStorage: 200Mi
-    limits:
-      cpu: 1
-      memory: 2048Mi
-      ephemeralStorage: 400Mi
   # Paperless-ngx supports rootless operation: the pod runs as uid/gid 1000
   # (the image's default paperless user), fsGroup makes the PVCs writable and
   # /tmp + /run are emptyDirs so the root filesystem stays read-only.
@@ -86,14 +86,14 @@ smbConnection:
           drop:
             - ALL
     resources:
+      # Limits are optional: memory and ephemeral-storage limits default to
+      # limitFactor x the request, an explicitly set limit always wins, and a
+      # CPU limit is only set when configured explicitly under "limits".
+      limitFactor: 3
       requests:
         cpu: 10m
         memory: 16Mi
         ephemeralStorage: 10Mi
-      limits:
-        cpu: 100m
-        memory: 32Mi
-        ephemeralStorage: 50Mi
 oidc:
   enabled: false
   autoLoginWithProvider: false

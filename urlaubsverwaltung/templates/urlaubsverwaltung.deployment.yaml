@@ -110,14 +110,7 @@ spec:
             - name: UV_SECURITY_OIDC_CLAIM-MAPPERS_GROUP-CLAIM_CLAIM-NAME
               value: "groups"
           resources:
-            requests:
-              memory: "{{ .Values.urlaubsverwaltung.resources.requests.memory }}"
-              cpu: "{{ .Values.urlaubsverwaltung.resources.requests.cpu }}"
-              ephemeral-storage: "{{ .Values.urlaubsverwaltung.resources.requests.ephemeralStorage }}"
-            limits:
-              memory: "{{ .Values.urlaubsverwaltung.resources.limits.memory }}"
-              cpu: "{{ .Values.urlaubsverwaltung.resources.limits.cpu }}"
-              ephemeral-storage: "{{ .Values.urlaubsverwaltung.resources.limits.ephemeralStorage }}"
+            {{- include "urlaubsverwaltung.resources" .Values.urlaubsverwaltung.resources | nindent 12 }}
           readinessProbe:
             httpGet:
               port: 8080

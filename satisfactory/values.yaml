@@ -11,11 +11,13 @@ server:
   messagingPort: 30888
   storage: 20Gi
   resources:
+    # Limits are optional: memory and ephemeral-storage limits default to
+    # limitFactor x the request, an explicitly set limit always wins, and a
+    # CPU limit is only set when configured explicitly under "limits".
+    # The game server holds a large world in memory, so the default factor
+    # stays at 2 to keep the limit at the previously published 8Gi.
+    limitFactor: 2
     requests:
       memory: "4Gi"
       cpu: "1"
       ephemeral-storage: "5Gi"
-    limits:
-      memory: "8Gi"
-      cpu: "2"
-      ephemeral-storage: "10Gi"

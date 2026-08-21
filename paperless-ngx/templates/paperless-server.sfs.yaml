@@ -199,14 +199,7 @@ spec:
             - mountPath: /run
               name: run
           resources:
-            requests:
-              memory: "{{ .Values.paperless.resources.requests.memory }}"
-              cpu: "{{ .Values.paperless.resources.requests.cpu }}"
-              ephemeral-storage: "{{ .Values.paperless.resources.requests.ephemeralStorage }}"
-            limits:
-              memory: "{{ .Values.paperless.resources.limits.memory }}"
-              cpu: "{{ .Values.paperless.resources.limits.cpu }}"
-              ephemeral-storage: "{{ .Values.paperless.resources.limits.ephemeralStorage }}"
+            {{- include "paperless-ngx.resources" .Values.paperless.resources | nindent 12 }}
           readinessProbe:
             httpGet:
               path: /

@@ -1,0 +1,69 @@
+name: Validate Helm Charts
+on:
+  pull_request:
+
+jobs:
+  detect-changed-charts:
+    name: Detect changed charts
+    runs-on: ubuntu-latest
+    outputs:
+      charts: ${{ steps.detect.outputs.charts }}
+      any: ${{ steps.detect.outputs.any }}
+    steps:
+      - name: "Checkout Repository"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: "Detect changed charts"
+        id: detect
+        run: |
+          CHARTS="[]"
+          CHANGED_DIRS=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" | cut -d/ -f1 | sort -u)
+          for DIR in $CHANGED_DIRS; do
+            if [ -f "$DIR/Chart.yaml" ]; then
+              CHARTS=$(echo "$CHARTS" | jq -c --arg dir "$DIR" '. + [$dir]')
+            fi
+          done
+          echo "charts=$CHARTS" >> "$GITHUB_OUTPUT"
+          if [ "$CHARTS" = "[]" ]; then
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            echo "No chart directories changed - nothing to build."
+          else
+            echo "any=true" >> "$GITHUB_OUTPUT"
+            echo "Changed charts: $CHARTS"
+          fi
+
+  build-chart:
+    name: "Build ${{ matrix.chart }}"
+    needs: detect-changed-charts
+    if: needs.detect-changed-charts.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        chart: ${{ fromJSON(needs.detect-changed-charts.outputs.charts) }}
+    steps:
+      - name: "Checkout Repository"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: "Install Helm"
+        uses: azure/setup-helm@v4
+      - name: "Lint Helm Chart"
+        run: helm lint --strict "${{ matrix.chart }}"
+      - name: "Package Helm Chart"
+        run: helm package "${{ matrix.chart }}"
+      - name: "Check Chart Version was bumped"
+        # template-chart is a scaffold and never published, its version is meaningless
+        if: matrix.chart != 'template-chart'
+        run: |
+          BASE_VERSION=$(git show "origin/${{ github.base_ref }}:${{ matrix.chart }}/Chart.yaml" 2>/dev/null | grep '^version:' | awk '{print $2}' || true)
+          NEW_VERSION=$(grep '^version:' "${{ matrix.chart }}/Chart.yaml" | awk '{print $2}')
+          if [ -z "$BASE_VERSION" ]; then
+            echo "New chart (does not exist on ${{ github.base_ref }}), version: $NEW_VERSION"
+          elif [ "$BASE_VERSION" = "$NEW_VERSION" ]; then
+            echo "::error file=${{ matrix.chart }}/Chart.yaml::Chart '${{ matrix.chart }}' was modified but its version was not bumped (still $BASE_VERSION). Bump 'version:' in Chart.yaml, otherwise the publish on main will collide with the already published version."
+            exit 1
+          else
+            echo "Version bump OK: $BASE_VERSION -> $NEW_VERSION"
+          fi

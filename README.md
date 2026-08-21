@@ -61,4 +61,4 @@ helm template <chart-name> --set ingress.domain=example.com --set ingress.cluste
 - Ingress assumes ingress-nginx (`ingressClassName: nginx`) and cert-manager: `ingress.clusterIssuer` and `ingress.domain` are required values; the TLS secret is named `tls-<release>-<chart>-ingress`.
 - `env` entries in `values.yaml` are rendered through `tpl`, so values may contain Helm templating; `value`, `secretKeyRef` and `configMapKeyRef` forms are supported.
 - Hardened defaults: `automountServiceAccountToken: false`, non-root user, `readOnlyRootFilesystem: true`, all capabilities dropped, probes and resource requests/limits always set.
-- Charts have no dependencies (`charts/` directories are empty); Dependabot is configured only for the `homeassistant` chart (helm + docker ecosystems, daily).
+- Charts have no dependencies (`charts/` directories are empty).

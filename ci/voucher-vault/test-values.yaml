@@ -1,0 +1,8 @@
+secrets:
+  voucherVaultSecretRef: op://ci/voucher-vault
+  oidcSecretRef: op://ci/voucher-vault-oidc
+  databaseSecretRef: op://ci/voucher-vault-db
+
+ingress:
+  clusterIssuer: ci
+  domain: vv.ci.local

@@ -1,0 +1,19 @@
+# Fixtures for the homeassistant install-test: the config secret the
+# 1Password operator would otherwise materialize (release name: ci). The
+# chart mounts the three keys as configuration.yaml, http-config.yaml and
+# recorder-config.yaml under /config.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ci-homeassistant-config-secret
+stringData:
+  config: |
+    default_config:
+    http: !include http-config.yaml
+    recorder: !include recorder-config.yaml
+  http-config: |
+    use_x_forwarded_for: true
+    trusted_proxies:
+      - 10.42.0.0/16
+  recorder-config: |
+    db_url: sqlite:////config/home-assistant_v2.db

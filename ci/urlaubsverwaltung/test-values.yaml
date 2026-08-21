@@ -1,0 +1,6 @@
+secrets:
+  databaseSecretRef: op://ci/uv-db
+  oidcSecretRef: op://ci/uv-oidc
+
+ingress:
+  domain: uv.ci.local

@@ -1,0 +1,3 @@
+# gotenberg needs no extra values for a CI install: no secrets, no ingress,
+# no persistence.
+{}

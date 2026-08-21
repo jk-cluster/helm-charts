@@ -1,0 +1,12 @@
+secrets:
+  cwaSecretRef: op://ci/cwa
+
+cwa:
+  # Both PVCs share this class and the consume PVC is RWX, which k3d's
+  # local-path provisioner cannot serve - the fixtures pre-bind static
+  # hostPath PVs of class ci-static instead.
+  storageClass: ci-static
+  storage: 2Gi
+
+ingress:
+  domain: cwa.ci.local

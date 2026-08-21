@@ -1,0 +1,9 @@
+secrets:
+  configSecretRef: op://ci/homeassistant-config
+
+core:
+  storage:
+    # k3d's default dynamic provisioner (the values default "default" does
+    # not exist there). Home Assistant starts as root, so writability of the
+    # dynamically provisioned volume is not an issue.
+    storageClass: local-path

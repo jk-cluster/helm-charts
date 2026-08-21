@@ -1,0 +1,14 @@
+matrix:
+  serverName: synapse.ci.local
+  configSecretRef: op://ci/matrix-synapse-config
+  delegation:
+    enabled: true
+    serverUrl: ci.local
+
+storage:
+  amount: 2Gi
+  storageClass: ci-static
+
+ingress:
+  clusterIssuer: ci
+  domain: matrix.ci.local

@@ -1,0 +1,184 @@
+# Fixtures for the outline install-test: throwaway postgres + redis, a dex
+# OIDC provider (outline fetches the issuer's discovery document at boot),
+# and the secrets the 1Password operator would otherwise materialize
+# (release name: ci). Outline's /_health probe checks Postgres AND Redis.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ci-outline-secret
+stringData:
+  # Outline requires 64-char hex secrets.
+  outline-secret-key: 5f4dcc3b5aa765d61d8327deb882cf995f4dcc3b5aa765d61d8327deb882cf99
+  outline-utils-secret: 9c1185a5c5e9fc54612808977ee8f5489c1185a5c5e9fc54612808977ee8f548
+  discovery-url: http://dex.default.svc.cluster.local:5556/dex
+  client-id: ci-client
+  client-secret: ci-client-secret
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ci-outline-db-secret
+stringData:
+  connection-url: postgres://ci:ci@postgres:5432/outline
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ci-outline-redis-secret
+stringData:
+  connection-url: redis://:cipass@redis:6379
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: public.ecr.aws/docker/library/postgres:16-alpine
+          env:
+            - name: POSTGRES_USER
+              value: ci
+            - name: POSTGRES_PASSWORD
+              value: ci
+            - name: POSTGRES_DB
+              value: outline
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "ci"]
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  labels:
+    app: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: public.ecr.aws/docker/library/redis:7-alpine
+          args: ["redis-server", "--requirepass", "cipass"]
+          ports:
+            - containerPort: 6379
+          readinessProbe:
+            tcpSocket:
+              port: 6379
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+spec:
+  selector:
+    app: redis
+  ports:
+    - port: 6379
+      targetPort: 6379
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dex-config
+data:
+  config.yaml: |
+    issuer: http://dex.default.svc.cluster.local:5556/dex
+    storage:
+      type: memory
+    web:
+      http: 0.0.0.0:5556
+    oauth2:
+      skipApprovalScreen: true
+    staticClients:
+      - id: ci-client
+        secret: ci-client-secret
+        name: CI Client
+        redirectURIs:
+          - https://outline.ci.local/auth/oidc.callback
+    enablePasswordDB: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dex
+  labels:
+    app: dex
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dex
+  template:
+    metadata:
+      labels:
+        app: dex
+    spec:
+      containers:
+        - name: dex
+          image: ghcr.io/dexidp/dex:v2.41.1
+          command: ["dex", "serve", "/etc/dex/cfg/config.yaml"]
+          ports:
+            - containerPort: 5556
+          readinessProbe:
+            httpGet:
+              path: /dex/healthz
+              port: 5556
+            periodSeconds: 5
+          volumeMounts:
+            - name: config
+              mountPath: /etc/dex/cfg
+      volumes:
+        - name: config
+          configMap:
+            name: dex-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dex
+spec:
+  selector:
+    app: dex
+  ports:
+    - port: 5556
+      targetPort: 5556

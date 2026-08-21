@@ -36,7 +36,21 @@ Collection of some self-made helm-charts. Each top-level directory is a standalo
 - `publish-<chart>.yml` — one thin workflow per chart; triggers on pushes to `main` touching `<chart>/**` (or manually) and calls the reusable workflow below. **A push to a chart directory on `main` publishes that chart**, so the chart version must be bumped in the same change.
 - `publish-helm-chart.yml` — reusable workflow: `helm package`, then `helm push` to the private JK-Registry. Registry credentials come from 1Password Connect (`OP_CONNECT_TOKEN` secret, items under `op://GitHub-Actions/`).
 - `change-app-version.yml` — manually dispatched app-version bump; the chart must be listed in its `chart-name` choice list.
-- `validate-charts.yml` — PR pipeline: detects which charts a PR touches and, for exactly those, runs `helm lint --strict`, `helm package`, and a chart-version bump check (`template-chart` is exempt from the version check). PRs without chart changes skip the build matrix.
+- `validate-charts.yml` — PR pipeline: detects which charts a PR touches and, for exactly those, runs `helm lint --strict`, `helm package`, and a chart-version bump check (`template-chart` is exempt from the version check). PRs without chart changes skip the build matrix. After the build stage, an **install-test** job (same changed-charts matrix) installs each changed chart into an ephemeral [k3d](https://k3d.io) cluster on the runner and requires every workload to become Ready — see below.
+
+### Install-test (PR pipeline stage 2)
+
+For every chart a PR changes, `ci/run-install-test.sh <chart>` runs against a throwaway k3d cluster: it applies the stub `OnePasswordItem` CRD plus the chart's fixtures, `helm install`s the chart with its CI values, and waits for all Deployments/StatefulSets to roll out (per-chart timeout). Since probes and security hardening are active on all workloads, "Ready" means the app actually answers. On failure the job dumps pod descriptions, events and container logs.
+
+Fixtures live at the **repo root** under `ci/` (deliberately *not* inside the chart directories, so they are neither packaged into the chart tgz nor trigger the publish workflows on merge):
+
+- `ci/common/` — fixtures applied for every chart (schema-less stub CRD for `OnePasswordItem`)
+- `ci/<chart>/test-values.yaml` — values for the CI install (required for every installable chart)
+- `ci/<chart>/fixtures.yaml` — dummy secrets with in-cluster connection data, throwaway infrastructure (postgres/redis/dex), static hostPath PVs/StorageClasses where the chart pins a storage class or needs RWX, and seed jobs (e.g. `synapse generate`)
+- `ci/<chart>/settings.env` — optional overrides (e.g. `INSTALL_TIMEOUT` for slow starters)
+- `ci/excluded-charts.txt` — charts that cannot run in CI, each with a justification. Currently: `satisfactory` (multi-GB image + 10GB+ Steam download), `teamspeak-server` (the TS6 v6.0.0-beta8 image crashes with "The default license has expired" until the appVersion is bumped), `template-chart` (scaffold with placeholder image)
+
+Fixture images avoid Docker Hub where possible (`public.ecr.aws`/`ghcr.io`) to dodge runner rate limits. The job currently runs with `continue-on-error: true` (stabilization phase); it will be promoted to a required check once it has proven stable across several chart PRs. When adding a new chart, add its `ci/<chart>/` fixtures (or an entry in `ci/excluded-charts.txt`) — the install-test fails if both are missing. The script also runs locally against any existing cluster: `k3d cluster create t && ci/run-install-test.sh <chart> && k3d cluster delete t`.
 
 ## Creating a new chart
 

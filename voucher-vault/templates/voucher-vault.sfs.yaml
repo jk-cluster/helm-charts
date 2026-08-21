@@ -59,7 +59,7 @@ spec:
             {{- toYaml .Values.voucherVault.startupProbe | nindent 12 }}
           {{- end }}
           resources:
-            {{- toYaml .Values.voucherVault.resources | nindent 12 }}
+            {{- include "voucher-vault.resources" .Values.voucherVault.resources | nindent 12 }}
           securityContext:
             {{- toYaml .Values.voucherVault.securityContext.container | nindent 12 }}
           volumeMounts:

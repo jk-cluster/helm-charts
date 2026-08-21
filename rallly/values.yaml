@@ -15,14 +15,14 @@ rallly:
     emailClaimPath: 'email'
     nameClaimPath: 'name'
   resources:
+    # Limits are optional: memory and ephemeral-storage limits default to
+    # limitFactor x the request, an explicitly set limit always wins, and a
+    # CPU limit is only set when configured explicitly under "limits".
+    limitFactor: 3
     requests:
       cpu: 0.1
       memory: 512Mi
       ephemeral-storage: 100Mi
-    limits:
-      cpu: 1
-      memory: 768Mi
-      ephemeral-storage: 250Mi
   livenessProbe:
     httpGet:
       path: /

@@ -36,14 +36,7 @@ spec:
             - name: UPLOADER_ADMIN_LIMIT
               value: 500mb
           resources:
-            requests:
-              memory: "{{ .Values.zipline.resources.requests.memory }}"
-              cpu: "{{ .Values.zipline.resources.requests.cpu }}"
-              ephemeral-storage: "{{ .Values.zipline.resources.requests.ephemeralStorage }}"
-            limits:
-              memory: "{{ .Values.zipline.resources.limits.memory }}"
-              cpu: "{{ .Values.zipline.resources.limits.cpu }}"
-              ephemeral-storage: "{{ .Values.zipline.resources.limits.ephemeralStorage }}"
+            {{- include "zipline.resources" .Values.zipline.resources | nindent 12 }}
           ports:
             - name: "zipline-server"
               containerPort: 3000

@@ -30,14 +30,7 @@ spec:
                   mountPath: "/mnt/consume"
                   readOnly: false
               resources:
-                requests:
-                  memory: "{{ .Values.smbConnection.cron.resources.requests.memory }}"
-                  cpu: "{{ .Values.smbConnection.cron.resources.requests.cpu }}"
-                  ephemeral-storage: "{{ .Values.smbConnection.cron.resources.requests.ephemeralStorage }}"
-                limits:
-                  memory: "{{ .Values.smbConnection.cron.resources.limits.memory }}"
-                  cpu: "{{ .Values.smbConnection.cron.resources.limits.cpu }}"
-                  ephemeral-storage: "{{ .Values.smbConnection.cron.resources.limits.ephemeralStorage }}"
+                {{- include "paperless-ngx.resources" .Values.smbConnection.cron.resources | nindent 16 }}
           restartPolicy: Never
           volumes:
             - name: smb-share

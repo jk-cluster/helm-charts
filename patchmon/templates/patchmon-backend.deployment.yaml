@@ -159,10 +159,8 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 30
-          {{- with .Values.patchmon.backend.resources }}
           resources:
-            {{ toYaml . | nindent 12 }}
-          {{- end }}
+            {{- include "patchmon.resources" .Values.patchmon.backend.resources | nindent 12 }}
           volumeMounts:
             - mountPath: /app/assets
               name: patchmon-volume

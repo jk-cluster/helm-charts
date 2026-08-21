@@ -43,14 +43,7 @@ spec:
           startupProbe:
             {{- toYaml .Values.gotenberg.startupProbe | nindent 12 }}
           resources:
-            requests:
-              memory: "{{ .Values.gotenberg.resources.requests.memory }}"
-              cpu: "{{ .Values.gotenberg.resources.requests.cpu }}"
-              ephemeral-storage: "{{ .Values.gotenberg.resources.requests.ephemeralStorage }}"
-            limits:
-              memory: "{{ .Values.gotenberg.resources.limits.memory }}"
-              cpu: "{{ .Values.gotenberg.resources.limits.cpu }}"
-              ephemeral-storage: "{{ .Values.gotenberg.resources.limits.ephemeralStorage }}"
+            {{- include "gotenberg.resources" .Values.gotenberg.resources | nindent 12 }}
       volumes:
         - name: tmp
           emptyDir: {}

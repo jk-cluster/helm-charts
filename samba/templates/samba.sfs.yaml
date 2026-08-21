@@ -46,14 +46,7 @@ spec:
           startupProbe:
             {{- toYaml .Values.samba.startupProbe | nindent 12 }}
           resources:
-            requests:
-              memory: "{{ .Values.samba.resources.requests.memory }}"
-              cpu: "{{ .Values.samba.resources.requests.cpu }}"
-              ephemeral-storage: "{{ .Values.samba.resources.requests.ephemeralStorage }}"
-            limits:
-              memory: "{{ .Values.samba.resources.limits.memory }}"
-              cpu: "{{ .Values.samba.resources.limits.cpu }}"
-              ephemeral-storage: "{{ .Values.samba.resources.limits.ephemeralStorage }}"
+            {{- include "samba.resources" .Values.samba.resources | nindent 12 }}
       restartPolicy: Always
       automountServiceAccountToken: false
       securityContext:

@@ -40,14 +40,7 @@ spec:
           startupProbe:
             {{- toYaml .Values.tika.startupProbe | nindent 12 }}
           resources:
-            requests:
-              memory: "{{ .Values.tika.resources.requests.memory }}"
-              cpu: "{{ .Values.tika.resources.requests.cpu }}"
-              ephemeral-storage: "{{ .Values.tika.resources.requests.ephemeralStorage }}"
-            limits:
-              memory: "{{ .Values.tika.resources.limits.memory }}"
-              cpu: "{{ .Values.tika.resources.limits.cpu }}"
-              ephemeral-storage: "{{ .Values.tika.resources.limits.ephemeralStorage }}"
+            {{- include "apache-tika.resources" .Values.tika.resources | nindent 12 }}
       volumes:
         - name: tmp
           emptyDir: {}

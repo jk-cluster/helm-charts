@@ -74,10 +74,8 @@ spec:
             periodSeconds: 30
             timeoutSeconds: 10
             failureThreshold: 40
-          {{- with .Values.server.resources }}
           resources:
-            {{ toYaml . | nindent 12 }}
-          {{- end }}
+            {{- include "satisfactory.resources" .Values.server.resources | nindent 12 }}
           volumeMounts:
             - name: satisfactory-volume
               mountPath: /config

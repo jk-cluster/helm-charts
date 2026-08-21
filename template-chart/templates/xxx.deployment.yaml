@@ -52,7 +52,7 @@ spec:
           startupProbe:
             {{- toYaml .Values.xxx.startupProbe | nindent 12 }}
           resources:
-            {{- toYaml .Values.xxx.resources | nindent 12 }}
+            {{- include "xxx.resources" .Values.xxx.resources | nindent 12 }}
           securityContext:
             {{- toYaml .Values.xxx.securityContext.container | nindent 12 }}
       restartPolicy: Always

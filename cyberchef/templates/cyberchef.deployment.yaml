@@ -42,14 +42,7 @@ spec:
           startupProbe:
             {{- toYaml .Values.cyberchef.startupProbe | nindent 12 }}
           resources:
-            requests:
-              memory: "{{ .Values.cyberchef.resources.requests.memory }}"
-              cpu: "{{ .Values.cyberchef.resources.requests.cpu }}"
-              ephemeral-storage: "{{ .Values.cyberchef.resources.requests.ephemeralStorage }}"
-            limits:
-              memory: "{{ .Values.cyberchef.resources.limits.memory }}"
-              cpu: "{{ .Values.cyberchef.resources.limits.cpu }}"
-              ephemeral-storage: "{{ .Values.cyberchef.resources.limits.ephemeralStorage }}"
+            {{- include "cyberchef.resources" .Values.cyberchef.resources | nindent 12 }}
       volumes:
         - name: nginx-cache
           emptyDir: {}

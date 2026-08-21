@@ -11,14 +11,14 @@ outline:
     size: 10Gi
     storageClass: null
   resources:
+    # Limits are optional: memory and ephemeral-storage limits default to
+    # limitFactor x the request, an explicitly set limit always wins, and a
+    # CPU limit is only set when configured explicitly under "limits".
+    limitFactor: 3
     requests:
       cpu: 0.1
       memory: 512Mi
       ephemeralStorage: 10Mi
-    limits:
-      cpu: 1
-      memory: 768Mi
-      ephemeralStorage: 100Mi
 
 ingress:
   maxUploadFileSize: 25m

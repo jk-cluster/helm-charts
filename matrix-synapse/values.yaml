@@ -21,23 +21,23 @@ matrix:
           drop:
             - ALL
     resources:
-      limits:
-        memory: "128Mi"
-        cpu: "250m"
-        ephemeralStorage: "100Mi"
+      # Limits are optional: memory and ephemeral-storage limits default to
+      # limitFactor x the request, an explicitly set limit always wins, and a
+      # CPU limit is only set when configured explicitly under "limits".
+      limitFactor: 3
       requests:
         memory: "64Mi"
         cpu: "125m"
         ephemeralStorage: "50Mi"
   resources:
+    # Limits are optional: memory and ephemeral-storage limits default to
+    # limitFactor x the request, an explicitly set limit always wins, and a
+    # CPU limit is only set when configured explicitly under "limits".
+    limitFactor: 3
     requests:
       memory: "1Gi"
       cpu: "1"
       ephemeralStorage: "1Gi"
-    limits:
-      memory: "2Gi"
-      cpu: "2"
-      ephemeralStorage: "2Gi"
 
 storage:
   amount: 10Gi

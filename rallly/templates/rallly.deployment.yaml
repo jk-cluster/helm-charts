@@ -131,7 +131,7 @@ spec:
           startupProbe:
             {{ toYaml .Values.rallly.startupProbe | nindent 12}}
           resources:
-            {{ toYaml .Values.rallly.resources | nindent 12 }}
+            {{- include "rallly.resources" .Values.rallly.resources | nindent 12 }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

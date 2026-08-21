@@ -2,6 +2,8 @@ name: Publish Matrix Synapse Helm Chart
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     paths:
       - matrix-synapse/**
 jobs:

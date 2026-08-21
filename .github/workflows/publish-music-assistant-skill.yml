@@ -2,6 +2,8 @@ name: Publish Music-Assistant Skill Helm Chart
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     paths:
       - music-assistant-skill/**
 jobs:

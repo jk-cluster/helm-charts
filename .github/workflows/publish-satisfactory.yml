@@ -2,6 +2,8 @@ name: Publish Zipline Helm Chart
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     paths:
       - satisfactory/**
 jobs:

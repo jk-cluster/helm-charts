@@ -2,6 +2,8 @@ name: Publish Calibre Web Automated Helm Chart
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     paths:
       - calibre-web-automated/**
 jobs:

@@ -2,6 +2,8 @@ name: Publish Apache Tika Helm Chart
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     paths:
       - apache-tika/**
 jobs:

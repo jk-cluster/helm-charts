@@ -4,13 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Working on issues — mandatory workflow
 
-When working on a GitHub issue in this repo, follow this process strictly:
+The main Claude session acts as the **task manager** and does not implement issues itself:
 
-1. **Plan first, get approval**: Present a plan for how you intend to implement the issue and wait for the user's explicit approval. Do not start implementing before the plan is approved.
-2. **Implement on a dedicated branch**: After approval, work the issue to completion on its own branch.
-3. **Open a PR** for the changes when the implementation is done.
-4. **Wait for the user's review**: The user may request changes as comments on the PR — address those. Do not merge yourself.
-5. Only after the PR has been **merged by the user** may work on the next issue begin.
+1. **Plan first, get approval**: The manager presents a plan for the issue and waits for the user's explicit approval. No implementation before approval.
+2. **Delegate implementation**: After approval, the manager launches a dedicated **development agent**. The agent implements the issue completely on its own branch and opens a PR.
+3. **PR comment handling by the agent**: After opening the PR, the development agent watches it for review comments. New comments are addressed automatically (code changes, reply on the thread), and addressed threads are marked as **resolved**.
+4. **Agent lifetime**: The development agent terminates itself once its PR has been merged (or closed).
+5. Only after the PR has been **merged by the user** may work on the next issue begin. The user merges; never merge yourself.
+6. **After the merge, verify the linked issue was closed** (auto-close via "Fixes #n"); close it manually if not.
+
+Additional rules for all commits, PRs, issues, and comments:
+
+- Do **not** add a `Co-Authored-By` trailer and do **not** append "Generated with Claude Code" footers.
 
 ## What this repo is
 

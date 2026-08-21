@@ -46,6 +46,16 @@ smbConnection:
   enabled: false
   server: null
   cronJob: "0 0,12 * * *"
+  cron:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 16Mi
+        ephemeralStorage: 10Mi
+      limits:
+        cpu: 100m
+        memory: 32Mi
+        ephemeralStorage: 50Mi
 oidc:
   enabled: false
   autoLoginWithProvider: false

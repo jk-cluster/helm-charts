@@ -2,6 +2,8 @@ name: Publish Paperless-NGX Helm Chart
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     paths:
       - paperless-ngx/**
 jobs:

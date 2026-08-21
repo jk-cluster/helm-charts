@@ -2,6 +2,8 @@ name: Publish Gotenberg Helm Chart
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     paths:
       - gotenberg/**
 jobs:

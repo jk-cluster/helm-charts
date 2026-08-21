@@ -2,6 +2,8 @@ name: Publish TeamSpeak Server Helm Chart
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     paths:
       - teamspeak-server/**
 jobs:

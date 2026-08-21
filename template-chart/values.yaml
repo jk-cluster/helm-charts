@@ -15,7 +15,6 @@ xxx:
     httpGet:
       path: /
       port: http
-    initialDelaySeconds: 10
     periodSeconds: 10
     timeoutSeconds: 5
     failureThreshold: 3
@@ -23,18 +22,18 @@ xxx:
     httpGet:
       path: /
       port: http
-    initialDelaySeconds: 10
     periodSeconds: 10
     timeoutSeconds: 5
     failureThreshold: 3
+  # The startup probe gates liveness/readiness, so those need no initialDelaySeconds.
+  # Startup budget = periodSeconds * failureThreshold = 150s.
   startupProbe:
     httpGet:
       path: /
       port: http
-    initialDelaySeconds: 30
-    periodSeconds: 10
+    periodSeconds: 5
     timeoutSeconds: 5
-    failureThreshold: 3
+    failureThreshold: 30
   securityContext:
     pod:
       runAsNonRoot: true

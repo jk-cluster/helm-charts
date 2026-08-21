@@ -43,7 +43,6 @@ spec:
               path: /health
               port: http
               scheme: HTTP
-            initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
@@ -52,10 +51,19 @@ spec:
               path: /health
               port: http
               scheme: HTTP
-            initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
+          # The startup probe gates liveness/readiness. Synapse can take a
+          # while to start (migrations, cache warmup): budget 10s * 30 = 300s.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+              scheme: HTTP
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
           resources:
             requests:
               memory: "{{ .Values.matrix.resources.requests.memory }}"

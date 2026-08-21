@@ -52,10 +52,28 @@ spec:
                 - "/bin/sh"
                 - "-c"
                 - "/home/steam/healthcheck.sh"
-            initialDelaySeconds: 300
             failureThreshold: 4
             successThreshold: 1
             periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: api
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # The startup probe gates liveness/readiness. The server downloads /
+          # updates the game files via Steam on startup, which can take a long
+          # time: budget 30s * 40 = 20 minutes.
+          startupProbe:
+            exec:
+              command:
+                - "/bin/sh"
+                - "-c"
+                - "/home/steam/healthcheck.sh"
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 40
           {{- with .Values.server.resources }}
           resources:
             {{ toYaml . | nindent 12 }}

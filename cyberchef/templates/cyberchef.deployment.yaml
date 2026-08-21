@@ -20,11 +20,16 @@ spec:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
           image: "ghcr.io/gchq/cyberchef:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
-          # TODO: liveness and readiness probes
           ports:
             - containerPort: 80
               protocol: TCP
               name: http
+          livenessProbe:
+            {{- toYaml .Values.cyberchef.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.cyberchef.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.cyberchef.startupProbe | nindent 12 }}
           resources:
             requests:
               memory: "{{ .Values.cyberchef.resources.requests.memory }}"

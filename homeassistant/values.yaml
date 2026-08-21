@@ -32,15 +32,30 @@ resources:
      memory: 512Mi
      ephemeralStorage: 128Mi
 
-# This is to setup the liveness and readiness probes more information can be found here: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
+# This is to setup the liveness, readiness and startup probes more information can be found here: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
 livenessProbe:
   httpGet:
     path: /
     port: http
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
 readinessProbe:
   httpGet:
     path: /
     port: http
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+# The startup probe gates liveness/readiness. Home Assistant can take a while to
+# start up, so grant a generous budget: 10s * 30 = 300s.
+startupProbe:
+  httpGet:
+    path: /
+    port: http
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 30
 
 # Additional volumes on the output Deployment definition.
 volumes: []

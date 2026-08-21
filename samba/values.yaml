@@ -7,6 +7,26 @@ samba:
       validUsers: null
       description: null
       size: null
+  # SMB is not an HTTP protocol, so probe the main SMB TCP port.
+  livenessProbe:
+    tcpSocket:
+      port: 445
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    tcpSocket:
+      port: 445
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # The startup probe gates liveness/readiness. Startup budget = 5s * 30 = 150s.
+  startupProbe:
+    tcpSocket:
+      port: 445
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30
   resources:
     requests:
       memory: 50Mi

@@ -1,4 +1,27 @@
 gotenberg:
+  # Gotenberg exposes a documented health endpoint at /health.
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: gotenberg-port
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: gotenberg-port
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # The startup probe gates liveness/readiness. Startup budget = 5s * 30 = 150s.
+  startupProbe:
+    httpGet:
+      path: /health
+      port: gotenberg-port
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30
   resources:
     requests:
       cpu: 0.1

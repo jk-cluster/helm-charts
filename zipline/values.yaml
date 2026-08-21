@@ -7,6 +7,31 @@ config:
   domain: null
   maxUploadFileSize: 30m
 zipline:
+  # Zipline v4 exposes /api/healthcheck (checks server and database health);
+  # the endpoint is enabled by default (config.features.healthcheck).
+  livenessProbe:
+    httpGet:
+      path: /api/healthcheck
+      port: zipline-server
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /api/healthcheck
+      port: zipline-server
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # The startup probe gates liveness/readiness. Zipline runs database
+  # migrations on startup, so grant a generous budget: 10s * 30 = 300s.
+  startupProbe:
+    httpGet:
+      path: /api/healthcheck
+      port: zipline-server
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 30
   resources:
     requests:
       cpu: 0.1

@@ -24,6 +24,12 @@ spec:
             - containerPort: 3000
               protocol: TCP
               name: gotenberg-port
+          livenessProbe:
+            {{- toYaml .Values.gotenberg.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.gotenberg.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.gotenberg.startupProbe | nindent 12 }}
           resources:
             requests:
               memory: "{{ .Values.gotenberg.resources.requests.memory }}"

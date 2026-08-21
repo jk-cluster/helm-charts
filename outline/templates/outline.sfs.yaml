@@ -80,18 +80,31 @@ spec:
             - containerPort: 3000
               protocol: TCP
               name: http
+          # Outline exposes a dedicated health endpoint at /_health
+          # (also used by the upstream Docker HEALTHCHECK).
           livenessProbe:
             httpGet:
-              path: /
+              path: /_health
               port: 3000
-            initialDelaySeconds: 30
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /
+              path: /_health
               port: 3000
-            initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # The startup probe gates liveness/readiness. Outline runs database
+          # migrations on startup: budget 10s * 30 = 300s.
+          startupProbe:
+            httpGet:
+              path: /_health
+              port: 3000
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
           resources:
             requests:
               memory: "{{ .Values.outline.resources.requests.memory }}"

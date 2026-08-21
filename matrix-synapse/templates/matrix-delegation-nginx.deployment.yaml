@@ -40,7 +40,6 @@ spec:
               path: /.well-known/matrix/server
               port: http
               scheme: HTTP
-            initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 3
@@ -49,10 +48,18 @@ spec:
               path: /.well-known/matrix/server
               port: http
               scheme: HTTP
-            initialDelaySeconds: 15
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 3
+          # The startup probe gates liveness/readiness. Startup budget = 5s * 30 = 150s.
+          startupProbe:
+            httpGet:
+              path: /.well-known/matrix/server
+              port: http
+              scheme: HTTP
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
       volumes:
         - name: nginx-config
           configMap:

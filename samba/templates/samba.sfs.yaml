@@ -39,6 +39,12 @@ spec:
             - name: "{{ $value.name }}"
               mountPath: "/shares/{{ $value.name }}"
             {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.samba.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.samba.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.samba.startupProbe | nindent 12 }}
           resources:
             requests:
               memory: "{{ .Values.samba.resources.requests.memory }}"

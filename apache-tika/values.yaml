@@ -1,4 +1,27 @@
 tika:
+  # Tika answers "GET /" on its server port with HTTP 200.
+  livenessProbe:
+    httpGet:
+      path: /
+      port: tika-port
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /
+      port: tika-port
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # The startup probe gates liveness/readiness. Startup budget = 5s * 30 = 150s.
+  startupProbe:
+    httpGet:
+      path: /
+      port: tika-port
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30
   resources:
     requests:
       cpu: 0.1

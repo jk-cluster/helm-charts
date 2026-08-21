@@ -135,7 +135,30 @@ spec:
               value: "https://{{ .Values.ingress.domain }}"
             - name: TRUST_PROXIES
               value: "1"
-          # TODO: Add liveness and readiness probes
+          # The backend exposes GET /health returning {"status": "ok"}.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # The startup probe gates liveness/readiness. The backend waits for
+          # the database and runs migrations on startup: budget 10s * 30 = 300s.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
           {{- with .Values.patchmon.backend.resources }}
           resources:
             {{ toYaml . | nindent 12 }}

@@ -28,7 +28,12 @@ spec:
             - name: http
               containerPort: 8123
               protocol: TCP
-          # TODO: liveness-probe, readiness-probe
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.startupProbe | nindent 12 }}
           resources:
             limits:
               cpu: {{ .Values.resources.limits.cpu }}

@@ -24,6 +24,12 @@ spec:
             - containerPort: 9998
               protocol: TCP
               name: tika-port
+          livenessProbe:
+            {{- toYaml .Values.tika.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.tika.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.tika.startupProbe | nindent 12 }}
           resources:
             requests:
               memory: "{{ .Values.tika.resources.requests.memory }}"

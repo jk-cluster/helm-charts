@@ -44,6 +44,12 @@ spec:
             - name: "zipline-server"
               containerPort: 3000
               protocol: TCP
+          livenessProbe:
+            {{- toYaml .Values.zipline.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.zipline.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.zipline.startupProbe | nindent 12 }}
           volumeMounts:
             - name: zipline-volume
               mountPath: /zipline/uploads

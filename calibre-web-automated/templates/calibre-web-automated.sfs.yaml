@@ -54,6 +54,12 @@ spec:
               subPath: customize.py.json
             - mountPath: "/cwa-book-ingest"
               name: cwa-consume
+          livenessProbe:
+            {{- toYaml .Values.cwa.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.cwa.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.cwa.startupProbe | nindent 12 }}
           resources:
             requests:
               memory: "{{ .Values.cwa.resources.requests.memory }}"

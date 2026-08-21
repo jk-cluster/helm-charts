@@ -113,7 +113,6 @@ spec:
             httpGet:
               port: 8080
               path: /actuator/health/readiness
-            initialDelaySeconds: 10
             periodSeconds: 5
             failureThreshold: 3
             successThreshold: 1
@@ -122,9 +121,17 @@ spec:
             httpGet:
               port: 8080
               path: /actuator/health/liveness
-            initialDelaySeconds: 20
             periodSeconds: 10
             failureThreshold: 3
             successThreshold: 1
+            timeoutSeconds: 5
+          # The startup probe gates liveness/readiness. Spring Boot startup
+          # (JVM + Liquibase migrations) gets a budget of 10s * 30 = 300s.
+          startupProbe:
+            httpGet:
+              port: 8080
+              path: /actuator/health/liveness
+            periodSeconds: 10
+            failureThreshold: 30
             timeoutSeconds: 5
       restartPolicy: Always

@@ -35,6 +35,27 @@ spec:
               value: "accept"
             - name: TSSERVER_DEFAULT_PORT
               value: "30987"
+          # The voice service is UDP and cannot be probed; probe the TCP
+          # file-transfer port instead.
+          livenessProbe:
+            tcpSocket:
+              port: file-transfer
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: file-transfer
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # The startup probe gates liveness/readiness. Startup budget = 5s * 30 = 150s.
+          startupProbe:
+            tcpSocket:
+              port: file-transfer
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 30
           resources:
             requests:
               cpu: "0.2"

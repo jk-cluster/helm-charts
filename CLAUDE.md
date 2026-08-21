@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Working on issues — mandatory workflow
+
+When working on a GitHub issue in this repo, follow this process strictly:
+
+1. **Plan first, get approval**: Present a plan for how you intend to implement the issue and wait for the user's explicit approval. Do not start implementing before the plan is approved.
+2. **Implement on a dedicated branch**: After approval, work the issue to completion on its own branch.
+3. **Open a PR** for the changes when the implementation is done.
+4. **Wait for the user's review**: The user may request changes as comments on the PR — address those. Do not merge yourself.
+5. Only after the PR has been **merged by the user** may work on the next issue begin.
+
 ## What this repo is
 
 A collection of self-made Helm charts, one directory per chart, published to a private OCI registry via GitHub Actions. There is no build system or test suite — validation is done with Helm itself:

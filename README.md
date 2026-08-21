@@ -33,9 +33,10 @@ Collection of some self-made helm-charts. Each top-level directory is a standalo
 
 ## CI/CD (GitHub Actions)
 
-- `publish-<chart>.yml` — one thin workflow per chart; triggers on any push touching `<chart>/**` (or manually) and calls the reusable workflow below. **A push to a chart directory on `main` publishes that chart**, so the chart version must be bumped in the same change.
+- `publish-<chart>.yml` — one thin workflow per chart; triggers on pushes to `main` touching `<chart>/**` (or manually) and calls the reusable workflow below. **A push to a chart directory on `main` publishes that chart**, so the chart version must be bumped in the same change.
 - `publish-helm-chart.yml` — reusable workflow: `helm package`, then `helm push` to the private JK-Registry. Registry credentials come from 1Password Connect (`OP_CONNECT_TOKEN` secret, items under `op://GitHub-Actions/`).
 - `change-app-version.yml` — manually dispatched app-version bump; the chart must be listed in its `chart-name` choice list.
+- `validate-charts.yml` — PR pipeline: detects which charts a PR touches and, for exactly those, runs `helm lint --strict`, `helm package`, and a chart-version bump check (`template-chart` is exempt from the version check). PRs without chart changes skip the build matrix.
 
 ## Creating a new chart
 
@@ -46,11 +47,13 @@ Collection of some self-made helm-charts. Each top-level directory is a standalo
 Validate locally with:
 
 ```bash
-helm lint <chart-name>
+helm lint --strict <chart-name>
 helm template <chart-name> --set ingress.domain=example.com --set ingress.clusterIssuer=letsencrypt
 ```
 
 (required values vary per chart)
+
+For runtime verification (do the workloads actually start, do probes/security settings hold?), use a throwaway local [k3d](https://k3d.io) cluster: `k3d cluster create <name>`, apply a stub CRD for `OnePasswordItem` plus dummy secrets (and throwaway postgres/redis pods where the app needs them), `helm install` the chart, watch pod readiness/events, then `k3d cluster delete <name>`.
 
 ## Chart conventions
 

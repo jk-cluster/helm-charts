@@ -8,10 +8,12 @@ config:
   maxUploadFileSize: 30m
 zipline:
   # Zipline v4 exposes /api/healthcheck (checks server and database health);
-  # the endpoint is enabled by default (config.features.healthcheck).
+  # the endpoint is enabled by default (config.features.healthcheck). Since it
+  # includes the database, it is used for readiness/startup only; liveness
+  # uses "/" so a database outage does not restart the pod.
   livenessProbe:
     httpGet:
-      path: /api/healthcheck
+      path: /
       port: zipline-server
     periodSeconds: 10
     timeoutSeconds: 5

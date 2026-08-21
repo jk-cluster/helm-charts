@@ -13,11 +13,17 @@ voucherVault:
       cpu: 1
       memory: 384Mi
       ephemeral-storage: 100Mi
-  # "/" answers with a redirect for anonymous users, which httpGet treats as success.
+  # "/" answers with a redirect for anonymous users, which httpGet treats as
+  # success. The Host header must be set to 127.0.0.1 because Django's
+  # ALLOWED_HOSTS only accepts 127.0.0.1 and the configured DOMAIN — probing
+  # with the default Host (the pod IP) would always return 400.
   livenessProbe:
     httpGet:
       path: /
       port: http
+      httpHeaders:
+        - name: Host
+          value: 127.0.0.1
     periodSeconds: 10
     timeoutSeconds: 5
     failureThreshold: 3
@@ -25,6 +31,9 @@ voucherVault:
     httpGet:
       path: /
       port: http
+      httpHeaders:
+        - name: Host
+          value: 127.0.0.1
     periodSeconds: 10
     timeoutSeconds: 5
     failureThreshold: 3
@@ -33,6 +42,9 @@ voucherVault:
     httpGet:
       path: /
       port: http
+      httpHeaders:
+        - name: Host
+          value: 127.0.0.1
     periodSeconds: 5
     timeoutSeconds: 5
     failureThreshold: 30

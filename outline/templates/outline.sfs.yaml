@@ -80,8 +80,10 @@ spec:
             - containerPort: 3000
               protocol: TCP
               name: http
-          # Outline exposes a dedicated health endpoint at /_health
-          # (also used by the upstream Docker HEALTHCHECK).
+          # Outline exposes a dedicated health endpoint at /_health (also used
+          # by the upstream Docker HEALTHCHECK). It checks Postgres and Redis;
+          # there is no dependency-free HTTP endpoint ("/" returns 500 too when
+          # the database is down), so all three probes use /_health.
           livenessProbe:
             httpGet:
               path: /_health

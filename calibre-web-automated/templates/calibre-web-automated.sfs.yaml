@@ -5,6 +5,7 @@ metadata:
   labels:
     app: {{ .Chart.Name }}-{{ .Release.Name }}
 spec:
+  serviceName: {{ .Chart.Name }}-{{ .Release.Name }}-cwa-service
   replicas: 1
   selector:
     matchLabels:

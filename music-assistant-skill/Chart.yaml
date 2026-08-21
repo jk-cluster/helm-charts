@@ -1,6 +1,0 @@
-apiVersion: v2
-name: music-assistant-skill
-description: Music Assistant Alexa Skill
-type: application
-version: 1.0.0+up0.0.36.beta
-appVersion: "0.0.36-beta"

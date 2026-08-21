@@ -12,7 +12,6 @@ Collection of some self-made helm-charts. Each top-level directory is a standalo
 | `gotenberg` | Gotenberg | Deployment + Service only (no ingress) |
 | `homeassistant` | Home Assistant | StatefulSet, has `NOTES.txt` and Helm tests |
 | `matrix-synapse` | Matrix Synapse | StatefulSet plus an nginx delegation Deployment/Service |
-| `music-assistant-skill` | Music Assistant Alexa Skill | Uses `_helpers.tpl` (unlike the other charts) |
 | `outline` | Outline | StatefulSet, separate DB/Redis secrets |
 | `paperless-ngx` | Paperless-ngx | Largest chart: consume CronJob, SMB-connector PV/PVC, pre/post-consumption scripts ConfigMap |
 | `patchmon` | PatchMon | Two Deployments (frontend + backend), OIDC secret |

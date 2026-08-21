@@ -1,0 +1,12 @@
+secrets:
+  ralllySecretRef: op://ci/rallly
+  oidcSecretRef: op://ci/rallly-oidc
+  databaseSecretRef: op://ci/rallly-db
+  # smtp stays disabled (default), so no smtpSecretRef is needed.
+
+rallly:
+  supportEmail: ci@example.org
+
+ingress:
+  clusterIssuer: ci
+  domain: rallly.ci.local

@@ -67,3 +67,37 @@ jobs:
           else
             echo "Version bump OK: $BASE_VERSION -> $NEW_VERSION"
           fi
+
+  install-test:
+    name: "Install-test ${{ matrix.chart }}"
+    needs: [detect-changed-charts, build-chart]
+    if: needs.detect-changed-charts.outputs.any-chart-changed == 'true'
+    runs-on: ubuntu-latest
+    # Stabilization phase (issue #22): the job reports failures but does not
+    # block the PR. Promote to a required check (drop continue-on-error) once
+    # it has proven stable across several chart PRs.
+    continue-on-error: true
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        chart: ${{ fromJSON(needs.detect-changed-charts.outputs.charts) }}
+    env:
+      K3D_VERSION: v5.9.0
+      K3S_IMAGE: docker.io/rancher/k3s:v1.35.5-k3s1
+    steps:
+      - name: "Checkout Repository"
+        uses: actions/checkout@v4
+      - name: "Install Helm"
+        uses: azure/setup-helm@v4
+      - name: "Install k3d"
+        run: curl -sSfL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | TAG="$K3D_VERSION" bash
+      - name: "Create k3d cluster"
+        run: k3d cluster create install-test --image "$K3S_IMAGE" --wait --timeout 180s
+      # Excluded charts (see ci/excluded-charts.txt) are skipped inside the
+      # script with their documented reason.
+      - name: "Install chart and wait for readiness"
+        run: ci/run-install-test.sh "${{ matrix.chart }}"
+      - name: "Delete k3d cluster"
+        if: always()
+        run: k3d cluster delete install-test || true

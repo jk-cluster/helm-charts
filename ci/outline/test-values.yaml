@@ -1,0 +1,7 @@
+secrets:
+  configSecretRef: op://ci/outline-config
+  redisSecretRef: op://ci/outline-redis
+  dbSecretRef: op://ci/outline-db
+
+ingress:
+  domain: outline.ci.local

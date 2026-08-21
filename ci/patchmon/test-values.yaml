@@ -1,0 +1,19 @@
+secrets:
+  redisSecretRef: op://ci/patchmon-redis
+  postgresSecretRef: op://ci/patchmon-postgres
+  oidcSecretRef: op://ci/patchmon-oidc
+  patchmonSecretRef: op://ci/patchmon
+
+ingress:
+  clusterIssuer: ci
+  domain: patchmon.ci.local
+
+patchmon:
+  storage:
+    # Point the RWX assets PVC at the fixture StorageClass so the pre-created
+    # world-writable hostPath PV is used (local-path cannot provision RWX, and
+    # the non-root backend must write its assets dir at boot). Note: the PVC
+    # template guards on .storage.storageClass but renders .storage.class,
+    # so both keys must be set.
+    storageClass: ci-static
+    class: ci-static

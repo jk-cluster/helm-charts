@@ -1,0 +1,141 @@
+# Fixtures for the urlaubsverwaltung install-test: throwaway postgres, a dex
+# OIDC provider (Spring performs OIDC discovery against the issuer at boot)
+# and the secrets the 1Password operator would otherwise materialize.
+# Note: this chart names secrets <chart>-<release>-..., release name is ci.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: urlaubsverwaltung-ci-uv-db-secret
+stringData:
+  jdbc-url: jdbc:postgresql://postgres:5432/urlaubsverwaltung
+  username: ci
+  password: ci
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: urlaubsverwaltung-ci-uv-oidc-secret
+stringData:
+  client-id: ci-client
+  client-secret: ci-client-secret
+  issuer-name: CI
+  redirect-uri: https://uv.ci.local/login/oauth2/code/default
+  issuer-uri: http://dex.default.svc.cluster.local:5556/dex
+  jwt-issuer-uri: http://dex.default.svc.cluster.local:5556/dex
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: public.ecr.aws/docker/library/postgres:16-alpine
+          env:
+            - name: POSTGRES_USER
+              value: ci
+            - name: POSTGRES_PASSWORD
+              value: ci
+            - name: POSTGRES_DB
+              value: urlaubsverwaltung
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "ci"]
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dex-config
+data:
+  config.yaml: |
+    issuer: http://dex.default.svc.cluster.local:5556/dex
+    storage:
+      type: memory
+    web:
+      http: 0.0.0.0:5556
+    oauth2:
+      skipApprovalScreen: true
+    staticClients:
+      - id: ci-client
+        secret: ci-client-secret
+        name: CI Client
+        redirectURIs:
+          - https://uv.ci.local/login/oauth2/code/default
+    enablePasswordDB: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dex
+  labels:
+    app: dex
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dex
+  template:
+    metadata:
+      labels:
+        app: dex
+    spec:
+      containers:
+        - name: dex
+          image: ghcr.io/dexidp/dex:v2.41.1
+          command: ["dex", "serve", "/etc/dex/cfg/config.yaml"]
+          ports:
+            - containerPort: 5556
+          readinessProbe:
+            httpGet:
+              path: /dex/healthz
+              port: 5556
+            periodSeconds: 5
+          volumeMounts:
+            - name: config
+              mountPath: /etc/dex/cfg
+      volumes:
+        - name: config
+          configMap:
+            name: dex-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dex
+spec:
+  selector:
+    app: dex
+  ports:
+    - port: 5556
+      targetPort: 5556

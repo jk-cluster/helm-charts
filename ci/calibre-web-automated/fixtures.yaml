@@ -1,0 +1,82 @@
+# Fixtures for the calibre-web-automated install-test: the cwa secret the
+# 1Password operator would otherwise materialize and static hostPath PVs
+# (the consume PVC is ReadWriteMany, which local-path cannot provision).
+# This chart names resources <chart>-<release>-..., release name is ci.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ci-static
+provisioner: kubernetes.io/no-provisioner
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: node-setup
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: setup
+          image: public.ecr.aws/docker/library/busybox:1.36
+          command:
+            - sh
+            - -c
+            - >
+              mkdir -p /pv/cwa/data /pv/cwa/consume &&
+              chmod -R 0777 /pv/cwa
+          volumeMounts:
+            - name: pv
+              mountPath: /pv
+      volumes:
+        - name: pv
+          hostPath:
+            path: /var/lib/ci-pv
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ci-cwa-data
+spec:
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ci-static
+  claimRef:
+    namespace: default
+    name: calibre-web-automated-ci-cwa-pvc
+  hostPath:
+    path: /var/lib/ci-pv/cwa/data
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ci-cwa-consume
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ci-static
+  claimRef:
+    namespace: default
+    name: calibre-web-automated-ci-cwa-consume-pvc
+  hostPath:
+    path: /var/lib/ci-pv/cwa/consume
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: calibre-web-automated-ci-cwa-secret
+stringData:
+  hardcover-api-token: ci-dummy-token
+  # Mounted as /config/.config/calibre/customize.py.json (calibre plugin
+  # registry); an empty JSON object is a valid file.
+  calibre-plugins: "{}"

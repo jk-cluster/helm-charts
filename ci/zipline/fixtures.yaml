@@ -1,0 +1,65 @@
+# Fixtures for the zipline install-test: throwaway postgres and the secrets
+# the 1Password operator would otherwise materialize (release name: ci).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ci-zipline-db-secret
+stringData:
+  connection-url: postgresql://ci:ci@postgres:5432/zipline
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ci-zipline-core-secret
+stringData:
+  server-secret: zipline-ci-core-secret-0123456789abcdef0123456789abcdef0123456789
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: public.ecr.aws/docker/library/postgres:16-alpine
+          env:
+            - name: POSTGRES_USER
+              value: ci
+            - name: POSTGRES_PASSWORD
+              value: ci
+            - name: POSTGRES_DB
+              value: zipline
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "ci"]
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432

@@ -1,0 +1,10 @@
+secrets:
+  sambaUsersRef: op://ci/samba-users
+
+samba:
+  storageClass: local-path
+  shares:
+    - name: ci-share
+      validUsers: ciuser
+      description: CI test share
+      size: 1Gi

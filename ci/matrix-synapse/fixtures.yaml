@@ -1,0 +1,95 @@
+# Fixtures for the matrix-synapse install-test. Synapse needs a signing key
+# and a log config on its PVC before it starts, so the PVC is backed by a
+# pre-bound hostPath PV and a seed Job runs "synapse generate" into that
+# directory first (same pattern as the k3d verification for PRs #21/#26).
+# The chart mounts homeserver.yaml from the config secret; the static config
+# below points at the generated key/log-config paths. Release name: ci.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ci-static
+provisioner: kubernetes.io/no-provisioner
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ci-matrix-synapse-data
+spec:
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ci-static
+  claimRef:
+    namespace: default
+    name: ci-matrix-synapse-pvc
+  hostPath:
+    path: /var/lib/ci-pv/matrix-synapse
+    type: DirectoryOrCreate
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: synapse-seed
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: generate
+          # Same image the chart deploys (appVersion of matrix-synapse).
+          image: ghcr.io/element-hq/synapse:v1.149.1
+          args: ["generate"]
+          env:
+            - name: SYNAPSE_SERVER_NAME
+              value: synapse.ci.local
+            - name: SYNAPSE_REPORT_STATS
+              value: "no"
+            # Match the UID/GID the chart runs synapse with, so the generated
+            # signing key (mode 0600) is readable by the server container.
+            - name: UID
+              value: "1000"
+            - name: GID
+              value: "1000"
+          volumeMounts:
+            - name: pv
+              mountPath: /data
+              subPath: matrix-synapse-data
+      volumes:
+        - name: pv
+          hostPath:
+            path: /var/lib/ci-pv/matrix-synapse
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ci-matrix-synapse-config-secret
+stringData:
+  homeserver.yaml: |
+    server_name: "synapse.ci.local"
+    pid_file: /data/homeserver.pid
+    listeners:
+      - port: 8008
+        tls: false
+        type: http
+        x_forwarded: true
+        resources:
+          - names: [client, federation]
+            compress: false
+    database:
+      name: sqlite3
+      args:
+        database: /data/homeserver.db
+    log_config: "/data/synapse.ci.local.log.config"
+    media_store_path: /media_store
+    signing_key_path: "/data/synapse.ci.local.signing.key"
+    registration_shared_secret: "ci-registration-shared-secret"
+    macaroon_secret_key: "ci-macaroon-secret-key"
+    form_secret: "ci-form-secret"
+    report_stats: false
+    trusted_key_servers:
+      - server_name: "matrix.org"
+    suppress_key_server_warning: true

@@ -5,6 +5,21 @@ matrix:
   delegation:
     enabled: false
     serverUrl: null
+    # The delegation nginx runs as the image's unprivileged nginx user
+    # (uid 101) and listens on the unprivileged port 8080; pid file and temp
+    # paths are redirected to the /tmp emptyDir by the mounted nginx.conf.
+    securityContext:
+      pod:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+      container:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        capabilities:
+          drop:
+            - ALL
     resources:
       limits:
         memory: "128Mi"

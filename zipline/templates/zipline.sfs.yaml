@@ -13,9 +13,13 @@ spec:
       labels:
         app: "{{ .Release.Name }}-{{ .Chart.Name }}-sfs"
     spec:
+      securityContext:
+        {{- toYaml .Values.zipline.securityContext.pod | nindent 8 }}
       containers:
         - name: "{{ .Release.Name }}-{{ .Chart.Name }}-sfs"
           image: "ghcr.io/diced/zipline:{{ .Chart.AppVersion }}"
+          securityContext:
+            {{- toYaml .Values.zipline.securityContext.container | nindent 12 }}
           env:
             - name: DATABASE_URL
               valueFrom:
@@ -60,8 +64,14 @@ spec:
             - name: zipline-volume
               mountPath: /zipline/themes
               subPath: themes/
+            # Zipline writes temporary chunks/files below /tmp; with a
+            # read-only root filesystem this must be a writable emptyDir.
+            - name: tmp
+              mountPath: /tmp
       automountServiceAccountToken: false
       volumes:
+        - name: tmp
+          emptyDir: {}
         - name: zipline-volume
           persistentVolumeClaim:
             claimName: {{ .Release.Name }}-{{ .Chart.Name }}-vc

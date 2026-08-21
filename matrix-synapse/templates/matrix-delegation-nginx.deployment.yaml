@@ -16,16 +16,25 @@ spec:
         app: {{ .Release.Name }}-{{ .Chart.Name }}-delegation-nginx
     spec:
       automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.matrix.delegation.securityContext.pod | nindent 8 }}
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-delegation-nginx
           image: "nginx:1.28.3"
+          securityContext:
+            {{- toYaml .Values.matrix.delegation.securityContext.container | nindent 12 }}
           ports:
-            - containerPort: 80
+            - containerPort: 8080
               name: http
           volumeMounts:
             - name: nginx-config
               mountPath: /etc/nginx/nginx.conf
               subPath: nginx.conf
+            # The mounted nginx.conf points the pid file and all temp paths to
+            # /tmp, so a single writable emptyDir suffices with a read-only
+            # root filesystem.
+            - name: tmp
+              mountPath: /tmp
           resources:
             limits:
               memory: "{{ .Values.matrix.delegation.resources.limits.memory }}"
@@ -61,6 +70,8 @@ spec:
             timeoutSeconds: 3
             failureThreshold: 30
       volumes:
+        - name: tmp
+          emptyDir: {}
         - name: nginx-config
           configMap:
             name: {{ .Release.Name }}-{{ .Chart.Name }}-delegation-nginx-config

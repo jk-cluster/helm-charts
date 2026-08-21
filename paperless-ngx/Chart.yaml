@@ -4,7 +4,7 @@ description: A Helm chart to deploy Paperless-NGX on Kubernetes
 
 type: application
 
-version: 5.0.0+up2.20.13
+version: 6.0.0+up2.20.13
 
 appVersion: 2.20.13
 

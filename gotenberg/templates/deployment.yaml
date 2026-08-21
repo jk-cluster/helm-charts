@@ -16,10 +16,22 @@ spec:
         app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
     spec:
       automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.gotenberg.securityContext.pod | nindent 8 }}
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
           image: "gotenberg/gotenberg:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
+          securityContext:
+            {{- toYaml .Values.gotenberg.securityContext.container | nindent 12 }}
+          volumeMounts:
+            # Gotenberg (and the Chromium/LibreOffice it drives) needs writable
+            # /tmp and home directories; with a read-only root filesystem these
+            # are provided as emptyDirs.
+            - name: tmp
+              mountPath: /tmp
+            - name: gotenberg-home
+              mountPath: /home/gotenberg
           ports:
             - containerPort: 3000
               protocol: TCP
@@ -39,4 +51,9 @@ spec:
               memory: "{{ .Values.gotenberg.resources.limits.memory }}"
               cpu: "{{ .Values.gotenberg.resources.limits.cpu }}"
               ephemeral-storage: "{{ .Values.gotenberg.resources.limits.ephemeralStorage }}"
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: gotenberg-home
+          emptyDir: {}
       restartPolicy: Always

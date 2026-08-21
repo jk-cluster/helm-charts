@@ -16,10 +16,19 @@ spec:
         app: {{ .Chart.Name }}-{{ .Release.Name }}-uv-deployment
     spec:
       automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.urlaubsverwaltung.securityContext.pod | nindent 8 }}
       containers:
         - name: {{ .Chart.Name }}-{{ .Release.Name }}-uv-container
           image: "urlaubsverwaltung/urlaubsverwaltung:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
+          securityContext:
+            {{- toYaml .Values.urlaubsverwaltung.securityContext.container | nindent 12 }}
+          volumeMounts:
+            # The JVM (Tomcat work dir, temp files) needs a writable /tmp with
+            # a read-only root filesystem.
+            - name: tmp
+              mountPath: /tmp
           ports:
             - containerPort: 8080
               name: http
@@ -134,4 +143,7 @@ spec:
             periodSeconds: 10
             failureThreshold: 30
             timeoutSeconds: 5
+      volumes:
+        - name: tmp
+          emptyDir: {}
       restartPolicy: Always

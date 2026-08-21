@@ -1,4 +1,18 @@
 tika:
+  # The official image runs as the dedicated user 35002:35002. /tmp is a
+  # writable emptyDir because Tika writes temporary files while parsing.
+  securityContext:
+    pod:
+      runAsNonRoot: true
+      runAsUser: 35002
+      runAsGroup: 35002
+    container:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      capabilities:
+        drop:
+          - ALL
   # Tika answers "GET /" on its server port with HTTP 200.
   livenessProbe:
     httpGet:

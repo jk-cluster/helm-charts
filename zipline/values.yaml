@@ -7,6 +7,22 @@ config:
   domain: null
   maxUploadFileSize: 30m
 zipline:
+  # The upstream image ships no dedicated user, but the Node.js server runs
+  # fine as an arbitrary non-root uid; fsGroup makes the uploads PVC writable.
+  securityContext:
+    pod:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      fsGroupChangePolicy: Always
+    container:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      capabilities:
+        drop:
+          - ALL
   # Zipline v4 exposes /api/healthcheck (checks server and database health);
   # the endpoint is enabled by default (config.features.healthcheck). Since it
   # includes the database, it is used for readiness/startup only; liveness

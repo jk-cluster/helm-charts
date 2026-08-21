@@ -16,10 +16,14 @@ spec:
         app: {{ .Release.Name }}-{{ .Chart.Name }}-frontend
     spec:
       automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.patchmon.frontend.securityContext.pod | nindent 8 }}
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-frontend
           image: "ghcr.io/patchmon/patchmon-frontend:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
+          securityContext:
+            {{- toYaml .Values.patchmon.frontend.securityContext.container | nindent 12 }}
           ports:
             - containerPort: 3000
               protocol: TCP
@@ -59,8 +63,19 @@ spec:
             - name: patchmon-volume
               mountPath: /usr/share/nginx/html/assets
               subPath: patchmon-assets
+            # nginx-unprivileged keeps its pid file and temp dirs in /tmp, and
+            # its entrypoint renders config templates into /etc/nginx/conf.d;
+            # both must be writable with a read-only root filesystem.
+            - name: tmp
+              mountPath: /tmp
+            - name: nginx-conf-d
+              mountPath: /etc/nginx/conf.d
       restartPolicy: Always
       volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: nginx-conf-d
+          emptyDir: {}
         - name: patchmon-volume
           persistentVolumeClaim:
             claimName: {{ .Release.Name }}-{{ .Chart.Name }}-pvc

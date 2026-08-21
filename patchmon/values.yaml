@@ -3,6 +3,24 @@ patchmon:
     size: 10Gi
     storageClass: null
   frontend:
+    # The frontend image is based on nginx-unprivileged; the pod runs as its
+    # nginx user (uid 101). The image's root-only init script (it would chown
+    # the shared assets volume) is replaced by fsGroup 1000: the same group
+    # the backend runs with, so both can read/write the shared assets.
+    securityContext:
+      pod:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 1000
+        fsGroupChangePolicy: Always
+      container:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        capabilities:
+          drop:
+            - ALL
     resources:
       requests:
         cpu: 0.1

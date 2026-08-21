@@ -22,6 +22,26 @@ ingress:
   #    hosts:
   #      - chart-example.local
 
+# Documented deviation from the repo-wide hardening standard: the official
+# Home Assistant container must start as root — it boots via the s6-overlay
+# init system, which performs its setup as uid 0 (the image supports no
+# non-root user), so runAsNonRoot/runAsUser are deliberately not set.
+# Everything else is hardened: no privilege escalation, all capabilities
+# dropped and a read-only root filesystem with writable emptyDirs for
+# /tmp and /run (s6-overlay state). NET_RAW is added back because Home
+# Assistant's device discovery (DHCP watcher, ping/arp integrations) uses
+# raw sockets and logs "Operation not permitted" without it.
+securityContext:
+  pod: {}
+  container:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - NET_RAW
+
 resources:
    limits:
      cpu: 1

@@ -1,4 +1,19 @@
 gotenberg:
+  # The official image runs as the dedicated gotenberg user (uid 1001). /tmp
+  # and /home/gotenberg are writable emptyDirs so Chromium/LibreOffice keep
+  # working with a read-only root filesystem.
+  securityContext:
+    pod:
+      runAsNonRoot: true
+      runAsUser: 1001
+      runAsGroup: 1001
+    container:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      capabilities:
+        drop:
+          - ALL
   # Gotenberg exposes a documented health endpoint at /health.
   livenessProbe:
     httpGet:

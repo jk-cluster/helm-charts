@@ -42,11 +42,49 @@ paperless:
       cpu: 1
       memory: 2048Mi
       ephemeralStorage: 400Mi
+  # Paperless-ngx supports rootless operation: the pod runs as uid/gid 1000
+  # (the image's default paperless user), fsGroup makes the PVCs writable and
+  # /tmp + /run are emptyDirs so the root filesystem stays read-only.
+  # Documented deviation: s6-overlay requires /run to be OWNED by the runtime
+  # uid (group-write is not enough), so a minimal root init container chowns
+  # the /run emptyDir to runAsUser/runAsGroup before the hardened main
+  # container starts.
+  securityContext:
+    pod:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      fsGroupChangePolicy: Always
+    container:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      capabilities:
+        drop:
+          - ALL
 smbConnection:
   enabled: false
   server: null
   cronJob: "0 0,12 * * *"
   cron:
+    # The consume mover only shuffles files between the SMB share (mounted
+    # with 0777 modes) and the consume PVC, so it runs as the same non-root
+    # uid/gid as paperless itself with a fully hardened context.
+    securityContext:
+      pod:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: Always
+      container:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        capabilities:
+          drop:
+            - ALL
     resources:
       requests:
         cpu: 10m

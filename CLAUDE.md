@@ -51,6 +51,6 @@ Copy `template-chart/` and replace every `xxx` placeholder — in file names (`t
 - Secrets are 1Password `OnePasswordItem` CRs: values expose `secrets.<name>SecretRef` holding an `op://` item path; the operator materializes the Kubernetes Secret.
 - Ingress assumes `ingressClassName: nginx` and cert-manager: `ingress.clusterIssuer` and `ingress.domain` are `required` values, TLS secret named `tls-<release>-<chart>-ingress`.
 - `env` entries in values support Helm templating — the deployment renders them through `tpl`, and supports `value`, `secretKeyRef`, and `configMapKeyRef` forms.
-- Hardened defaults: `automountServiceAccountToken: false`, non-root user, `readOnlyRootFilesystem: true`, all capabilities dropped; probes and resource requests/limits always set.
+- Hardened defaults: `automountServiceAccountToken: false`, non-root user, `readOnlyRootFilesystem: true`, all capabilities dropped; probes and resource requests/limits always set. Security contexts are values-configurable (`securityContext.pod` / `securityContext.container`); image-forced deviations are documented with a comment in the chart's `values.yaml`.
 - Stateful apps use a StatefulSet in a `<app>.sfs.yaml` template instead of a deployment.
 - No chart has dependencies; `charts/` directories are empty.

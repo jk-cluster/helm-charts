@@ -7,15 +7,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 The main Claude session acts as the **task manager** and does not implement issues itself:
 
 1. **Plan first, get approval**: The manager presents a plan for the issue and waits for the user's explicit approval. No implementation before approval.
-2. **Delegate implementation**: After approval, the manager launches a dedicated **development agent**. The agent implements the issue completely on its own branch and opens a PR.
-3. **PR comment handling by the agent**: After opening the PR, the development agent watches it for review comments. New comments are addressed automatically (code changes, reply on the thread), and addressed threads are marked as **resolved**.
-4. **Agent lifetime**: The development agent terminates itself once its PR has been merged (or closed).
-5. Only after the PR has been **merged by the user** may work on the next issue begin. The user merges; never merge yourself.
-6. **After the merge, verify the linked issue was closed** (auto-close via "Fixes #n"); close it manually if not.
+2. **Document the final plan on the issue**: Once approved, the plan is posted as a comment on the GitHub issue before implementation starts (skip if the issue body already contains the full plan; later decisions go there as comments too).
+3. **Delegate implementation**: After approval, the manager launches a dedicated **development agent**. The agent implements the issue completely on its own branch and opens a PR.
+4. **PR comment handling by the agent**: After opening the PR, the development agent watches it for review comments. New comments are addressed automatically (code changes, reply on the thread), and addressed threads are marked as **resolved**.
+5. **Agent lifetime**: The development agent terminates itself once its PR has been merged (or closed).
+6. Only after the PR has been **merged by the user** may work on the next issue begin. The user merges; never merge yourself.
+7. **After the merge, verify the linked issue was closed** (auto-close via "Fixes #n"); close it manually if not.
 
 Additional rules for all commits, PRs, issues, and comments:
 
 - Do **not** add a `Co-Authored-By` trailer and do **not** append "Generated with Claude Code" footers.
+
+## Keep the docs current
+
+- Changes to this issue workflow always go into this CLAUDE.md file.
+- General repository information (charts, CI pipelines, conventions, tooling) always lives in README.md. Any PR that changes repo-wide behavior must update README.md in the same PR.
+- Runtime verification of chart changes is done in a local, throwaway k3d cluster (k3d is installed on the maintainer's machine): stub CRD for `OnePasswordItem`, dummy secrets, throwaway infrastructure (postgres/redis) where needed.
 
 ## What this repo is
 

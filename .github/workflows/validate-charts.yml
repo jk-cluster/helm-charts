@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       charts: ${{ steps.detect.outputs.charts }}
-      any: ${{ steps.detect.outputs.any }}
+      any-chart-changed: ${{ steps.detect.outputs.any-chart-changed }}
     steps:
       - name: "Checkout Repository"
         uses: actions/checkout@v4
@@ -26,17 +26,17 @@ jobs:
           done
           echo "charts=$CHARTS" >> "$GITHUB_OUTPUT"
           if [ "$CHARTS" = "[]" ]; then
-            echo "any=false" >> "$GITHUB_OUTPUT"
+            echo "any-chart-changed=false" >> "$GITHUB_OUTPUT"
             echo "No chart directories changed - nothing to build."
           else
-            echo "any=true" >> "$GITHUB_OUTPUT"
+            echo "any-chart-changed=true" >> "$GITHUB_OUTPUT"
             echo "Changed charts: $CHARTS"
           fi
 
   build-chart:
     name: "Build ${{ matrix.chart }}"
     needs: detect-changed-charts
-    if: needs.detect-changed-charts.outputs.any == 'true'
+    if: needs.detect-changed-charts.outputs.any-chart-changed == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

@@ -26,10 +26,10 @@ Additional rules for all commits, PRs, issues, and comments:
 
 ## What this repo is
 
-A collection of self-made Helm charts, one directory per chart, published to a private OCI registry via GitHub Actions. There is no build system or test suite — validation is done with Helm itself:
+A collection of self-made Helm charts, one directory per chart, published to a private OCI registry via GitHub Actions. Validation happens on three levels: locally with Helm, in the PR pipeline (`validate-charts.yml`: strict lint, package, version-bump check), and in the PR install-test stage (k3d, fixtures under `ci/` — see README):
 
 ```bash
-helm lint <chart-name>
+helm lint --strict <chart-name>
 helm template <chart-name> --set ingress.domain=example.com --set ingress.clusterIssuer=letsencrypt   # render locally; required values vary per chart
 ```
 
@@ -37,12 +37,21 @@ helm template <chart-name> --set ingress.domain=example.com --set ingress.cluste
 
 Copy `template-chart/` and replace every `xxx` placeholder — in file names (`templates/xxx.deployment.yaml` → `templates/<app>.deployment.yaml`), in `Chart.yaml`, and in the `values.yaml` keys and their `.Values.xxx.*` references inside templates. Then wire up CI:
 
-1. Add `.github/workflows/publish-<chart-name>.yml` (copy an existing one, e.g. `publish-outline.yml`) — it triggers on pushes to `<chart-name>/**` and calls the reusable `publish-helm-chart.yml`.
+1. Add `.github/workflows/publish-<chart-name>.yml` (copy an existing one, e.g. `publish-outline.yml`) — it triggers on pushes to `main` touching `<chart-name>/**` and calls the reusable `publish-helm-chart.yml`.
 2. Add the chart name to the `chart-name` choice list in `.github/workflows/change-app-version.yml`.
+3. Add install-test fixtures under `ci/<chart-name>/` (`test-values.yaml`, `fixtures.yaml`) or an entry with justification in `ci/excluded-charts.txt` — the PR install-test fails if both are missing.
 
 ## Versioning scheme
 
-`Chart.yaml` versions follow `version: <chart-semver>+up<appVersion>` (e.g. `1.4.0+up1.9.2`), with `appVersion` matching the suffix (dashes in the app version are normalized to dots in the suffix). When changing a chart's templates or values, bump the semver part; when only updating the app version, the `change-app-version.yml` workflow does it (it commits directly to main). Any push touching a chart directory publishes that chart, so the version must be bumped in the same change.
+`Chart.yaml` versions follow `version: <chart-semver>+up<appVersion>` (e.g. `1.4.0+up1.9.2`), with `appVersion` matching the suffix (dashes in the app version are normalized to dots in the suffix). Any push to `main` touching a chart directory publishes that chart, so the version must be bumped in the same change.
+
+Semver conventions for the chart part:
+
+- **Patch**: bug fixes without behavior or values-schema change.
+- **Minor**: additive, backward-compatible changes (new optional values with unchanged defaults).
+- **Major**: runtime behavior changes or breaking values changes (e.g. probes, security hardening, computed limits).
+
+App-version updates go through PRs (so the validate and install-test pipelines run), not through the `change-app-version.yml` dispatch workflow (which commits directly to main and bypasses both). For app **major** jumps, update stepwise: first to the last release of the old major line (own PR, merge, publish), then to the newest major.
 
 ## Chart conventions (from template-chart)
 

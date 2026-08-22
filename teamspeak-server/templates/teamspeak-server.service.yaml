@@ -1,19 +1,21 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Release.Name }}-service
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-service
+  labels:
+    app: {{ .Release.Name }}-{{ .Chart.Name }}-service
 spec:
   selector:
-    app: {{ .Release.Name }}-server-sfs
+    app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
   ports:
-    - port: 30987
+    - port: {{ .Values.server.voicePort }}
       name: voice-port
       targetPort: voice-port
       protocol: UDP
-      nodePort: 30987
-    - port: 30033
+      nodePort: {{ .Values.server.voicePort }}
+    - port: {{ .Values.server.fileTransferPort }}
       name: file-transfer
       targetPort: file-transfer
       protocol: TCP
-      nodePort: 30033
+      nodePort: {{ .Values.server.fileTransferPort }}
   type: NodePort

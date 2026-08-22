@@ -8,6 +8,15 @@ scaleDown: false
 # The chart-global scaleDown flag takes precedence.
 replicas: 1
 
+server:
+  # UDP voice port and TCP file transfer port. Each value is used as the
+  # container port, the service port and the NodePort, and is passed to the
+  # server via TSSERVER_DEFAULT_PORT / TSSERVER_FILE_TRANSFER_PORT so the
+  # server always listens on the exposed port (file transfer requires the
+  # in-container port to match the externally reachable port).
+  voicePort: 30987
+  fileTransferPort: 30033
+
 resources:
   # Limits are optional: memory and ephemeral-storage limits default to
   # limitFactor x the request, an explicitly set limit always wins, and a
@@ -17,6 +26,65 @@ resources:
     cpu: 0.2
     memory: 100Mi
     ephemeral-storage: 100Mi
+
+# Extra environment variables for the server container, appended to the ones
+# the chart always sets (TSSERVER_LICENSE_ACCEPTED, TSSERVER_DEFAULT_PORT,
+# TSSERVER_FILE_TRANSFER_PORT). Values are rendered through tpl and support
+# the value, secretKeyRef and configMapKeyRef forms:
+#   - name: SOME_ENV
+#     value: "{{ .Release.Name }}"
+#   - name: FROM_SECRET
+#     valueFrom:
+#       secretKeyRef:
+#         name: "some-secret"
+#         key: "someKey"
+#   - name: FROM_CONFIGMAP
+#     valueFrom:
+#       configMapKeyRef:
+#         name: "some-configmap"
+#         key: "someKey"
+env: []
+
+livenessProbe:
+  # The voice service is UDP and cannot be probed; probe the TCP
+  # file-transfer port instead.
+  tcpSocket:
+    port: file-transfer
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+readinessProbe:
+  tcpSocket:
+    port: file-transfer
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+# The startup probe gates liveness/readiness, so those need no
+# initialDelaySeconds. Startup budget = periodSeconds * failureThreshold = 150s.
+startupProbe:
+  tcpSocket:
+    port: file-transfer
+  periodSeconds: 5
+  timeoutSeconds: 5
+  failureThreshold: 30
+
+securityContext:
+  pod:
+    runAsNonRoot: true
+    # The teamspeak6-server image runs as the non-root user "teamspeak"
+    # (uid/gid 9987); fsGroup 9987 keeps the data volume writable.
+    runAsUser: 9987
+    runAsGroup: 9987
+    fsGroup: 9987
+    fsGroupChangePolicy: Always
+  container:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    capabilities:
+      drop:
+        - ALL
+      add: []
 
 storage:
   size: 25Gi

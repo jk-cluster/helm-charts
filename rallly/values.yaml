@@ -23,6 +23,25 @@ rallly:
     pictureClaimPath: 'picture'
     emailClaimPath: 'email'
     nameClaimPath: 'name'
+  securityContext:
+    pod:
+      runAsNonRoot: true
+      runAsUser: 20000
+      runAsGroup: 1000
+      fsGroup: 1000
+      fsGroupChangePolicy: Always
+    container:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      capabilities:
+        drop:
+          - ALL
+        add: []
+  # Extra environment variables, appended to the ones the chart always sets.
+  # Values are rendered through tpl; value, secretKeyRef and configMapKeyRef
+  # forms are supported.
+  env: []
   resources:
     # Limits are optional: memory and ephemeral-storage limits default to
     # limitFactor x the request, an explicitly set limit always wins, and a
@@ -59,3 +78,7 @@ rallly:
 ingress:
   clusterIssuer: null
   domain: null
+  className: nginx
+  # Extra annotations for the Ingress; merged with the cert-manager
+  # cluster-issuer annotation the chart always sets.
+  annotations: {}

@@ -18,8 +18,7 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
-        fsGroup: 1001
-        fsGroupChangePolicy: Always
+        {{- toYaml .Values.outline.securityContext.pod | nindent 8 }}
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
           image: "outlinewiki/outline:{{ .Chart.AppVersion }}"
@@ -76,45 +75,52 @@ spec:
               value: "{{ .Values.outline.maxUploadSize }}"
             - name: FORCE_HTTPS
               value: "{{ .Values.outline.forceHttps }}"
+            {{- range $value := .Values.outline.env }}
+            {{- if $value.value }}
+            - name: {{ $value.name | quote }}
+              value: {{ tpl $value.value $ | quote }}
+            {{- else if $value.valueFrom }}
+            {{- if $value.valueFrom.secretKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ tpl $value.valueFrom.secretKeyRef.name $ | quote }}
+                  key: {{ tpl $value.valueFrom.secretKeyRef.key $ | quote }}
+            {{- else if $value.valueFrom.configMapKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ tpl $value.valueFrom.configMapKeyRef.name $ | quote }}
+                  key: {{ tpl $value.valueFrom.configMapKeyRef.key $ | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
           ports:
             - containerPort: 3000
               protocol: TCP
               name: http
-          # Outline exposes a dedicated health endpoint at /_health (also used
-          # by the upstream Docker HEALTHCHECK). It checks Postgres and Redis;
-          # there is no dependency-free HTTP endpoint ("/" returns 500 too when
-          # the database is down), so all three probes use /_health.
           livenessProbe:
-            httpGet:
-              path: /_health
-              port: 3000
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
+            {{- toYaml .Values.outline.livenessProbe | nindent 12 }}
           readinessProbe:
-            httpGet:
-              path: /_health
-              port: 3000
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
-          # The startup probe gates liveness/readiness. Outline runs database
-          # migrations on startup: budget 10s * 30 = 300s.
+            {{- toYaml .Values.outline.readinessProbe | nindent 12 }}
           startupProbe:
-            httpGet:
-              path: /_health
-              port: 3000
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 30
+            {{- toYaml .Values.outline.startupProbe | nindent 12 }}
           resources:
             {{- include "outline.resources" .Values.outline.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.outline.securityContext.container | nindent 12 }}
           volumeMounts:
             - mountPath: "/outline-data/data"
               name: outline-data
               subPath: data
+            # Writable emptyDir so the root filesystem can stay read-only:
+            # Outline writes import/export scratch files to /tmp.
+            - mountPath: /tmp
+              name: tmp
       restartPolicy: Always
       volumes:
         - name: outline-data
           persistentVolumeClaim:
             claimName: {{ .Release.Name }}-{{ .Chart.Name }}-pvc
+        - name: tmp
+          emptyDir: {}

@@ -19,6 +19,33 @@ spec:
       automountServiceAccountToken: false
       securityContext:
         {{- toYaml .Values.voucherVault.securityContext.pod | nindent 8 }}
+      initContainers:
+        # STATIC_ROOT (/opt/app/myapp/static) doubles as the app's own static
+        # source directory, so it cannot simply be shadowed by an empty
+        # volume: this init container seeds the static-files emptyDir with
+        # the assets shipped in the image (cp -a preserves timestamps, so the
+        # entrypoint's collectstatic only adds what is missing, e.g. the
+        # Django admin static files). See securityContext in values.yaml.
+        - name: init-static
+          image: "l4rm4nd/vouchervault:{{ .Chart.AppVersion }}"
+          imagePullPolicy: IfNotPresent
+          # Copies the children (not ".") so cp never tries to set metadata
+          # on the mountpoint itself, which the non-root uid may not own.
+          command: ["sh", "-c", "cp -a /opt/app/myapp/static/* /static-seed/"]
+          securityContext:
+            {{- toYaml .Values.voucherVault.securityContext.container | nindent 12 }}
+          volumeMounts:
+            - name: static-files
+              mountPath: /static-seed
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+              ephemeral-storage: 1Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+              ephemeral-storage: 10Mi
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
           image: "l4rm4nd/vouchervault:{{ .Chart.AppVersion }}"
@@ -63,7 +90,15 @@ spec:
           securityContext:
             {{- toYaml .Values.voucherVault.securityContext.container | nindent 12 }}
           volumeMounts:
-            {{- if .Values.voucherVault.storage.volumeMounts }}
+            # Writable emptyDirs over the paths the image writes at runtime,
+            # so the root filesystem can stay read-only (see securityContext
+            # in values.yaml).
+            - name: tmp
+              mountPath: /tmp
+            - name: logs
+              mountPath: /opt/app/logs
+            - name: static-files
+              mountPath: /opt/app/myapp/static
             {{- range $value := .Values.voucherVault.storage.volumeMounts }}
             - name: {{ tpl $value.name $ | quote }}
               mountPath: {{ tpl $value.mountPath $ | quote }}
@@ -77,12 +112,16 @@ spec:
               readOnly: {{ tpl $value.readOnly $ | quote }}
               {{- end }}
             {{- end }}
-            {{- else }}
-            []
-            {{- end }}
       restartPolicy: Always
       volumes:
-        {{- if .Values.voucherVault.storage.volumes }}
+        # Writable emptyDirs backing the read-only root filesystem (see
+        # securityContext in values.yaml).
+        - name: tmp
+          emptyDir: {}
+        - name: logs
+          emptyDir: {}
+        - name: static-files
+          emptyDir: {}
         {{- range $value := .Values.voucherVault.storage.volumes }}
         - name: {{ tpl $value.name $ | quote }}
           {{- if $value.persistentVolumeClaim }}
@@ -127,7 +166,4 @@ spec:
             sizeLimit: {{ tpl $value.emptyDir.sizeLimit $ | quote }}
             {{- end }}
           {{- end }}
-        {{- end }}
-        {{- else }}
-        []
         {{- end }}

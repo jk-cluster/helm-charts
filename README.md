@@ -9,6 +9,7 @@ Collection of some self-made helm-charts. Each top-level directory is a standalo
 | `apache-tika` | Apache Tika | Deployment + Service only (no ingress) |
 | `calibre-web-automated` | Calibre-Web Automated | StatefulSet, extra consume-PVC |
 | `cyberchef` | CyberChef | Stateless Deployment |
+| `freesailarr` | gluetun VPN media stack (qbittorrent, prowlarr, flaresolverr, radarr, recyclarr, sonarr, seerr, bazarr) | Single-pod StatefulSet: all apps share gluetun's network namespace; config volumes via volumeClaimTemplates, media PVCs as existingClaims |
 | `gotenberg` | Gotenberg | Deployment + Service only (no ingress) |
 | `homeassistant` | Home Assistant | StatefulSet, has `NOTES.txt` and Helm tests |
 | `matrix-synapse` | Matrix Synapse | StatefulSet plus an nginx delegation Deployment/Service |

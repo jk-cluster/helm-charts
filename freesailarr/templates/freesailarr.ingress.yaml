@@ -1,0 +1,38 @@
+{{- $apps := list }}
+{{- range $app := include "freesailarr.uiApps" . | fromJsonArray }}
+{{- if (index $.Values $app.name).ingress.enabled }}
+{{- $apps = append $apps $app }}
+{{- end }}
+{{- end }}
+{{- if and .Values.ingress.enabled (gt (len $apps) 0) }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-ingress
+  annotations:
+    cert-manager.io/cluster-issuer: {{ required "A Cluster-Issuer must be provided" .Values.ingress.clusterIssuer }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    {{- range $apps }}
+    - host: {{ .name }}.{{ required "A Domain/Host must be provided" $.Values.ingress.domain }}
+      http:
+        paths:
+          - backend:
+              service:
+                name: {{ $.Release.Name }}-{{ $.Chart.Name }}-service
+                port:
+                  name: {{ .name }}
+            path: /
+            pathType: Prefix
+    {{- end }}
+  tls:
+    - hosts:
+        {{- range $apps }}
+        - {{ .name }}.{{ $.Values.ingress.domain }}
+        {{- end }}
+      secretName: tls-{{ .Release.Name }}-{{ .Chart.Name }}-ingress
+{{- end }}

@@ -35,6 +35,7 @@ on:
           - minecraft-router
           - minecraft-server
           - rss-bridge
+          - freesailarr
   workflow_call:
     inputs:
       app-version:

@@ -1,0 +1,571 @@
+# freesailarr runs gluetun plus the whole media automation stack in a single
+# StatefulSet pod: every app container shares gluetun's network namespace, the
+# containers talk to each other over localhost and all traffic leaves through
+# the Wireguard tunnel.
+#
+# Image pinning (documented deviation from the Chart.AppVersion standard):
+# appVersion pins the gluetun image only. All other app images are pinned via
+# values (<app>.image.repository / <app>.image.tag) because the stack combines
+# nine independently versioned upstream projects; the pinned tags are reviewed
+# alongside every app-version update round, like side images in other charts.
+
+# Scale the whole chart down without uninstalling it: scaleDown: true renders
+# every Deployment/StatefulSet with replicas: 0 (and suspends CronJobs) and
+# takes precedence over any per-workload replicas value. PVCs, Secrets and
+# Services stay in place; scaleDown: false brings the workloads back up.
+scaleDown: false
+
+# Replica count for the whole stack (one pod contains all containers); 0 is
+# allowed and scales it down. The chart-global scaleDown flag takes precedence.
+# More than 1 replica is not meaningful: every replica would run its own
+# isolated stack on its own config volumes.
+replicas: 1
+
+secrets:
+  # op:// item path for the gluetun VPN credentials. The 1Password item must
+  # contain the fields "wireguard-private-key" (the Wireguard private key) and
+  # "wireguard-addresses" (the Wireguard interface address, e.g. 10.x.y.z/32).
+  gluetunSecretRef: null
+
+# User/group the linuxserver.io containers drop to after init (their PUID/PGID
+# mechanism) and the runAsUser/runAsGroup for the seerr and recyclarr
+# containers. Media and config volumes must be writable for this user.
+puid: 1000
+pgid: 1000
+# Timezone for all containers.
+timezone: Europe/Zurich
+
+securityContext:
+  # Pod-level security context. No pod-level runAsNonRoot/runAsUser: the pod
+  # mixes root containers (gluetun, linuxserver.io images) with non-root ones
+  # (seerr, recyclarr, flaresolverr); users are set per container instead.
+  # fsGroup (keep in sync with pgid) makes freshly provisioned config volumes
+  # group-writable for the non-root containers; fsGroupChangePolicy
+  # OnRootMismatch avoids recursively re-chowning the (large, shared) media
+  # claims on every pod start.
+  pod:
+    fsGroup: 1000
+    fsGroupChangePolicy: OnRootMismatch
+
+storage:
+  # StorageClass for all config volumeClaimTemplates (null = cluster default).
+  storageClass: null
+
+# Media libraries as pre-existing PVCs (shared with the separately deployed
+# Jellyfin) - the chart mounts but never creates them. Each claim is required
+# as soon as an app that mounts it is enabled:
+#   downloads: qbittorrent, radarr, sonarr
+#   movies:    radarr, bazarr
+#   tv:        sonarr, bazarr
+media:
+  downloads:
+    existingClaim: null
+  movies:
+    existingClaim: null
+  tv:
+    existingClaim: null
+
+ingress:
+  enabled: true
+  clusterIssuer: null
+  domain: null
+  className: nginx
+  # Extra annotations for the Ingress; merged with the cert-manager
+  # cluster-issuer annotation the chart always sets.
+  annotations: {}
+
+gluetun:
+  # Image tag comes from Chart.AppVersion (gluetun is the chart's main app).
+  vpn:
+    serviceProvider: mullvad
+    type: wireguard
+    serverCities: Zurich
+    serverCountries: Switzerland
+    dnsUpstreamResolvers: quad9
+    # Comma-separated CIDRs the gluetun firewall allows outbound traffic to
+    # outside the VPN tunnel. Set this to the cluster pod and service CIDRs
+    # (e.g. "10.42.0.0/16,10.43.0.0/16" on k3s) - without it the firewall
+    # blocks cluster-internal egress such as DNS lookups against cluster DNS
+    # and seerr talking to the in-cluster Jellyfin.
+    firewallOutboundSubnets: null
+  storage:
+    # Size of the gluetun config volume (server list cache under /gluetun).
+    size: 1Gi
+  # Extra environment variables, appended to the ones the chart always sets.
+  # Values are rendered through tpl; value, secretKeyRef and configMapKeyRef
+  # forms are supported. (Same for every <app>.env block below.)
+  env: []
+  # gluetun's built-in HTTP health server; the chart binds it to :9999 (env
+  # HEALTH_SERVER_ADDRESS) so the kubelet probes, which connect to the pod IP,
+  # can reach it. It returns 200 only while the VPN tunnel is up and working.
+  livenessProbe:
+    httpGet:
+      path: /
+      port: 9999
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /
+      port: 9999
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # The startup probe gates liveness/readiness. Budget for image start plus
+  # Wireguard handshake: 5s * 30 = 150s.
+  startupProbe:
+    httpGet:
+      path: /
+      port: 9999
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30
+  resources:
+    # Limits are optional: memory and ephemeral-storage limits default to
+    # limitFactor x the request, an explicitly set limit always wins, and a
+    # CPU limit is only set when configured explicitly under "limits".
+    # (Same for every <app>.resources block below.)
+    limitFactor: 3
+    requests:
+      cpu: 0.1
+      memory: 128Mi
+      ephemeralStorage: 50Mi
+  # Deviations from the hardening baseline, forced by gluetun's role as VPN
+  # gateway:
+  # - runs as root (no runAsNonRoot): required to create the tun device and
+  #   program the firewall.
+  # - NET_ADMIN capability: creates the Wireguard tunnel and the iptables
+  #   rules (firewall, kill switch).
+  # - readOnlyRootFilesystem: false: gluetun rewrites /etc/resolv.conf and
+  #   other files on its root filesystem at runtime.
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - NET_ADMIN
+
+qbittorrent:
+  enabled: true
+  image:
+    repository: linuxserver/qbittorrent
+    tag: 5.2.1
+  ingress:
+    enabled: true
+  storage:
+    size: 1Gi
+  env: []
+  livenessProbe:
+    httpGet:
+      path: /
+      port: 8080
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /
+      port: 8080
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # The startup probe gates liveness/readiness. Startup budget = 5s * 30 = 150s.
+  startupProbe:
+    httpGet:
+      path: /
+      port: 8080
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30
+  resources:
+    limitFactor: 3
+    requests:
+      cpu: 0.2
+      memory: 512Mi
+      ephemeralStorage: 100Mi
+  # Deviations from the hardening baseline, forced by the linuxserver.io
+  # images (s6-overlay init that starts as root and drops to PUID/PGID):
+  # - no runAsNonRoot: s6-overlay must start as root to create the abc user
+  #   from PUID/PGID and chown /config.
+  # - capabilities: ALL dropped except what the s6-overlay init needs:
+  #   CHOWN/FOWNER/DAC_OVERRIDE (taking ownership of /config and /run) and
+  #   SETUID/SETGID (dropping from root to the PUID/PGID user).
+  # readOnlyRootFilesystem stays true: the writable paths (/run, /tmp) are
+  # mounted as emptyDirs. (Same block for all linuxserver.io containers:
+  # qbittorrent, prowlarr, radarr, sonarr, bazarr.)
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - CHOWN
+        - DAC_OVERRIDE
+        - FOWNER
+        - SETGID
+        - SETUID
+
+prowlarr:
+  enabled: true
+  image:
+    repository: linuxserver/prowlarr
+    tag: 2.3.5
+  ingress:
+    enabled: true
+  storage:
+    size: 1Gi
+  env: []
+  # The *arr apps expose /ping as an unauthenticated health endpoint.
+  livenessProbe:
+    httpGet:
+      path: /ping
+      port: 9696
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /ping
+      port: 9696
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # The startup probe gates liveness/readiness. Startup budget = 5s * 30 = 150s.
+  startupProbe:
+    httpGet:
+      path: /ping
+      port: 9696
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30
+  resources:
+    limitFactor: 3
+    requests:
+      cpu: 0.1
+      memory: 256Mi
+      ephemeralStorage: 100Mi
+  # linuxserver.io image - see the qbittorrent securityContext comment.
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - CHOWN
+        - DAC_OVERRIDE
+        - FOWNER
+        - SETGID
+        - SETUID
+
+flaresolverr:
+  enabled: true
+  image:
+    repository: ghcr.io/flaresolverr/flaresolverr
+    tag: v3.5.0
+  # No ingress and no config volume: flaresolverr is stateless and only
+  # consumed by prowlarr over localhost.
+  env: []
+  # /health is flaresolverr's dedicated lightweight health endpoint.
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 8191
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 8191
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # The startup probe gates liveness/readiness. Startup budget = 5s * 30 = 150s.
+  startupProbe:
+    httpGet:
+      path: /health
+      port: 8191
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30
+  resources:
+    limitFactor: 3
+    requests:
+      cpu: 0.2
+      memory: 512Mi
+      ephemeralStorage: 200Mi
+  # The image runs as its own non-root user; chromium's writable paths (/tmp,
+  # /dev/shm) are emptyDirs, so the full hardening baseline holds.
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    capabilities:
+      drop:
+        - ALL
+
+radarr:
+  enabled: true
+  image:
+    repository: linuxserver/radarr
+    tag: 6.1.1
+  ingress:
+    enabled: true
+  storage:
+    size: 1Gi
+  env: []
+  livenessProbe:
+    httpGet:
+      path: /ping
+      port: 7878
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /ping
+      port: 7878
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # The startup probe gates liveness/readiness. Startup budget = 5s * 30 = 150s.
+  startupProbe:
+    httpGet:
+      path: /ping
+      port: 7878
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30
+  resources:
+    limitFactor: 3
+    requests:
+      cpu: 0.1
+      memory: 256Mi
+      ephemeralStorage: 100Mi
+  # linuxserver.io image - see the qbittorrent securityContext comment.
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - CHOWN
+        - DAC_OVERRIDE
+        - FOWNER
+        - SETGID
+        - SETUID
+
+recyclarr:
+  enabled: true
+  image:
+    repository: ghcr.io/recyclarr/recyclarr
+    tag: 8.6.0
+  # No ingress: recyclarr has no web UI, it syncs TRaSH guides to radarr and
+  # sonarr on a schedule (daemon mode).
+  storage:
+    size: 1Gi
+  env: []
+  # recyclarr serves no HTTP port in daemon mode, so all probes exec the CLI.
+  livenessProbe:
+    exec:
+      command:
+        - recyclarr
+        - --version
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 3
+  readinessProbe:
+    exec:
+      command:
+        - recyclarr
+        - --version
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 3
+  # The startup probe gates liveness/readiness. Startup budget = 5s * 30 = 150s.
+  startupProbe:
+    exec:
+      command:
+        - recyclarr
+        - --version
+    periodSeconds: 5
+    timeoutSeconds: 10
+    failureThreshold: 30
+  resources:
+    limitFactor: 3
+    requests:
+      cpu: 0.05
+      memory: 128Mi
+      ephemeralStorage: 50Mi
+  # The image supports running as an arbitrary non-root user; runAsUser and
+  # runAsGroup are set from the global puid/pgid values in the template - do
+  # not set them here.
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    capabilities:
+      drop:
+        - ALL
+
+sonarr:
+  enabled: true
+  image:
+    repository: linuxserver/sonarr
+    tag: 4.0.17
+  ingress:
+    enabled: true
+  storage:
+    size: 1Gi
+  env: []
+  livenessProbe:
+    httpGet:
+      path: /ping
+      port: 8989
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /ping
+      port: 8989
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # The startup probe gates liveness/readiness. Startup budget = 5s * 30 = 150s.
+  startupProbe:
+    httpGet:
+      path: /ping
+      port: 8989
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30
+  resources:
+    limitFactor: 3
+    requests:
+      cpu: 0.1
+      memory: 256Mi
+      ephemeralStorage: 100Mi
+  # linuxserver.io image - see the qbittorrent securityContext comment.
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - CHOWN
+        - DAC_OVERRIDE
+        - FOWNER
+        - SETGID
+        - SETUID
+
+seerr:
+  enabled: true
+  image:
+    repository: ghcr.io/seerr-team/seerr
+    tag: v3.3.0
+  ingress:
+    enabled: true
+  storage:
+    size: 1Gi
+  env: []
+  # /api/v1/settings/public answers unauthenticated once the app is up.
+  livenessProbe:
+    httpGet:
+      path: /api/v1/settings/public
+      port: 5055
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /api/v1/settings/public
+      port: 5055
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # The startup probe gates liveness/readiness. First boot runs database
+  # migrations: budget 10s * 30 = 300s.
+  startupProbe:
+    httpGet:
+      path: /api/v1/settings/public
+      port: 5055
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 30
+  resources:
+    limitFactor: 3
+    requests:
+      cpu: 0.1
+      memory: 256Mi
+      ephemeralStorage: 100Mi
+  # The image runs fine as an arbitrary non-root user; runAsUser and
+  # runAsGroup are set from the global puid/pgid values in the template - do
+  # not set them here.
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    capabilities:
+      drop:
+        - ALL
+
+bazarr:
+  enabled: true
+  image:
+    repository: linuxserver/bazarr
+    tag: 1.5.6
+  ingress:
+    enabled: true
+  storage:
+    size: 1Gi
+  env: []
+  # bazarr has no unauthenticated health endpoint; / serves the UI with 200.
+  livenessProbe:
+    httpGet:
+      path: /
+      port: 6767
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /
+      port: 6767
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # The startup probe gates liveness/readiness. Startup budget = 5s * 30 = 150s.
+  startupProbe:
+    httpGet:
+      path: /
+      port: 6767
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30
+  resources:
+    limitFactor: 3
+    requests:
+      cpu: 0.1
+      memory: 256Mi
+      ephemeralStorage: 100Mi
+  # linuxserver.io image - see the qbittorrent securityContext comment.
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - CHOWN
+        - DAC_OVERRIDE
+        - FOWNER
+        - SETGID
+        - SETUID

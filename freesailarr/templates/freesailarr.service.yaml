@@ -1,0 +1,18 @@
+{{- $apps := include "freesailarr.uiApps" . | fromJsonArray }}
+{{- if gt (len $apps) 0 }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-service
+spec:
+  selector:
+    app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+  ports:
+    {{- range $apps }}
+    - protocol: TCP
+      port: {{ int .port }}
+      targetPort: {{ .name }}
+      name: {{ .name }}
+    {{- end }}
+  type: ClusterIP
+{{- end }}

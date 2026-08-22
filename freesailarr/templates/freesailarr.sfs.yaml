@@ -1,0 +1,459 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+  labels:
+    app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+spec:
+  replicas: {{ include "freesailarr.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.replicas) }}
+  serviceName: {{ .Release.Name }}-{{ .Chart.Name }}-service
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+  template:
+    metadata:
+      name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+      labels:
+        app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.securityContext.pod | nindent 8 }}
+      containers:
+        # gluetun is the VPN gateway: all app containers share the pod's
+        # network namespace, talk to each other over localhost and reach the
+        # internet only through the Wireguard tunnel (gluetun's firewall acts
+        # as kill switch).
+        - name: gluetun
+          image: "qmcgaw/gluetun:{{ .Chart.AppVersion }}"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TZ
+              value: {{ .Values.timezone | quote }}
+            - name: VPN_SERVICE_PROVIDER
+              value: {{ .Values.gluetun.vpn.serviceProvider | quote }}
+            - name: VPN_TYPE
+              value: {{ .Values.gluetun.vpn.type | quote }}
+            - name: WIREGUARD_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-{{ .Chart.Name }}-gluetun-secret
+                  key: wireguard-private-key
+            - name: WIREGUARD_ADDRESSES
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-{{ .Chart.Name }}-gluetun-secret
+                  key: wireguard-addresses
+            {{- with .Values.gluetun.vpn.serverCities }}
+            - name: SERVER_CITIES
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.gluetun.vpn.serverCountries }}
+            - name: SERVER_COUNTRIES
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.gluetun.vpn.dnsUpstreamResolvers }}
+            - name: DNS_UPSTREAM_RESOLVERS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.gluetun.vpn.firewallOutboundSubnets }}
+            - name: FIREWALL_OUTBOUND_SUBNETS
+              value: {{ . | quote }}
+            {{- end }}
+            # Open the firewall for the UI/probe ports of the enabled apps and
+            # the health server - kubelet probes and ingress traffic arrive on
+            # the pod IP and would be dropped otherwise.
+            - name: FIREWALL_INPUT_PORTS
+              value: {{ include "freesailarr.firewallInputPorts" . | quote }}
+            # Bind the health server to all interfaces so the kubelet HTTP
+            # probes (which connect to the pod IP, not localhost) reach it.
+            - name: HEALTH_SERVER_ADDRESS
+              value: ":9999"
+            {{- include "freesailarr.env" (dict "root" $ "env" .Values.gluetun.env) | nindent 12 }}
+          ports:
+            - containerPort: 9999
+              protocol: TCP
+              name: health
+          livenessProbe:
+            {{- toYaml .Values.gluetun.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.gluetun.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.gluetun.startupProbe | nindent 12 }}
+          resources:
+            {{- include "freesailarr.resources" .Values.gluetun.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.gluetun.securityContext | nindent 12 }}
+          volumeMounts:
+            - mountPath: /gluetun
+              name: gluetun-config
+            - mountPath: /dev/net/tun
+              name: dev-net-tun
+        {{- if .Values.qbittorrent.enabled }}
+        - name: qbittorrent
+          image: "{{ .Values.qbittorrent.image.repository }}:{{ .Values.qbittorrent.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PUID
+              value: {{ .Values.puid | quote }}
+            - name: PGID
+              value: {{ .Values.pgid | quote }}
+            - name: TZ
+              value: {{ .Values.timezone | quote }}
+            - name: WEBUI_PORT
+              value: "8080"
+            {{- include "freesailarr.env" (dict "root" $ "env" .Values.qbittorrent.env) | nindent 12 }}
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+              name: qbittorrent
+          livenessProbe:
+            {{- toYaml .Values.qbittorrent.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.qbittorrent.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.qbittorrent.startupProbe | nindent 12 }}
+          resources:
+            {{- include "freesailarr.resources" .Values.qbittorrent.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.qbittorrent.securityContext | nindent 12 }}
+          volumeMounts:
+            - mountPath: /config
+              name: qbittorrent-config
+            - mountPath: /downloads
+              name: media-downloads
+            # Writable paths for s6-overlay so the root filesystem stays
+            # read-only (same pattern for all linuxserver.io containers).
+            - mountPath: /run
+              name: qbittorrent-run
+            - mountPath: /tmp
+              name: qbittorrent-tmp
+        {{- end }}
+        {{- if .Values.prowlarr.enabled }}
+        - name: prowlarr
+          image: "{{ .Values.prowlarr.image.repository }}:{{ .Values.prowlarr.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PUID
+              value: {{ .Values.puid | quote }}
+            - name: PGID
+              value: {{ .Values.pgid | quote }}
+            - name: TZ
+              value: {{ .Values.timezone | quote }}
+            {{- include "freesailarr.env" (dict "root" $ "env" .Values.prowlarr.env) | nindent 12 }}
+          ports:
+            - containerPort: 9696
+              protocol: TCP
+              name: prowlarr
+          livenessProbe:
+            {{- toYaml .Values.prowlarr.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.prowlarr.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.prowlarr.startupProbe | nindent 12 }}
+          resources:
+            {{- include "freesailarr.resources" .Values.prowlarr.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.prowlarr.securityContext | nindent 12 }}
+          volumeMounts:
+            - mountPath: /config
+              name: prowlarr-config
+            - mountPath: /run
+              name: prowlarr-run
+            - mountPath: /tmp
+              name: prowlarr-tmp
+        {{- end }}
+        {{- if .Values.flaresolverr.enabled }}
+        - name: flaresolverr
+          image: "{{ .Values.flaresolverr.image.repository }}:{{ .Values.flaresolverr.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TZ
+              value: {{ .Values.timezone | quote }}
+            {{- include "freesailarr.env" (dict "root" $ "env" .Values.flaresolverr.env) | nindent 12 }}
+          ports:
+            - containerPort: 8191
+              protocol: TCP
+              name: flaresolverr
+          livenessProbe:
+            {{- toYaml .Values.flaresolverr.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.flaresolverr.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.flaresolverr.startupProbe | nindent 12 }}
+          resources:
+            {{- include "freesailarr.resources" .Values.flaresolverr.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.flaresolverr.securityContext | nindent 12 }}
+          volumeMounts:
+            # Writable paths for headless chromium so the root filesystem
+            # stays read-only; /dev/shm is a memory-backed emptyDir because
+            # chromium needs more shared memory than the container default.
+            - mountPath: /tmp
+              name: flaresolverr-tmp
+            - mountPath: /dev/shm
+              name: flaresolverr-shm
+        {{- end }}
+        {{- if .Values.radarr.enabled }}
+        - name: radarr
+          image: "{{ .Values.radarr.image.repository }}:{{ .Values.radarr.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PUID
+              value: {{ .Values.puid | quote }}
+            - name: PGID
+              value: {{ .Values.pgid | quote }}
+            - name: TZ
+              value: {{ .Values.timezone | quote }}
+            {{- include "freesailarr.env" (dict "root" $ "env" .Values.radarr.env) | nindent 12 }}
+          ports:
+            - containerPort: 7878
+              protocol: TCP
+              name: radarr
+          livenessProbe:
+            {{- toYaml .Values.radarr.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.radarr.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.radarr.startupProbe | nindent 12 }}
+          resources:
+            {{- include "freesailarr.resources" .Values.radarr.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.radarr.securityContext | nindent 12 }}
+          volumeMounts:
+            - mountPath: /config
+              name: radarr-config
+            - mountPath: /movies
+              name: media-movies
+            - mountPath: /downloads
+              name: media-downloads
+            - mountPath: /run
+              name: radarr-run
+            - mountPath: /tmp
+              name: radarr-tmp
+        {{- end }}
+        {{- if .Values.recyclarr.enabled }}
+        - name: recyclarr
+          image: "{{ .Values.recyclarr.image.repository }}:{{ .Values.recyclarr.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TZ
+              value: {{ .Values.timezone | quote }}
+            - name: RECYCLARR_CREATE_CONFIG
+              value: "true"
+            {{- include "freesailarr.env" (dict "root" $ "env" .Values.recyclarr.env) | nindent 12 }}
+          livenessProbe:
+            {{- toYaml .Values.recyclarr.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.recyclarr.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.recyclarr.startupProbe | nindent 12 }}
+          resources:
+            {{- include "freesailarr.resources" .Values.recyclarr.resources | nindent 12 }}
+          securityContext:
+            runAsUser: {{ .Values.puid }}
+            runAsGroup: {{ .Values.pgid }}
+            {{- toYaml .Values.recyclarr.securityContext | nindent 12 }}
+          volumeMounts:
+            - mountPath: /config
+              name: recyclarr-config
+            # Writable scratch space for the .NET runtime so the root
+            # filesystem stays read-only.
+            - mountPath: /tmp
+              name: recyclarr-tmp
+        {{- end }}
+        {{- if .Values.sonarr.enabled }}
+        - name: sonarr
+          image: "{{ .Values.sonarr.image.repository }}:{{ .Values.sonarr.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PUID
+              value: {{ .Values.puid | quote }}
+            - name: PGID
+              value: {{ .Values.pgid | quote }}
+            - name: TZ
+              value: {{ .Values.timezone | quote }}
+            {{- include "freesailarr.env" (dict "root" $ "env" .Values.sonarr.env) | nindent 12 }}
+          ports:
+            - containerPort: 8989
+              protocol: TCP
+              name: sonarr
+          livenessProbe:
+            {{- toYaml .Values.sonarr.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.sonarr.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.sonarr.startupProbe | nindent 12 }}
+          resources:
+            {{- include "freesailarr.resources" .Values.sonarr.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.sonarr.securityContext | nindent 12 }}
+          volumeMounts:
+            - mountPath: /config
+              name: sonarr-config
+            - mountPath: /tv
+              name: media-tv
+            - mountPath: /downloads
+              name: media-downloads
+            - mountPath: /run
+              name: sonarr-run
+            - mountPath: /tmp
+              name: sonarr-tmp
+        {{- end }}
+        {{- if .Values.seerr.enabled }}
+        - name: seerr
+          image: "{{ .Values.seerr.image.repository }}:{{ .Values.seerr.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TZ
+              value: {{ .Values.timezone | quote }}
+            {{- include "freesailarr.env" (dict "root" $ "env" .Values.seerr.env) | nindent 12 }}
+          ports:
+            - containerPort: 5055
+              protocol: TCP
+              name: seerr
+          livenessProbe:
+            {{- toYaml .Values.seerr.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.seerr.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.seerr.startupProbe | nindent 12 }}
+          resources:
+            {{- include "freesailarr.resources" .Values.seerr.resources | nindent 12 }}
+          securityContext:
+            runAsUser: {{ .Values.puid }}
+            runAsGroup: {{ .Values.pgid }}
+            {{- toYaml .Values.seerr.securityContext | nindent 12 }}
+          volumeMounts:
+            - mountPath: /app/config
+              name: seerr-config
+            - mountPath: /tmp
+              name: seerr-tmp
+        {{- end }}
+        {{- if .Values.bazarr.enabled }}
+        - name: bazarr
+          image: "{{ .Values.bazarr.image.repository }}:{{ .Values.bazarr.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PUID
+              value: {{ .Values.puid | quote }}
+            - name: PGID
+              value: {{ .Values.pgid | quote }}
+            - name: TZ
+              value: {{ .Values.timezone | quote }}
+            {{- include "freesailarr.env" (dict "root" $ "env" .Values.bazarr.env) | nindent 12 }}
+          ports:
+            - containerPort: 6767
+              protocol: TCP
+              name: bazarr
+          livenessProbe:
+            {{- toYaml .Values.bazarr.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.bazarr.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.bazarr.startupProbe | nindent 12 }}
+          resources:
+            {{- include "freesailarr.resources" .Values.bazarr.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.bazarr.securityContext | nindent 12 }}
+          volumeMounts:
+            - mountPath: /config
+              name: bazarr-config
+            - mountPath: /movies
+              name: media-movies
+            - mountPath: /tv
+              name: media-tv
+            - mountPath: /run
+              name: bazarr-run
+            - mountPath: /tmp
+              name: bazarr-tmp
+        {{- end }}
+      restartPolicy: Always
+      volumes:
+        # The tun device gluetun needs to create the Wireguard tunnel.
+        - name: dev-net-tun
+          hostPath:
+            path: /dev/net/tun
+            type: CharDevice
+        {{- if or .Values.qbittorrent.enabled .Values.radarr.enabled .Values.sonarr.enabled }}
+        - name: media-downloads
+          persistentVolumeClaim:
+            claimName: {{ required "media.downloads.existingClaim is required when qbittorrent, radarr or sonarr is enabled" .Values.media.downloads.existingClaim }}
+        {{- end }}
+        {{- if or .Values.radarr.enabled .Values.bazarr.enabled }}
+        - name: media-movies
+          persistentVolumeClaim:
+            claimName: {{ required "media.movies.existingClaim is required when radarr or bazarr is enabled" .Values.media.movies.existingClaim }}
+        {{- end }}
+        {{- if or .Values.sonarr.enabled .Values.bazarr.enabled }}
+        - name: media-tv
+          persistentVolumeClaim:
+            claimName: {{ required "media.tv.existingClaim is required when sonarr or bazarr is enabled" .Values.media.tv.existingClaim }}
+        {{- end }}
+        {{- if .Values.qbittorrent.enabled }}
+        - name: qbittorrent-run
+          emptyDir: {}
+        - name: qbittorrent-tmp
+          emptyDir: {}
+        {{- end }}
+        {{- if .Values.prowlarr.enabled }}
+        - name: prowlarr-run
+          emptyDir: {}
+        - name: prowlarr-tmp
+          emptyDir: {}
+        {{- end }}
+        {{- if .Values.flaresolverr.enabled }}
+        - name: flaresolverr-tmp
+          emptyDir: {}
+        - name: flaresolverr-shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 512Mi
+        {{- end }}
+        {{- if .Values.radarr.enabled }}
+        - name: radarr-run
+          emptyDir: {}
+        - name: radarr-tmp
+          emptyDir: {}
+        {{- end }}
+        {{- if .Values.recyclarr.enabled }}
+        - name: recyclarr-tmp
+          emptyDir: {}
+        {{- end }}
+        {{- if .Values.sonarr.enabled }}
+        - name: sonarr-run
+          emptyDir: {}
+        - name: sonarr-tmp
+          emptyDir: {}
+        {{- end }}
+        {{- if .Values.seerr.enabled }}
+        - name: seerr-tmp
+          emptyDir: {}
+        {{- end }}
+        {{- if .Values.bazarr.enabled }}
+        - name: bazarr-run
+          emptyDir: {}
+        - name: bazarr-tmp
+          emptyDir: {}
+        {{- end }}
+  # Config volumes for gluetun and the enabled apps. NOTE: volumeClaimTemplates
+  # are immutable - toggling an app's enabled flag later requires recreating
+  # the StatefulSet once (kubectl delete statefulset <name> --cascade=orphan
+  # before upgrading; existing PVCs and their data survive).
+  volumeClaimTemplates:
+    {{- range $app := list "gluetun" "qbittorrent" "prowlarr" "radarr" "recyclarr" "sonarr" "seerr" "bazarr" }}
+    {{- $config := index $.Values $app }}
+    {{- if or (eq $app "gluetun") $config.enabled }}
+    - metadata:
+        name: {{ $app }}-config
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ $config.storage.size }}
+        {{- with $.Values.storage.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+    {{- end }}
+    {{- end }}

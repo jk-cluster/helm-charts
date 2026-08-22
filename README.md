@@ -48,7 +48,7 @@ Fixtures live at the **repo root** under `ci/` (deliberately *not* inside the ch
 - `ci/<chart>/test-values.yaml` — values for the CI install (required for every installable chart)
 - `ci/<chart>/fixtures.yaml` — dummy secrets with in-cluster connection data, throwaway infrastructure (postgres/redis/dex), static hostPath PVs/StorageClasses where the chart pins a storage class or needs RWX, and seed jobs (e.g. `synapse generate`)
 - `ci/<chart>/settings.env` — optional overrides (e.g. `INSTALL_TIMEOUT` for slow starters)
-- `ci/excluded-charts.txt` — charts that cannot run in CI, each with a justification. Currently: `satisfactory` (multi-GB image + 10GB+ Steam download), `teamspeak-server` (the TS6 v6.0.0-beta8 image crashes with "The default license has expired" until the appVersion is bumped), `template-chart` (scaffold with placeholder image)
+- `ci/excluded-charts.txt` — charts that cannot run in CI, each with a justification. Currently: `satisfactory` (multi-GB image + 10GB+ Steam download), `template-chart` (scaffold with placeholder image)
 
 Fixture images avoid Docker Hub where possible (`public.ecr.aws`/`ghcr.io`) to dodge runner rate limits. The job currently runs with `continue-on-error: true` (stabilization phase); it will be promoted to a required check once it has proven stable across several chart PRs. When adding a new chart, add its `ci/<chart>/` fixtures (or an entry in `ci/excluded-charts.txt`) — the install-test fails if both are missing. The script also runs locally against any existing cluster: `k3d cluster create t && ci/run-install-test.sh <chart> && k3d cluster delete t`.
 

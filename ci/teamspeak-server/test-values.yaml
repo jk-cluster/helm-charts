@@ -1,0 +1,6 @@
+# CI install-test values for teamspeak-server: the chart needs no secrets or
+# throwaway infrastructure (no fixtures.yaml), only a storage class that
+# exists in the k3d cluster and a small volume.
+storage:
+  size: 1Gi
+  storageClass: local-path

@@ -38,6 +38,45 @@ patchmon:
         cpu: 0.1
         memory: 256Mi
         ephemeral-storage: 10Mi
+    # Probes hit GET /health ({"status": "ok"}). The 2.x server rejects
+    # requests whose Host header is neither loopback nor a CORS_ORIGIN host
+    # with 403 — kubelet probes target the pod IP, so they must send the
+    # public hostname as Host header. Probe values are rendered through tpl,
+    # so the default Host header follows ingress.domain.
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: 3000
+        httpHeaders:
+          - name: Host
+            value: "{{ .Values.ingress.domain }}"
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: 3000
+        httpHeaders:
+          - name: Host
+            value: "{{ .Values.ingress.domain }}"
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    # The startup probe gates liveness/readiness. The server waits for the
+    # database and runs migrations on startup; upstream warns that the first
+    # 2.x boot rebuilds database indexes, which can take minutes on slow
+    # storage: budget 10s * 60 = 600s.
+    startupProbe:
+      httpGet:
+        path: /health
+        port: 3000
+        httpHeaders:
+          - name: Host
+            value: "{{ .Values.ingress.domain }}"
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 60
   guacd:
     # In-browser RDP for Windows hosts (beta) via the Apache Guacamole daemon,
     # run as a sidecar container in the server pod. Disabled by default; when
@@ -67,10 +106,34 @@ patchmon:
         cpu: 0.05
         memory: 64Mi
         ephemeral-storage: 10Mi
+    # Probe values are rendered through tpl.
+    livenessProbe:
+      tcpSocket:
+        port: 4822
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    readinessProbe:
+      tcpSocket:
+        port: 4822
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    # The startup probe gates liveness/readiness. Startup budget = 5s * 30 = 150s.
+    startupProbe:
+      tcpSocket:
+        port: 4822
+      periodSeconds: 5
+      timeoutSeconds: 5
+      failureThreshold: 30
 
 ingress:
   clusterIssuer: null
   domain: null
+  className: nginx
+  # Extra annotations for the Ingress; merged with the cert-manager
+  # cluster-issuer annotation the chart always sets.
+  annotations: {}
 
 secrets:
   redisSecretRef: null

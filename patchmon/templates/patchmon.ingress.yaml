@@ -10,19 +10,14 @@ spec:
     - host: {{ required "A Domain/Host must be provided" .Values.ingress.domain }}
       http:
         paths:
+          # The 2.x server serves the frontend and /api/* from one process,
+          # so a single path covers everything (WebSockets included).
           - backend:
               service:
-                name: {{ .Release.Name }}-{{ .Chart.Name }}-frontend-service
+                name: {{ .Release.Name }}-{{ .Chart.Name }}-service
                 port:
                   name: http
             path: /
-            pathType: Prefix
-          - backend:
-              service:
-                name: {{ .Release.Name }}-{{ .Chart.Name }}-backend-service
-                port:
-                  name: http
-            path: /api
             pathType: Prefix
   tls:
     - hosts:

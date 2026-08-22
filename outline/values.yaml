@@ -19,6 +19,55 @@ outline:
   storage:
     size: 10Gi
     storageClass: null
+  # The upstream image (outlinewiki/outline) runs as its nodejs user
+  # (uid/gid 1001). Outline only writes to the upload storage (PVC) and to
+  # /tmp (import/export scratch files), which the chart mounts as an
+  # emptyDir, so the root filesystem stays read-only.
+  securityContext:
+    pod:
+      runAsNonRoot: true
+      runAsUser: 1001
+      runAsGroup: 1001
+      fsGroup: 1001
+      fsGroupChangePolicy: Always
+    container:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      capabilities:
+        drop:
+          - ALL
+  # Outline exposes a dedicated health endpoint at /_health (also used
+  # by the upstream Docker HEALTHCHECK). It checks Postgres and Redis;
+  # there is no dependency-free HTTP endpoint ("/" returns 500 too when
+  # the database is down), so all three probes use /_health.
+  livenessProbe:
+    httpGet:
+      path: /_health
+      port: 3000
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /_health
+      port: 3000
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # The startup probe gates liveness/readiness. Outline runs database
+  # migrations on startup: budget 10s * 30 = 300s.
+  startupProbe:
+    httpGet:
+      path: /_health
+      port: 3000
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 30
+  # Extra environment variables, appended to the ones the chart always sets.
+  # Values are rendered through tpl; value, secretKeyRef and configMapKeyRef
+  # forms are supported.
+  env: []
   resources:
     # Limits are optional: memory and ephemeral-storage limits default to
     # limitFactor x the request, an explicitly set limit always wins, and a
@@ -30,6 +79,11 @@ outline:
       ephemeralStorage: 10Mi
 
 ingress:
+  enabled: true
   maxUploadFileSize: 25m
   clusterIssuer: letsencrypt
   domain: null
+  className: nginx
+  # Extra annotations for the Ingress; merged with the cert-manager
+  # cluster-issuer and proxy-body-size annotations the chart always sets.
+  annotations: {}

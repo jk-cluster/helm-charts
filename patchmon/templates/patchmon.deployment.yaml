@@ -143,44 +143,14 @@ spec:
             - name: GUACD_ADDRESS
               value: "127.0.0.1:4822"
             {{- end }}
-          # The server exposes GET /health returning {"status": "ok"}. The
-          # 2.x server rejects requests whose Host header is neither loopback
-          # nor a CORS_ORIGIN host with 403 — kubelet probes target the pod
-          # IP, so they must send the public hostname as Host header.
+          # Probe values are rendered through tpl (see values.yaml for the
+          # defaults and why the probes send a Host header).
           livenessProbe:
-            httpGet:
-              path: /health
-              port: 3000
-              httpHeaders:
-                - name: Host
-                  value: {{ .Values.ingress.domain }}
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
+            {{- tpl (toYaml .Values.patchmon.server.livenessProbe) . | nindent 12 }}
           readinessProbe:
-            httpGet:
-              path: /health
-              port: 3000
-              httpHeaders:
-                - name: Host
-                  value: {{ .Values.ingress.domain }}
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
-          # The startup probe gates liveness/readiness. The server waits for
-          # the database and runs migrations on startup; upstream warns that
-          # the first 2.x boot rebuilds database indexes, which can take
-          # minutes on slow storage: budget 10s * 60 = 600s.
+            {{- tpl (toYaml .Values.patchmon.server.readinessProbe) . | nindent 12 }}
           startupProbe:
-            httpGet:
-              path: /health
-              port: 3000
-              httpHeaders:
-                - name: Host
-                  value: {{ .Values.ingress.domain }}
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 60
+            {{- tpl (toYaml .Values.patchmon.server.startupProbe) . | nindent 12 }}
           resources:
             {{- include "patchmon.resources" .Values.patchmon.server.resources | nindent 12 }}
           volumeMounts:
@@ -199,23 +169,11 @@ spec:
               protocol: TCP
               name: guacd
           livenessProbe:
-            tcpSocket:
-              port: 4822
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
+            {{- tpl (toYaml .Values.patchmon.guacd.livenessProbe) . | nindent 12 }}
           readinessProbe:
-            tcpSocket:
-              port: 4822
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
+            {{- tpl (toYaml .Values.patchmon.guacd.readinessProbe) . | nindent 12 }}
           startupProbe:
-            tcpSocket:
-              port: 4822
-            periodSeconds: 5
-            timeoutSeconds: 5
-            failureThreshold: 30
+            {{- tpl (toYaml .Values.patchmon.guacd.startupProbe) . | nindent 12 }}
           resources:
             {{- include "patchmon.resources" .Values.patchmon.guacd.resources | nindent 12 }}
           volumeMounts:

@@ -5,7 +5,7 @@ icon: https://raw.githubusercontent.com/gchq/CyberChef/master/src/web/static/ima
 
 type: application
 
-version: 5.0.1+up11.4.0
+version: 5.1.0+up11.4.0
 appVersion: "11.4.0"
 
 maintainers:

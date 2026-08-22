@@ -84,3 +84,7 @@ ingress:
   enabled: true
   clusterIssuer: null
   domain: null
+  className: nginx
+  # Extra annotations for the Ingress; merged with the cert-manager
+  # cluster-issuer annotation the chart always sets.
+  annotations: {}

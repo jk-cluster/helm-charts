@@ -30,3 +30,82 @@ server:
       memory: "4Gi"
       cpu: "1"
       ephemeral-storage: "5Gi"
+
+# Extra environment variables for the server container, appended to the ones
+# the chart always sets (DEBUG, MAXPLAYERS, PGID, PUID, SKIPUPDATE, STEAMBETA,
+# DISABLESEASONALEVENTS, SERVERGAMEPORT, SERVERMESSAGINGPORT). Values are
+# rendered through tpl and support the value, secretKeyRef and configMapKeyRef
+# forms:
+#   - name: SOME_ENV
+#     value: "{{ .Release.Name }}"
+#   - name: FROM_SECRET
+#     valueFrom:
+#       secretKeyRef:
+#         name: "some-secret"
+#         key: "someKey"
+#   - name: FROM_CONFIGMAP
+#     valueFrom:
+#       configMapKeyRef:
+#         name: "some-configmap"
+#         key: "someKey"
+env: []
+
+# The image's healthcheck script queries the server's HTTPS API on the game
+# port (SERVERGAMEPORT), so liveness/startup keep working under port overrides.
+livenessProbe:
+  exec:
+    command:
+      - "/bin/sh"
+      - "-c"
+      - "/home/steam/healthcheck.sh"
+  failureThreshold: 4
+  successThreshold: 1
+  periodSeconds: 30
+  timeoutSeconds: 10
+readinessProbe:
+  tcpSocket:
+    port: api
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+# The startup probe gates liveness/readiness. The server downloads / updates
+# the game files via Steam on startup, which can take a long time:
+# budget 30s * 40 = 20 minutes.
+startupProbe:
+  exec:
+    command:
+      - "/bin/sh"
+      - "-c"
+      - "/home/steam/healthcheck.sh"
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 40
+
+securityContext:
+  pod:
+    runAsNonRoot: true
+    # The wolveix/satisfactory-server image supports rootless operation only
+    # as its built-in "steam" user (uid/gid 1000) - the entrypoint rejects any
+    # other non-root uid/gid. The PUID/PGID env vars only apply to the root
+    # entrypoint path and are ignored when running non-root.
+    runAsUser: 1000
+    runAsGroup: 1000
+    # fsGroup keeps the data volume writable for the steam user.
+    # OnRootMismatch (instead of Always) skips the recursive chown/chmod of
+    # the multi-GB game files on every pod start; volumes provisioned by chart
+    # versions < 4.0.0 were already chowned to 1000:1000 by the image's root
+    # entrypoint.
+    fsGroup: 1000
+    fsGroupChangePolicy: OnRootMismatch
+  container:
+    allowPrivilegeEscalation: false
+    # Works because the chart mounts emptyDirs at /tmp and the steam user's
+    # ~/.steam, ~/.config and ~/.local (steamcmd bootstraps itself into
+    # ~/.local/share/Steam on start); all other writes go to the PVC at
+    # /config.
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    capabilities:
+      drop:
+        - ALL
+      add: []

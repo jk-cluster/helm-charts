@@ -1,0 +1,117 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+  labels:
+    app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+spec:
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+  serviceName: {{ .Release.Name }}-{{ .Chart.Name }}-service
+  replicas: {{ include "satisfactory.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.server.replicas) }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.securityContext.pod | nindent 8 }}
+      containers:
+        - name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+          image: "ghcr.io/wolveix/satisfactory-server:{{ .Chart.AppVersion }}"
+          env:
+            - name: DEBUG
+              value: "{{ .Values.dev.debug }}"
+            - name: MAXPLAYERS
+              value: "{{ .Values.game.maxPlayers }}"
+            # PUID/PGID are only used by the image's root entrypoint path;
+            # with the default non-root security context they are ignored.
+            - name: PGID
+              value: "1000"
+            - name: PUID
+              value: "1000"
+            - name: SKIPUPDATE
+              value: "false"
+            - name: STEAMBETA
+              value: "{{ .Values.game.experimental }}"
+            - name: DISABLESEASONALEVENTS
+              value: "{{ .Values.game.seasonalEvents }}"
+            - name: SERVERGAMEPORT
+              value: "{{ .Values.server.gamePort }}"
+            - name: SERVERMESSAGINGPORT
+              value: "{{ .Values.server.messagingPort }}"
+            {{- range $value := .Values.env }}
+            {{- if $value.value }}
+            - name: {{ $value.name }}
+              value: {{ tpl $value.value $ }}
+            {{- else if $value.valueFrom }}
+            {{- if $value.valueFrom.secretKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ tpl $value.valueFrom.secretKeyRef.name $ }}
+                  key: {{ tpl $value.valueFrom.secretKeyRef.key $ }}
+            {{- else if $value.valueFrom.configMapKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ tpl $value.valueFrom.configMapKeyRef.name $ }}
+                  key: {{ tpl $value.valueFrom.configMapKeyRef.key $ }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+          ports:
+            - name: "api"
+              containerPort: {{ .Values.server.gamePort }}
+              protocol: TCP
+            - name: "game"
+              containerPort: {{ .Values.server.gamePort }}
+              protocol: UDP
+            - name: "messaging"
+              containerPort: {{ .Values.server.messagingPort }}
+              protocol: TCP
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.startupProbe | nindent 12 }}
+          resources:
+            {{- include "satisfactory.resources" .Values.server.resources | nindent 12 }}
+          volumeMounts:
+            - name: satisfactory-volume
+              mountPath: /config
+              subPath: config/
+            - name: satisfactory-volume
+              mountPath: /config/gamefiles
+              subPath: gameFiles/
+            # Writable paths required by readOnlyRootFilesystem: the steam
+            # user's home dot-dirs (steamcmd bootstraps itself into
+            # ~/.local/share/Steam, keeps state under ~/.steam, and the game
+            # saves symlink lives under ~/.config) and /tmp (crash dumps).
+            # Everything else is written to the PVC at /config.
+            - name: steam-home
+              mountPath: /home/steam/.steam
+              subPath: dot-steam
+            - name: steam-home
+              mountPath: /home/steam/.config
+              subPath: dot-config
+            - name: steam-home
+              mountPath: /home/steam/.local
+              subPath: dot-local
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            {{- toYaml .Values.securityContext.container | nindent 12 }}
+      volumes:
+        - name: satisfactory-volume
+          persistentVolumeClaim:
+            # Deliberate exception from the naming scheme: renaming the PVC
+            # would detach existing data (see README, naming exceptions).
+            claimName: {{ .Release.Name }}-{{ .Chart.Name }}-vc
+        - name: steam-home
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

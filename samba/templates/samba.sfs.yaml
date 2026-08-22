@@ -20,6 +20,29 @@ spec:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
           image: "ghcr.io/dockur/samba:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
+          {{- with .Values.samba.env }}
+          env:
+            {{- range $value := . }}
+            {{- if $value.value }}
+            - name: {{ $value.name }}
+              value: {{ tpl $value.value $ | quote }}
+            {{- else if $value.valueFrom }}
+            {{- if $value.valueFrom.secretKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ tpl $value.valueFrom.secretKeyRef.name $ | quote }}
+                  key: {{ tpl $value.valueFrom.secretKeyRef.key $ | quote }}
+            {{- else if $value.valueFrom.configMapKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ tpl $value.valueFrom.configMapKeyRef.name $ | quote }}
+                  key: {{ tpl $value.valueFrom.configMapKeyRef.key $ | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+          {{- end }}
           ports:
             - containerPort: 445
               protocol: TCP
@@ -47,14 +70,16 @@ spec:
             {{- toYaml .Values.samba.startupProbe | nindent 12 }}
           resources:
             {{- include "samba.resources" .Values.samba.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.samba.securityContext.container | nindent 12 }}
       restartPolicy: Always
       automountServiceAccountToken: false
       securityContext:
-        fsGroup: 1000
+        {{- toYaml .Values.samba.securityContext.pod | nindent 8 }}
       volumes:
         - name: smb-config
           configMap:
-            name: {{ .Release.Name }}-{{ .Chart.Name }}-config-cfm
+            name: {{ .Release.Name }}-{{ .Chart.Name }}-configmap
             items:
               - key: smb.conf
                 path: smb.conf

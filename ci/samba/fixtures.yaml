@@ -1,10 +1,10 @@
 # Fixtures for the samba install-test: the users secret the 1Password
 # operator would otherwise materialize (release name: ci). users.conf uses
-# the dockur/samba "user:password" format.
+# the dockur/samba "username:uid:groupname:gid:password[:homedir]" format.
 apiVersion: v1
 kind: Secret
 metadata:
   name: ci-samba-users-secret
 stringData:
   users.conf: |
-    ciuser:ci-password
+    ciuser:1000:smb:1000:ci-password

@@ -98,13 +98,17 @@ gluetun:
   # gluetun's built-in HTTP health server; the chart binds it to :9999 (env
   # HEALTH_SERVER_ADDRESS) so the kubelet probes, which connect to the pod IP,
   # can reach it. It returns 200 only while the VPN tunnel is up and working.
+  # Liveness is more tolerant (60s) than readiness (30s): during a short
+  # tunnel re-negotiation gluetun recovers on its own and a kubelet restart
+  # would only prolong the outage; the kill switch keeps all egress blocked
+  # the whole time, so nothing runs unprotected.
   livenessProbe:
     httpGet:
       path: /
       port: 9999
     periodSeconds: 10
     timeoutSeconds: 5
-    failureThreshold: 3
+    failureThreshold: 6
   readinessProbe:
     httpGet:
       path: /

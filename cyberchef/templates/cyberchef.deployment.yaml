@@ -25,14 +25,12 @@ spec:
           securityContext:
             {{- toYaml .Values.cyberchef.securityContext.container | nindent 12 }}
           volumeMounts:
-            # nginx needs writable cache/temp dirs and a writable pid file
-            # location when the root filesystem is read-only.
-            - name: nginx-cache
-              mountPath: /var/cache/nginx
-            - name: nginx-run
-              mountPath: /run
+            # nginx-unprivileged keeps its pid file and temp/cache dirs under
+            # /tmp, which needs to be writable with a read-only root filesystem.
+            - name: tmp
+              mountPath: /tmp
           ports:
-            - containerPort: 80
+            - containerPort: 8080
               protocol: TCP
               name: http
           livenessProbe:
@@ -44,8 +42,6 @@ spec:
           resources:
             {{- include "cyberchef.resources" .Values.cyberchef.resources | nindent 12 }}
       volumes:
-        - name: nginx-cache
-          emptyDir: {}
-        - name: nginx-run
+        - name: tmp
           emptyDir: {}
       restartPolicy: Always

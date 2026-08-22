@@ -17,7 +17,7 @@ spec:
             {{- toYaml .Values.smbConnection.cron.securityContext.pod | nindent 12 }}
           containers:
             - name: paperless-consume-cronjob
-              image: busybox:1.28
+              image: "{{ .Values.paperless.busybox.image.repository }}:{{ .Values.paperless.busybox.image.tag }}"
               imagePullPolicy: IfNotPresent
               securityContext:
                 {{- toYaml .Values.smbConnection.cron.securityContext.container | nindent 16 }}

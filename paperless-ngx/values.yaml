@@ -5,20 +5,31 @@
 scaleDown: false
 
 secrets:
-  redisRef: null
-  databaseRef: null
-  paperlessRef: null
+  redisSecretRef: null
+  databaseSecretRef: null
+  paperlessSecretRef: null
   smbConnectionSecretRef: null
   oidcSecretRef: null
 
 ingress:
   clusterIssuer: "letsencrypt-issuer"
   domain: null
+  className: nginx
+  # Extra annotations for the Ingress; merged with the cert-manager
+  # cluster-issuer and upload-size annotations the chart always sets.
+  annotations: {}
 
 paperless:
   # Replica count for this workload; 0 is allowed and scales it down.
   # The chart-global scaleDown flag takes precedence.
   replicas: 1
+  # Auxiliary busybox image, used by the /run-ownership init container and the
+  # SMB consume-mover CronJob. Pinned independently of appVersion (which
+  # tracks paperless-ngx); reviewed alongside every app-version update round.
+  busybox:
+    image:
+      repository: busybox
+      tag: "1.38.0"
   ocr:
     languages: "eng"
     # Paperless-ngx 3.x modes: auto (default, skips OCR when embedded text
@@ -53,6 +64,37 @@ paperless:
   scripts:
     postConsumptionScripts: []
     preConsumptionScripts: []
+  livenessProbe:
+    httpGet:
+      path: /
+      port: 8000
+    periodSeconds: 30
+    failureThreshold: 3
+    successThreshold: 1
+    timeoutSeconds: 5
+  readinessProbe:
+    httpGet:
+      path: /
+      port: 8000
+    periodSeconds: 10
+    failureThreshold: 3
+    successThreshold: 1
+    timeoutSeconds: 5
+  # The startup probe gates liveness/readiness. Paperless runs database
+  # migrations on startup, and since 3.0 the first start after an upgrade
+  # also rebuilds the search index from scratch (Whoosh -> Tantivy):
+  # budget 10s * 60 = 600s.
+  startupProbe:
+    httpGet:
+      path: /
+      port: 8000
+    periodSeconds: 10
+    failureThreshold: 60
+    timeoutSeconds: 5
+  # Extra environment variables, appended to the ones the chart always sets.
+  # Values are rendered through tpl; value, secretKeyRef and configMapKeyRef
+  # forms are supported.
+  env: []
   resources:
     # Limits are optional: memory and ephemeral-storage limits default to
     # limitFactor x the request, an explicitly set limit always wins, and a

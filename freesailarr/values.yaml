@@ -299,13 +299,17 @@ flaresolverr:
       cpu: 0.2
       memory: 512Mi
       ephemeralStorage: 200Mi
-  # The image runs as its own non-root user; chromium's writable paths (/tmp,
-  # /dev/shm) are emptyDirs, so the full hardening baseline holds. runAsUser/
-  # runAsGroup pin the image's "flaresolverr" user numerically (uid/gid 1000,
-  # the image declares it by name only, which runAsNonRoot cannot verify).
+  # Deviations from the hardening baseline, forced by the flaresolverr image:
+  # - readOnlyRootFilesystem: false: on startup flaresolverr copies and
+  #   patches the chromedriver binary to the hardcoded path /app/chromedriver
+  #   and writes chromedriver caches under /app (its home directory).
+  # - runAsUser/runAsGroup pin the image's "flaresolverr" user numerically
+  #   (uid/gid 1000; the image declares it by name only, which the kubelet's
+  #   runAsNonRoot check cannot verify).
+  # Chromium's scratch paths (/tmp, /dev/shm) are emptyDirs.
   securityContext:
     allowPrivilegeEscalation: false
-    readOnlyRootFilesystem: true
+    readOnlyRootFilesystem: false
     runAsNonRoot: true
     runAsUser: 1000
     runAsGroup: 1000

@@ -4,5 +4,5 @@ description: A Helm chart for deploying a teamspeak-server on Kubernetes
 
 type: application
 
-version: 3.0.0+upv6.0.0.beta8
+version: 3.1.0+upv6.0.0.beta8
 appVersion: "v6.0.0-beta8"

@@ -5,6 +5,9 @@ metadata:
   name: {{ .Release.Name }}-{{ .Chart.Name }}-consume-cronjob
 spec:
   schedule: {{ .Values.smbConnection.cronJob }}
+  {{- if .Values.scaleDown }}
+  suspend: true
+  {{- end }}
   jobTemplate:
     spec:
       template:

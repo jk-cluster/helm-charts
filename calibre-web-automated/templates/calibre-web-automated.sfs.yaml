@@ -6,7 +6,7 @@ metadata:
     app: {{ .Chart.Name }}-{{ .Release.Name }}
 spec:
   serviceName: {{ .Chart.Name }}-{{ .Release.Name }}-cwa-service
-  replicas: 1
+  replicas: {{ include "calibre-web-automated.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.cwa.replicas) }}
   selector:
     matchLabels:
       app: {{ .Chart.Name }}-{{ .Release.Name }}-cwa-sfs

@@ -4,7 +4,7 @@ description: A Helm chart to deploy Rallly on Kubernetes
 
 type: application
 
-version: 3.0.0+up4.8.1
+version: 3.1.0+up4.8.1
 appVersion: "4.8.1"
 
 maintainers:

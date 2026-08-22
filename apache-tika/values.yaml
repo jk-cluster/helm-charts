@@ -1,4 +1,13 @@
+# Scale the whole chart down without uninstalling it: scaleDown: true renders
+# every Deployment/StatefulSet with replicas: 0 (and suspends CronJobs) and
+# takes precedence over any per-workload replicas value. PVCs, Secrets and
+# Services stay in place; scaleDown: false brings the workloads back up.
+scaleDown: false
+
 tika:
+  # Replica count for this workload; 0 is allowed and scales it down.
+  # The chart-global scaleDown flag takes precedence.
+  replicas: 1
   # The official image runs as the dedicated user 35002:35002. /tmp is a
   # writable emptyDir because Tika writes temporary files while parsing.
   securityContext:

@@ -1,3 +1,9 @@
+# Scale the whole chart down without uninstalling it: scaleDown: true renders
+# every Deployment/StatefulSet with replicas: 0 (and suspends CronJobs) and
+# takes precedence over any per-workload replicas value. PVCs, Secrets and
+# Services stay in place; scaleDown: false brings the workloads back up.
+scaleDown: false
+
 config:
   storage: 50Gi
   storageClass: longhorn
@@ -7,6 +13,9 @@ config:
   domain: null
   maxUploadFileSize: 30m
 zipline:
+  # Replica count for this workload; 0 is allowed and scales it down.
+  # The chart-global scaleDown flag takes precedence.
+  replicas: 1
   # The upstream image ships no dedicated user, but the Node.js server runs
   # fine as an arbitrary non-root uid; fsGroup makes the uploads PVC writable.
   securityContext:

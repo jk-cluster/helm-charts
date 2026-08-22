@@ -73,6 +73,7 @@ For runtime verification (do the workloads actually start, do probes/security se
 
 - Resources are named `{{ .Release.Name }}-{{ .Chart.Name }}-<kind>`; template files are named `<app>.<kind>.yaml` (StatefulSets use `.sfs.yaml`).
 - Image tags come from `{{ .Chart.AppVersion }}`.
+- Auxiliary/sidecar images (images other than the app image, currently only the delegation nginx in matrix-synapse) are pinned via values (`<workload>.image.repository` / `<workload>.image.tag`) instead of being hardcoded in templates, and their pinned versions are reviewed alongside every app-version update round.
 - Secrets are **1Password `OnePasswordItem` CRs**: values expose `secrets.<name>SecretRef` holding an `op://` item path; the 1Password operator materializes the Kubernetes Secret in-cluster.
 - Ingress assumes ingress-nginx (`ingressClassName: nginx`) and cert-manager: `ingress.clusterIssuer` and `ingress.domain` are required values; the TLS secret is named `tls-<release>-<chart>-ingress`.
 - `env` entries in `values.yaml` are rendered through `tpl`, so values may contain Helm templating; `value`, `secretKeyRef` and `configMapKeyRef` forms are supported.

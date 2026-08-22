@@ -26,10 +26,10 @@ Collection of some self-made helm-charts. Each top-level directory is a standalo
 
 ## Versioning
 
-`Chart.yaml` uses the scheme `version: <chart-semver>+up<app-version>` (e.g. `1.4.0+up1.9.2`), where `appVersion` matches the `+up` suffix (dashes in the app version are normalized to dots in the suffix, e.g. `0.0.36-beta` → `+up0.0.36.beta`).
+`Chart.yaml` uses the scheme `version: <chart-semver>+up<app-version>` (e.g. `1.4.0+up1.9.2`) — see the [chart style guidelines](#chart-style-guidelines) for the full rules (suffix normalization, semver bump levels).
 
-- Bump the **semver part** when the chart itself (templates/values) changes.
-- The **app version** is bumped via the `Change App-Version` workflow, which rewrites `version:`/`appVersion:` and commits directly to `main`.
+- Bump the **chart version** in every change that touches a chart directory — a push to `main` publishes the chart.
+- **App-version updates go through PRs** (so the validate and install-test pipelines run). The manually dispatched `Change App-Version` workflow (rewrites `version:`/`appVersion:` and commits directly to `main`) exists but bypasses both pipelines. For app **major** jumps, update stepwise: first to the last release of the old major line (own PR, merge, publish), then to the newest major.
 
 ## CI/CD (GitHub Actions)
 
@@ -69,16 +69,75 @@ helm template <chart-name> --set ingress.domain=example.com --set ingress.cluste
 
 For runtime verification (do the workloads actually start, do probes/security settings hold?), use a throwaway local [k3d](https://k3d.io) cluster: `k3d cluster create <name>`, apply a stub CRD for `OnePasswordItem` plus dummy secrets (and throwaway postgres/redis pods where the app needs them), `helm install` the chart, watch pod readiness/events, then `k3d cluster delete <name>`.
 
-## Chart conventions
+## Chart style guidelines
 
-- Resources are named `{{ .Release.Name }}-{{ .Chart.Name }}-<kind>`; template files are named `<app>.<kind>.yaml` (StatefulSets use `.sfs.yaml`).
-  - **Deliberate exception — existing PVC names**: PVCs of already-published charts keep their historical names even where they deviate from the scheme. Renaming a PVC makes Kubernetes provision a new, empty volume, so a rename would orphan the existing data. New charts name PVCs `{{ .Release.Name }}-{{ .Chart.Name }}-pvc` per the scheme. StatefulSet names *are* being aligned (data survives because the charts use standalone PVC templates, not `volumeClaimTemplates`); each rename ships in its own major-bump PR with a one-time migration note (`kubectl delete statefulset <old> --cascade=orphan` before upgrading).
-- Image tags come from `{{ .Chart.AppVersion }}`.
-- Auxiliary/sidecar images (images other than the app image, currently only the delegation nginx in matrix-synapse) are pinned via values (`<workload>.image.repository` / `<workload>.image.tag`) instead of being hardcoded in templates, and their pinned versions are reviewed alongside every app-version update round.
+These guidelines are **binding for every current and future chart** in this repo. They are the consolidated end state of the conventions overhaul (#32, batches 0–4); `template-chart/` is the reference implementation.
+
+### 1. Naming
+
+- Resources are named `{{ .Release.Name }}-{{ .Chart.Name }}-<kind>` (e.g. `...-deployment`, `...-sfs`, `...-service`, `...-secret`, `...-configmap`, `...-ingress`, `...-pvc`).
+- Template files are named `<app>.<kind>.yaml`; stateful apps use a StatefulSet in a `<app>.sfs.yaml` template instead of a deployment.
+- **Documented exception — existing PVC names**: PVCs of already-published charts keep their historical names even where they deviate from the scheme. Renaming a PVC makes Kubernetes provision a new, empty volume, so a rename would orphan the existing data. New charts name PVCs `{{ .Release.Name }}-{{ .Chart.Name }}-pvc` per the scheme.
+- StatefulSet renames are possible (data survives because the charts use standalone PVC templates, not `volumeClaimTemplates`) but only ship in a major-bump PR with a one-time migration note: `kubectl delete statefulset <old> --cascade=orphan` (and delete the leftover old pod) before upgrading.
+
+### 2. Versioning
+
+- `Chart.yaml` uses `version: <chart-semver>+up<appVersion>`; the `+up` suffix matches `appVersion`, with dashes normalized to dots (e.g. `0.0.36-beta` → `+up0.0.36.beta`). `appVersion` is the **exact image tag** of the main app image.
+- Semver rules for the chart part:
+  - **Patch**: bug fixes without behavior or values-schema change; plain app-version updates.
+  - **Minor**: additive, backward-compatible changes (new optional values with unchanged defaults).
+  - **Major**: runtime behavior changes or breaking values changes (e.g. resource renames, probes, security hardening, values that become required).
+- Any push to `main` touching a chart directory publishes that chart, so the version must be bumped in the same change.
+
+### 3. Images
+
+- The main app image tag comes from `{{ .Chart.AppVersion }}` — never hardcoded.
+- Auxiliary images (sidecars, init containers, secondary workloads — e.g. the delegation nginx in matrix-synapse, guacd in patchmon, busybox init/consume images in paperless-ngx) are pinned via values instead of being hardcoded in templates, and their pinned versions are reviewed alongside every app-version update round.
+
+### 4. Ingress
+
+- `ingress.domain` and `ingress.clusterIssuer` (cert-manager) are `required` values **without defaults** — every installation sets both explicitly; they are the only values needed for a default install.
+- `ingress.className` selects the ingress class and defaults to `nginx`.
+- `ingress.annotations` takes optional extra annotations that are merged with the cert-manager `cluster-issuer` annotation the chart always sets.
+- The TLS secret is named `tls-<release>-<chart>-ingress`.
+- **Documented exception — homeassistant**: keeps its upstream-style flexible ingress values (host/tls lists, no required values); only its `ingress.className` default follows the standard (`nginx`, clearable to omit the field).
+
+### 5. Security hardening
+
+- Defaults on every workload: `automountServiceAccountToken: false`, non-root user, `readOnlyRootFilesystem: true`, all capabilities dropped, `allowPrivilegeEscalation: false`.
+- Pod and container contexts are values-configurable via `securityContext.pod` / `securityContext.container`.
+- Writable paths (e.g. `/tmp`, nginx cache dirs, s6-overlay's `/run`) are emptyDirs so the root filesystem stays read-only.
+- Where an image cannot satisfy the full standard (e.g. Home Assistant must start as root for s6-overlay, paperless needs a root init container to hand over `/run`, samba needs its capabilities), the deviation is minimal and **must** be justified with a comment in that chart's `values.yaml`.
+
+### 6. Probes
+
+- Every workload has liveness, readiness and startup probes (documented exception: the paperless-ngx consume CronJob).
+- Probes are values-configurable with calibrated defaults (the startup probe gates liveness/readiness; its budget is documented in a values comment per chart).
+
+### 7. Resources (auto-limits)
+
+- Resource requests ship as chart defaults in `values.yaml` and are user-overridable.
+- Limits are computed by a per-chart `_helpers.tpl` helper (reference implementation in `template-chart/templates/_helpers.tpl`): an explicitly set limit always wins, missing memory and ephemeral-storage limits default to `resources.limitFactor` × the request (factor default `3`), and a CPU limit is only rendered when set explicitly — otherwise CPU stays unlimited (it is compressible, throttling instead of OOM-killing). The helper is duplicated into every chart because charts have no dependencies.
+
+### 8. Secrets
+
 - Secrets are **1Password `OnePasswordItem` CRs**: values expose `secrets.<name>SecretRef` holding an `op://` item path; the 1Password operator materializes the Kubernetes Secret in-cluster.
-- Ingress standard: `ingress.domain` and `ingress.clusterIssuer` (cert-manager) are the only required values. `ingress.className` selects the ingress class and defaults to `nginx`; `ingress.annotations` takes optional extra annotations that are merged with the cert-manager `cluster-issuer` annotation the chart always sets. The TLS secret is named `tls-<release>-<chart>-ingress`. (homeassistant deliberately keeps its upstream-style flexible ingress values instead.)
-- `env` entries in `values.yaml` are rendered through `tpl`, so values may contain Helm templating; `value`, `secretKeyRef` and `configMapKeyRef` forms are supported.
-- Hardened defaults: `automountServiceAccountToken: false`, non-root user, `readOnlyRootFilesystem: true`, all capabilities dropped, probes and resource requests always set. Pod and container contexts are configurable via `securityContext.pod` / `securityContext.container` in each chart's values; writable paths (e.g. `/tmp`, nginx cache dirs, s6-overlay's `/run`) are emptyDirs. Where an image cannot satisfy the full standard (e.g. Home Assistant must start as root for s6-overlay, paperless needs a root init container to hand over `/run`), the deviation is minimal and justified with a comment in that chart's `values.yaml`.
-- Resource requests ship as chart defaults and are user-overridable; limits are computed by a per-chart `_helpers.tpl` helper (reference implementation in `template-chart/templates/_helpers.tpl`): an explicitly set limit always wins, missing memory and ephemeral-storage limits default to `resources.limitFactor` × the request (factor default `3`), and a CPU limit is only rendered when set explicitly — otherwise CPU stays unlimited (it is compressible, throttling instead of OOM-killing). The helper is duplicated into every chart because charts have no dependencies.
-- Replica counts and scale-to-zero: every Deployment/StatefulSet has a `replicas` value (default `1`, the values path per workload matches its section, e.g. `patchmon.frontend.replicas`) that also accepts an explicit `0` for per-workload fine control. In addition, every chart has a global `scaleDown` flag (default `false`): `scaleDown: true` takes precedence over all `replicas` values, renders every Deployment/StatefulSet with `replicas: 0` and suspends CronJobs (paperless-ngx consume job). `scaleDown` **stops** the app but does not uninstall it — PVCs, Secrets, Services and Ingress stay in place, and setting it back to `false` brings the workloads back up. Implemented via a per-chart `<chart>.replicas` helper in `_helpers.tpl` (reference in `template-chart`); the helper uses an explicit nil check (`kindIs "invalid"`) because Helm's `default` would swallow an explicit `0`.
+
+### 9. Environment variables
+
+- Every workload container offers an additive `env` value block, appended to the env entries the chart always sets.
+- Entries are rendered through `tpl` (so values may contain Helm templating) and support the `value`, `secretKeyRef` and `configMapKeyRef` forms (pattern: `template-chart/templates/xxx.deployment.yaml`).
+
+### 10. Scaling
+
+- Every Deployment/StatefulSet has a `replicas` value (default `1`, the values path per workload matches its section) that also accepts an explicit `0` for per-workload fine control.
+- Every chart has a global `scaleDown` flag (default `false`): `scaleDown: true` takes precedence over all `replicas` values, renders every Deployment/StatefulSet with `replicas: 0` and suspends CronJobs. It **stops** the app but does not uninstall it — PVCs, Secrets, Services and Ingress stay in place; setting it back to `false` brings the workloads back up.
+- Implemented via a per-chart `<chart>.replicas` helper in `_helpers.tpl` (reference in `template-chart`); the helper uses an explicit nil check (`kindIs "invalid"`) because Helm's `default` would swallow an explicit `0`.
+
+### 11. Everything else
+
+- `icon:` is mandatory in every `Chart.yaml`.
+- `helm lint --strict` must pass without findings.
+- `NOTES.txt` for every chart is planned (#43); currently only homeassistant ships one.
+- CI: every installable chart has fixtures under `ci/<chart>/` (`test-values.yaml`, optionally `fixtures.yaml`/`settings.env`) or a justified entry in `ci/excluded-charts.txt` — the install-test fails if both are missing.
 - Charts have no dependencies (`charts/` directories are empty).

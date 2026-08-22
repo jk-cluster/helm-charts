@@ -4,14 +4,15 @@
 # Services stay in place; scaleDown: false brings the workloads back up.
 scaleDown: false
 
+secrets:
+  databaseSecretRef: null
+  ziplineSecretRef: null
+
 config:
   storage: 50Gi
   storageClass: longhorn
-  secretRef:
-    db: null
-    zipline: null
-  domain: null
   maxUploadFileSize: 30m
+
 zipline:
   # Replica count for this workload; 0 is allowed and scales it down.
   # The chart-global scaleDown flag takes precedence.
@@ -68,3 +69,15 @@ zipline:
       cpu: 0.1
       memory: 265Mi
       ephemeralStorage: 100Mi
+  # Extra environment variables, appended to the ones the chart always sets.
+  # Rendered through tpl; value, secretKeyRef and configMapKeyRef forms are
+  # supported (see template-chart).
+  env: []
+
+ingress:
+  clusterIssuer: null
+  domain: null
+  className: nginx
+  # Extra annotations for the Ingress; merged with the cert-manager
+  # cluster-issuer and upload-size annotations the chart always sets.
+  annotations: {}

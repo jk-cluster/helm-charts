@@ -1,9 +1,11 @@
 config:
   storage: 1Gi
   storageClass: local-path
+ingress:
   domain: zipline.ci.local
-  # The OnePasswordItem CRs only need non-null item paths; the actual
-  # Kubernetes Secrets come from ci/zipline/fixtures.yaml.
-  secretRef:
-    db: op://ci/zipline-db
-    zipline: op://ci/zipline-core
+  clusterIssuer: ci-issuer
+# The OnePasswordItem CRs only need non-null item paths; the actual
+# Kubernetes Secrets come from ci/zipline/fixtures.yaml.
+secrets:
+  databaseSecretRef: op://ci/zipline-db
+  ziplineSecretRef: op://ci/zipline-core

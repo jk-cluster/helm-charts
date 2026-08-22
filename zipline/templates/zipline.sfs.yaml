@@ -27,14 +27,34 @@ spec:
                   name: {{ .Release.Name }}-{{ .Chart.Name }}-db-secret
                   key: connection-url
             - name: CORE_DEFAULT_DOMAIN
-              value: "{{ .Values.config.domain }}"
+              value: "{{ .Values.ingress.domain }}"
             - name: CORE_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Release.Name }}-{{ .Chart.Name }}-core-secret
+                  name: {{ .Release.Name }}-{{ .Chart.Name }}-secret
                   key: server-secret
             - name: UPLOADER_ADMIN_LIMIT
               value: 500mb
+            {{- range $value := .Values.zipline.env }}
+            {{- if $value.value }}
+            - name: {{ $value.name | quote }}
+              value: {{ tpl $value.value $ | quote }}
+            {{- else if $value.valueFrom }}
+            {{- if $value.valueFrom.secretKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ tpl $value.valueFrom.secretKeyRef.name $ | quote }}
+                  key: {{ tpl $value.valueFrom.secretKeyRef.key $ | quote }}
+            {{- else if $value.valueFrom.configMapKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ tpl $value.valueFrom.configMapKeyRef.name $ | quote }}
+                  key: {{ tpl $value.valueFrom.configMapKeyRef.key $ | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
           resources:
             {{- include "zipline.resources" .Values.zipline.resources | nindent 12 }}
           ports:

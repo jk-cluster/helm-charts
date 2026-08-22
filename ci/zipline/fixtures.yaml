@@ -10,7 +10,7 @@ stringData:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: ci-zipline-core-secret
+  name: ci-zipline-secret
 stringData:
   server-secret: zipline-ci-core-secret-0123456789abcdef0123456789abcdef0123456789
 ---

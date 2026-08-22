@@ -1,29 +1,25 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}-{{ .Chart.Name }}
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
   labels:
-    app: {{ .Release.Name }}-{{ .Chart.Name }}
+    app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
 spec:
   replicas: {{ include "rallly.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.rallly.replicas) }}
   selector:
     matchLabels:
-      app: {{ .Release.Name }}-{{ .Chart.Name }}
+      app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
   template:
     metadata:
-      name: {{ .Release.Name }}-{{ .Chart.Name }}
+      name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
       labels:
-        app: {{ .Release.Name }}-{{ .Chart.Name }}
+        app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
     spec:
       automountServiceAccountToken: false
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 20000
-        runAsGroup: 1000
-        fsGroup: 1000
-        fsGroupChangePolicy: Always
+        {{- toYaml .Values.rallly.securityContext.pod | nindent 8 }}
       containers:
-        - name: {{ .Release.Name }}-{{ .Chart.Name }}
+        - name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
           image: "lukevella/rallly:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
           env:
@@ -120,6 +116,26 @@ spec:
                   name: {{ .Release.Name }}-{{ .Chart.Name }}-database-secret
                   key: database-url
             # TODO: Add Storage Configuration
+            {{- range $value := .Values.rallly.env }}
+            {{- if $value.value }}
+            - name: {{ $value.name }}
+              value: {{ tpl $value.value $ }}
+            {{- else if $value.valueFrom }}
+            {{- if $value.valueFrom.secretKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ tpl $value.valueFrom.secretKeyRef.name $ }}
+                  key: {{ tpl $value.valueFrom.secretKeyRef.key $ }}
+            {{- else if $value.valueFrom.configMapKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ tpl $value.valueFrom.configMapKeyRef.name $ }}
+                  key: {{ tpl $value.valueFrom.configMapKeyRef.key $ }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
           ports:
             - containerPort: 3000
               protocol: TCP
@@ -133,12 +149,5 @@ spec:
           resources:
             {{- include "rallly.resources" .Values.rallly.resources | nindent 12 }}
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            capabilities:
-              drop:
-                - ALL
-              add:
-                -
+            {{- toYaml .Values.rallly.securityContext.container | nindent 12 }}
       restartPolicy: Always

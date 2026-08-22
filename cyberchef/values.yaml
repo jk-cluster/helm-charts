@@ -60,7 +60,7 @@ cyberchef:
 
 ingress:
   enabled: true
-  clusterIssuer: letsencrypt
+  clusterIssuer: null
   domain: null
   className: nginx
   # Extra annotations for the Ingress; merged with the cert-manager

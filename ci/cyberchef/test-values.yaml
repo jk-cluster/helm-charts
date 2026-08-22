@@ -1,5 +1,6 @@
-# cyberchef: stateless, no secrets. Only the ingress host is required
-# (clusterIssuer already has a default). The Ingress just has to apply -
-# there is no ingress-nginx/cert-manager in the CI cluster.
+# cyberchef: stateless, no secrets. Only the required ingress values are set.
+# The Ingress just has to apply - there is no ingress-nginx/cert-manager in
+# the CI cluster.
 ingress:
   domain: cyberchef.ci.local
+  clusterIssuer: ci

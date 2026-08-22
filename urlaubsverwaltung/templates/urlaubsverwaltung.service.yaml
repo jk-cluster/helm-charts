@@ -1,10 +1,10 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Chart.Name }}-{{ .Release.Name }}-uv-service
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-service
 spec:
   selector:
-    app: {{ .Chart.Name }}-{{ .Release.Name }}-uv-deployment
+    app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
   ports:
     - protocol: TCP
       port: 80

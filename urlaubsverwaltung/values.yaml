@@ -9,8 +9,13 @@ secrets:
   oidcSecretRef: null
 
 ingress:
+  enabled: true
   clusterIssuer: "letsencrypt-issuer"
   domain: null
+  className: nginx
+  # Extra annotations for the Ingress; merged with the cert-manager
+  # cluster-issuer annotation the chart always sets.
+  annotations: {}
 
 urlaubsverwaltung:
   # Replica count for this workload; 0 is allowed and scales it down.
@@ -31,6 +36,35 @@ urlaubsverwaltung:
       capabilities:
         drop:
           - ALL
+  livenessProbe:
+    httpGet:
+      port: 8080
+      path: /actuator/health/liveness
+    periodSeconds: 10
+    failureThreshold: 3
+    successThreshold: 1
+    timeoutSeconds: 5
+  readinessProbe:
+    httpGet:
+      port: 8080
+      path: /actuator/health/readiness
+    periodSeconds: 5
+    failureThreshold: 3
+    successThreshold: 1
+    timeoutSeconds: 5
+  # The startup probe gates liveness/readiness. Spring Boot startup
+  # (JVM + Liquibase migrations) gets a budget of 10s * 30 = 300s.
+  startupProbe:
+    httpGet:
+      port: 8080
+      path: /actuator/health/liveness
+    periodSeconds: 10
+    failureThreshold: 30
+    timeoutSeconds: 5
+  # Extra environment variables, appended to the ones the chart always sets.
+  # Values are rendered through tpl; value, secretKeyRef and configMapKeyRef
+  # forms are supported.
+  env: []
   resources:
     # Limits are optional: memory and ephemeral-storage limits default to
     # limitFactor x the request, an explicitly set limit always wins, and a

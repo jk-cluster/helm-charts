@@ -46,7 +46,47 @@ cwa:
       cpu: 0.1
       memory: 512Mi
       ephemeralStorage: 100Mi
+  # Documented deviation from the repo-wide hardening standard: the CWA image
+  # (linuxserver.io-style) must start as root — it boots via the s6-overlay
+  # init system, whose stage-1/2 setup runs as uid 0 and then drops the app
+  # to the PUID/PGID user (1000), so runAsNonRoot/runAsUser are deliberately
+  # not set (s6 supervisors stay root, the application runs as uid 1000).
+  # readOnlyRootFilesystem is deliberately false: in read-only mode the image
+  # disables the PUID/PGID remapping (the runtime uid would silently change
+  # from 1000 to the built-in 911 and break existing volume data) and its
+  # init fails to write the ImageMagick policy under /etc. Everything else
+  # is hardened: no privilege escalation and all capabilities dropped except
+  # the minimal set the s6 init/supervision needs (verified against v4.0.6):
+  # CHOWN/DAC_OVERRIDE/FOWNER/SETGID/SETUID for the ownership fix-up of
+  # /config etc. and the root->PUID drop, KILL so the root supervisor can
+  # signal the uid-1000 services (without it the pod cannot shut down
+  # cleanly and gets SIGKILLed).
+  securityContext:
+    pod:
+      fsGroup: 1000
+      fsGroupChangePolicy: Always
+    container:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: false
+      capabilities:
+        drop:
+          - ALL
+        add:
+          - CHOWN
+          - DAC_OVERRIDE
+          - FOWNER
+          - KILL
+          - SETGID
+          - SETUID
+  # Extra environment variables, appended to the ones the chart always sets.
+  # Rendered through tpl; value, secretKeyRef and configMapKeyRef forms are
+  # supported (see template-chart).
+  env: []
 
 ingress:
-  clusterIssuer: "letsencrypt-issuer"
+  clusterIssuer: null
   domain: null
+  className: nginx
+  # Extra annotations for the Ingress; merged with the cert-manager
+  # cluster-issuer and proxy-body-size annotations the chart always sets.
+  annotations: {}

@@ -9,4 +9,5 @@ cwa:
   storage: 2Gi
 
 ingress:
+  clusterIssuer: ci
   domain: cwa.ci.local

@@ -1,6 +1,9 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
+  # Deliberate naming exception (see README): this PVC keeps its historical
+  # <chart>-<release>-cwa-consume-pvc name — renaming a PVC would provision
+  # a new, empty volume and orphan the existing data.
   name: {{ .Chart.Name }}-{{ .Release.Name }}-cwa-consume-pvc
 spec:
   accessModes:

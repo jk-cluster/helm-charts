@@ -1,20 +1,23 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ .Chart.Name }}-{{ .Release.Name }}-cwa-ingress
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-ingress
   annotations:
-    cert-manager.io/cluster-issuer: {{ required "A Cluster-Issuer must be provided" .Values.ingress.clusterIssuer}}
+    cert-manager.io/cluster-issuer: {{ required "A Cluster-Issuer must be provided" .Values.ingress.clusterIssuer }}
     nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.cwa.maxUploadFileSize }}
     nginx.org/client-max-body-size: {{ .Values.cwa.maxUploadFileSize }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
-  ingressClassName: nginx
+  ingressClassName: {{ .Values.ingress.className }}
   rules:
     - host: {{ required "A Domain/Host must be provided" .Values.ingress.domain }}
       http:
         paths:
           - backend:
               service:
-                name: {{ .Chart.Name }}-{{ .Release.Name }}-cwa-service
+                name: {{ .Release.Name }}-{{ .Chart.Name }}-service
                 port:
                   name: http
             path: /
@@ -22,4 +25,4 @@ spec:
   tls:
     - hosts:
         - {{ required "A Domain/Host must be provided" .Values.ingress.domain }}
-      secretName: tls-{{ .Chart.Name }}-{{ .Release.Name }}-ingress
+      secretName: tls-{{ .Release.Name }}-{{ .Chart.Name }}-ingress

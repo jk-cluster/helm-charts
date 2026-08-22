@@ -1,7 +1,9 @@
 # Fixtures for the calibre-web-automated install-test: the cwa secret the
 # 1Password operator would otherwise materialize and static hostPath PVs
 # (the consume PVC is ReadWriteMany, which local-path cannot provision).
-# This chart names resources <chart>-<release>-..., release name is ci.
+# Release name is ci; resources are named <release>-<chart>-..., except the
+# PVCs, which keep their historical <chart>-<release>-cwa-* names
+# (documented naming exception, see README).
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
@@ -74,7 +76,7 @@ spec:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: calibre-web-automated-ci-cwa-secret
+  name: ci-calibre-web-automated-secret
 stringData:
   hardcover-api-token: ci-dummy-token
   # Mounted as /config/.config/calibre/customize.py.json (calibre plugin

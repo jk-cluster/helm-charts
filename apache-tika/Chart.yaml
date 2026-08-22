@@ -4,5 +4,5 @@ description: A Helm chart to deploy Apache Tika on Kubernetes
 
 type: application
 
-version: 7.1.0+up3.2.3.0.full
-appVersion: "3.2.3.0-full"
+version: 7.1.1+up3.3.1.0.full
+appVersion: "3.3.1.0-full"

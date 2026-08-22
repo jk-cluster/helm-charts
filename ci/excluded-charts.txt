@@ -1,5 +1,4 @@
 # Charts excluded from the PR install-test, one per line: <chart> <reason>.
 # ci/run-install-test.sh skips these with the given reason.
 satisfactory the game-server image is multiple GB and Steam downloads 10GB+ game files on first start - impractical on a CI runner
-teamspeak-server the TS6 v6.0.0-beta8 image crashes on start ("The default license has expired. Please use the latest server version.", re-verified 2026-08-21); nothing to test until the appVersion is bumped
 template-chart scaffold with placeholder image "registry/image:xxx", never published

@@ -1,8 +1,17 @@
+# Scale the whole chart down without uninstalling it: scaleDown: true renders
+# every Deployment/StatefulSet with replicas: 0 (and suspends CronJobs) and
+# takes precedence over any per-workload replicas value. PVCs, Secrets and
+# Services stay in place; scaleDown: false brings the workloads back up.
+scaleDown: false
+
 patchmon:
   storage:
     size: 10Gi
     storageClass: null
   frontend:
+    # Replica count for this workload; 0 is allowed and scales it down.
+    # The chart-global scaleDown flag takes precedence.
+    replicas: 1
     # The frontend image is based on nginx-unprivileged; the pod runs as its
     # nginx user (uid 101). The image's root-only init script (it would chown
     # the shared assets volume) is replaced by fsGroup 1000: the same group
@@ -31,6 +40,9 @@ patchmon:
         memory: 128Mi
         ephemeral-storage: 10Mi
   backend:
+    # Replica count for this workload; 0 is allowed and scales it down.
+    # The chart-global scaleDown flag takes precedence.
+    replicas: 1
     resources:
       # Limits are optional: memory and ephemeral-storage limits default to
       # limitFactor x the request, an explicitly set limit always wins, and a

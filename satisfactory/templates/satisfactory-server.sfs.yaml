@@ -7,7 +7,7 @@ spec:
     matchLabels:
       app: "{{ .Release.Name }}-{{ .Chart.Name }}-sf-server"
   serviceName: "{{ .Release.Name }}-{{ .Chart.Name }}-sf-service"
-  replicas: 1
+  replicas: {{ include "satisfactory.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.server.replicas) }}
   template:
     metadata:
       labels:

@@ -5,7 +5,7 @@ metadata:
   labels:
     app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
 spec:
-  replicas: 1
+  replicas: {{ include "apache-tika.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.tika.replicas) }}
   selector:
     matchLabels:
       app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment

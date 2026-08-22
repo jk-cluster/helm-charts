@@ -83,3 +83,34 @@ results are printed without a decimal point.
 {{- printf "%v%s" $product $suffix -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Render the replica count for a Deployment/StatefulSet.
+
+Input: dict
+  "scaleDown"  the chart-global .Values.scaleDown flag (may be nil)
+  "replicas"   the workload's replicas value (may be nil)
+
+Rules (issue #25):
+  - scaleDown: true takes precedence and always yields 0.
+  - otherwise an explicitly set replicas value is used as given, including an
+    explicit 0 — Helm's "default" would swallow 0, hence the explicit
+    kindIs "invalid" nil check.
+  - a missing replicas value defaults to 1.
+
+Usage (the values path to the workload's replicas varies per chart):
+  replicas: {{ include "outline.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.<app>.replicas) }}
+
+NOTE: like the resources helper above, this is duplicated into every chart's
+templates/_helpers.tpl with the chart's name as define prefix. This file in
+template-chart is the reference implementation.
+*/}}
+{{- define "outline.replicas" -}}
+{{- if .scaleDown -}}
+0
+{{- else if not (kindIs "invalid" .replicas) -}}
+{{- .replicas -}}
+{{- else -}}
+1
+{{- end -}}
+{{- end -}}

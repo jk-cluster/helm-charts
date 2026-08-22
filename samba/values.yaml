@@ -1,7 +1,16 @@
+# Scale the whole chart down without uninstalling it: scaleDown: true renders
+# every Deployment/StatefulSet with replicas: 0 (and suspends CronJobs) and
+# takes precedence over any per-workload replicas value. PVCs, Secrets and
+# Services stay in place; scaleDown: false brings the workloads back up.
+scaleDown: false
+
 secrets:
   sambaUsersRef: null
 
 samba:
+  # Replica count for this workload; 0 is allowed and scales it down.
+  # The chart-global scaleDown flag takes precedence.
+  replicas: 1
   shares:
     - name: null
       validUsers: null

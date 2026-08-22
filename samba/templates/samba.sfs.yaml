@@ -5,7 +5,7 @@ metadata:
   labels:
     app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
 spec:
-  replicas: 1
+  replicas: {{ include "samba.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.samba.replicas) }}
   serviceName: {{ .Release.Name }}-{{ .Chart.Name }}-service
   selector:
     matchLabels:

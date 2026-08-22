@@ -1,30 +1,37 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}-{{ .Chart.Name }}-backend
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
   labels:
-    app: {{ .Release.Name }}-{{ .Chart.Name }}-backend
+    app: {{ .Release.Name }}-{{ .Chart.Name }}
 spec:
-  replicas: {{ include "patchmon.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.patchmon.backend.replicas) }}
+  replicas: {{ include "patchmon.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.patchmon.server.replicas) }}
   selector:
     matchLabels:
-      app: {{ .Release.Name }}-{{ .Chart.Name }}-backend
+      app: {{ .Release.Name }}-{{ .Chart.Name }}
   template:
     metadata:
-      name: {{ .Release.Name }}-{{ .Chart.Name }}-backend
+      name: {{ .Release.Name }}-{{ .Chart.Name }}
       labels:
-        app: {{ .Release.Name }}-{{ .Chart.Name }}-backend
+        app: {{ .Release.Name }}-{{ .Chart.Name }}
     spec:
       automountServiceAccountToken: false
+      # Pin a stable pod hostname: the server identifies itself in the agent
+      # presence registry (Redis) by hostname, and a Deployment pod's default
+      # hostname changes on every rollout, which would leave stale presence
+      # records behind (upstream pins "patchmon-server" in its compose file
+      # for the same reason).
+      hostname: {{ .Release.Name }}-{{ .Chart.Name }}-server
       securityContext:
-        fsGroup: 1000
-        fsGroupChangePolicy: Always
+        {{- toYaml .Values.patchmon.server.securityContext.pod | nindent 8 }}
       containers:
-        - name: {{ .Release.Name }}-{{ .Chart.Name }}-backend
-          image: "ghcr.io/patchmon/patchmon-backend:{{ .Chart.AppVersion }}"
+        - name: {{ .Release.Name }}-{{ .Chart.Name }}-server
+          image: "ghcr.io/patchmon/patchmon-server:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
+          securityContext:
+            {{- toYaml .Values.patchmon.server.securityContext.container | nindent 12 }}
           ports:
-            - containerPort: 3001
+            - containerPort: 3000
               protocol: TCP
               name: http
           env:
@@ -58,8 +65,6 @@ spec:
                 secretKeyRef:
                   name: {{ .Release.Name }}-{{ .Chart.Name }}-redis-secret
                   key: db
-            - name: ASSETS_DIR
-              value: /app/assets
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
@@ -104,8 +109,11 @@ spec:
                   key: requested-scopes
             - name: OIDC_AUTO_CREATE_USERS
               value: "true"
+            # 2.x role vocabulary: superadmin, admin, host_manager, readonly,
+            # user. "viewer" (the 1.x default of this chart) no longer exists;
+            # readonly is its least-privilege equivalent.
             - name: OIDC_DEFAULT_ROLE
-              value: "viewer"
+              value: "readonly"
             - name: OIDC_DISABLE_LOCAL_AUTH
               value: "true"
             - name: OIDC_BUTTON_TEXT
@@ -125,51 +133,100 @@ spec:
                 secretKeyRef:
                   name: {{ .Release.Name }}-{{ .Chart.Name }}-oidc-secret
                   key: admin-group-name
-            - name: SERVER_PROTOCOL
-              value: "https"
-            - name: SERVER_HOST
-              value: "{{ .Values.ingress.domain }}"
-            - name: SERVER_PORT
-              value: "443"
             - name: CORS_ORIGIN
-              value: "https://{{ .Values.ingress.domain }}"
-            - name: TRUST_PROXIES
-              value: "1"
-          # The backend exposes GET /health returning {"status": "ok"}.
+              value: "https://{{ required "A Domain/Host must be provided" .Values.ingress.domain }}"
+            # Renamed upstream in 2.x (was TRUST_PROXIES=<count> in 1.x): the
+            # server sits behind the ingress-nginx reverse proxy.
+            - name: TRUST_PROXY
+              value: "true"
+            {{- if .Values.patchmon.guacd.enabled }}
+            - name: GUACD_ADDRESS
+              value: "127.0.0.1:4822"
+            {{- end }}
+          # The server exposes GET /health returning {"status": "ok"}. The
+          # 2.x server rejects requests whose Host header is neither loopback
+          # nor a CORS_ORIGIN host with 403 — kubelet probes target the pod
+          # IP, so they must send the public hostname as Host header.
           livenessProbe:
             httpGet:
               path: /health
-              port: 3001
+              port: 3000
+              httpHeaders:
+                - name: Host
+                  value: {{ .Values.ingress.domain }}
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /health
-              port: 3001
+              port: 3000
+              httpHeaders:
+                - name: Host
+                  value: {{ .Values.ingress.domain }}
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
-          # The startup probe gates liveness/readiness. The backend waits for
-          # the database and runs migrations on startup: budget 10s * 30 = 300s.
+          # The startup probe gates liveness/readiness. The server waits for
+          # the database and runs migrations on startup; upstream warns that
+          # the first 2.x boot rebuilds database indexes, which can take
+          # minutes on slow storage: budget 10s * 60 = 600s.
           startupProbe:
             httpGet:
               path: /health
-              port: 3001
+              port: 3000
+              httpHeaders:
+                - name: Host
+                  value: {{ .Values.ingress.domain }}
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 60
+          resources:
+            {{- include "patchmon.resources" .Values.patchmon.server.resources | nindent 12 }}
+          volumeMounts:
+            # The image is stateless, but the Go server needs a writable /tmp
+            # for scratch files with a read-only root filesystem.
+            - name: tmp
+              mountPath: /tmp
+        {{- if .Values.patchmon.guacd.enabled }}
+        - name: {{ .Release.Name }}-{{ .Chart.Name }}-guacd
+          image: {{ .Values.patchmon.guacd.image }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            {{- toYaml .Values.patchmon.guacd.securityContext.container | nindent 12 }}
+          ports:
+            - containerPort: 4822
+              protocol: TCP
+              name: guacd
+          livenessProbe:
+            tcpSocket:
+              port: 4822
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: 4822
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          startupProbe:
+            tcpSocket:
+              port: 4822
+            periodSeconds: 5
             timeoutSeconds: 5
             failureThreshold: 30
           resources:
-            {{- include "patchmon.resources" .Values.patchmon.backend.resources | nindent 12 }}
+            {{- include "patchmon.resources" .Values.patchmon.guacd.resources | nindent 12 }}
           volumeMounts:
-            - mountPath: /app/assets
-              name: patchmon-volume
-              subPath: patchmon-assets
-            - mountPath: /app/agents
-              name: patchmon-volume
-              subPath: patchmon-agents
+            - name: guacd-tmp
+              mountPath: /tmp
+        {{- end }}
       restartPolicy: Always
       volumes:
-        - name: patchmon-volume
-          persistentVolumeClaim:
-            claimName: {{ .Release.Name }}-{{ .Chart.Name }}-pvc
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.patchmon.guacd.enabled }}
+        - name: guacd-tmp
+          emptyDir: {}
+        {{- end }}

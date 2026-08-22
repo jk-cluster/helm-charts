@@ -5,24 +5,23 @@
 scaleDown: false
 
 patchmon:
-  storage:
-    size: 10Gi
-    storageClass: null
-  frontend:
+  server:
     # Replica count for this workload; 0 is allowed and scales it down.
     # The chart-global scaleDown flag takes precedence.
+    # Note: the server registers itself in the agent presence registry under a
+    # stable identity (the pod hostname, pinned by the chart). Running more
+    # than one replica requires a distinct identity per replica and is not
+    # supported by this chart.
     replicas: 1
-    # The frontend image is based on nginx-unprivileged; the pod runs as its
-    # nginx user (uid 101). The image's root-only init script (it would chown
-    # the shared assets volume) is replaced by fsGroup 1000: the same group
-    # the backend runs with, so both can read/write the shared assets.
+    # The 2.x server image is a hardened Alpine image running as uid 65532
+    # (nonroot). It is stateless: frontend, agent binaries and SCAP content
+    # are baked into the image, so the root filesystem stays read-only; /tmp
+    # is provided as an emptyDir.
     securityContext:
       pod:
         runAsNonRoot: true
-        runAsUser: 101
-        runAsGroup: 101
-        fsGroup: 1000
-        fsGroupChangePolicy: Always
+        runAsUser: 65532
+        runAsGroup: 65532
       container:
         allowPrivilegeEscalation: false
         readOnlyRootFilesystem: true
@@ -37,20 +36,36 @@ patchmon:
       limitFactor: 3
       requests:
         cpu: 0.1
-        memory: 128Mi
+        memory: 256Mi
         ephemeral-storage: 10Mi
-  backend:
-    # Replica count for this workload; 0 is allowed and scales it down.
-    # The chart-global scaleDown flag takes precedence.
-    replicas: 1
+  guacd:
+    # In-browser RDP for Windows hosts (beta) via the Apache Guacamole daemon,
+    # run as a sidecar container in the server pod. Disabled by default; when
+    # enabled, the server is pointed at it via GUACD_ADDRESS=127.0.0.1:4822.
+    enabled: false
+    # guacd is an independent upstream application, so its image is not tied
+    # to the chart's appVersion. Pinned to the version upstream ships with.
+    image: guacamole/guacd:1.6.0
+    # The image runs as its own unprivileged user (uid 1000); it only needs a
+    # writable /tmp, which the chart provides as an emptyDir.
+    securityContext:
+      container:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        capabilities:
+          drop:
+            - ALL
     resources:
       # Limits are optional: memory and ephemeral-storage limits default to
       # limitFactor x the request, an explicitly set limit always wins, and a
       # CPU limit is only set when configured explicitly under "limits".
       limitFactor: 3
       requests:
-        cpu: 0.1
-        memory: 512Mi
+        cpu: 0.05
+        memory: 64Mi
         ephemeral-storage: 10Mi
 
 ingress:

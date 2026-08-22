@@ -4,8 +4,8 @@ description: A Helm chart to deploy Patchmon on Kubernetes
 
 type: application
 
-version: 4.1.0+up1.4.2
-appVersion: "1.4.2"
+version: 5.0.0+up2.1.3
+appVersion: "2.1.3"
 
 maintainers:
   - name: jklein

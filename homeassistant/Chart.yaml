@@ -3,9 +3,9 @@ name: homeassistant
 description: A Helm chart to deploy Home Assistant on Kubernetes
 type: application
 
-version: 4.1.0+up2026.2.3
+version: 4.1.1+up2026.8.3
 
-appVersion: "2026.2.3"
+appVersion: "2026.8.3"
 
 maintainers:
   - name: jklein

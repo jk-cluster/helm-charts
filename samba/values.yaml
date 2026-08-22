@@ -5,17 +5,23 @@
 scaleDown: false
 
 secrets:
-  sambaUsersRef: null
+  sambaUsersSecretRef: null
 
 samba:
   # Replica count for this workload; 0 is allowed and scales it down.
   # The chart-global scaleDown flag takes precedence.
   replicas: 1
+  # NodePorts the SMB service is published on (service type NodePort).
+  smbNodePort: 30445
+  netbiosNodePort: 30139
   shares:
     - name: null
       validUsers: null
       description: null
       size: null
+  # Extra environment variables for the samba container. Values are rendered
+  # through tpl; value, secretKeyRef and configMapKeyRef forms are supported.
+  env: []
   # SMB is not an HTTP protocol, so probe the main SMB TCP port.
   livenessProbe:
     tcpSocket:
@@ -45,6 +51,36 @@ samba:
       memory: 50Mi
       cpu: 0.1
       ephemeralStorage: 50Mi
+
+  # Deviations from the repo's hardening baseline, forced by the
+  # ghcr.io/dockur/samba image (its entrypoint samba.sh):
+  # - no runAsNonRoot: the entrypoint creates the Unix users from users.conf
+  #   (groupadd/adduser/usermod) and smbd impersonates the authenticated
+  #   share user per session, both of which require starting as root.
+  # - readOnlyRootFilesystem: false: the entrypoint writes to the root
+  #   filesystem at startup (/etc/passwd + /etc/group for user creation,
+  #   the /etc/samba.conf healthcheck symlink, mkdir /shared and the Samba
+  #   TDB databases under /var/lib/samba).
+  # - capabilities: ALL dropped except what a multi-user root file server
+  #   needs: NET_BIND_SERVICE (ports 445/139), SETUID/SETGID (per-session
+  #   user impersonation), CHOWN/FOWNER/DAC_OVERRIDE (managing share files
+  #   on behalf of the users).
+  securityContext:
+    pod:
+      fsGroup: 1000
+    container:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: false
+      capabilities:
+        drop:
+          - ALL
+        add:
+          - CHOWN
+          - DAC_OVERRIDE
+          - FOWNER
+          - NET_BIND_SERVICE
+          - SETGID
+          - SETUID
 
   globalConfig: null
   storageClass: longhorn

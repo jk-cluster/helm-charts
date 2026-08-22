@@ -1,5 +1,5 @@
 secrets:
-  sambaUsersRef: op://ci/samba-users
+  sambaUsersSecretRef: op://ci/samba-users
 
 samba:
   storageClass: local-path

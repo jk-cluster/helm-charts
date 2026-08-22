@@ -4,13 +4,75 @@
 # Services stay in place; scaleDown: false brings the workloads back up.
 scaleDown: false
 
+secrets:
+  configSecretRef: null
+
 matrix:
   # Replica count for this workload; 0 is allowed and scales it down.
   # The chart-global scaleDown flag takes precedence.
   replicas: 1
   serverName: null
   timezone: UTC
-  configSecretRef: null
+  # The upstream image (ghcr.io/element-hq/synapse) only drops privileges
+  # itself (via gosu, driven by UID/GID env vars) when started as root; with
+  # an explicit non-root runAsUser it skips that step and runs directly as
+  # that user. Synapse writes to /data and /media_store (both on the PVC) and
+  # to /tmp (mounted as an emptyDir by the chart), so the root filesystem
+  # stays read-only. The uid/gid 1000 matches the previous gosu default, so
+  # existing PVC data stays accessible.
+  securityContext:
+    pod:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      fsGroupChangePolicy: Always
+    container:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      capabilities:
+        drop:
+          - ALL
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: http
+      scheme: HTTP
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: http
+      scheme: HTTP
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # The startup probe gates liveness/readiness. Synapse can take a
+  # while to start (migrations, cache warmup): budget 10s * 30 = 300s.
+  startupProbe:
+    httpGet:
+      path: /health
+      port: http
+      scheme: HTTP
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 30
+  # Extra environment variables, appended to the ones the chart always sets.
+  # Values are rendered through tpl; value, secretKeyRef and configMapKeyRef
+  # forms are supported.
+  env: []
+  resources:
+    # Limits are optional: memory and ephemeral-storage limits default to
+    # limitFactor x the request, an explicitly set limit always wins, and a
+    # CPU limit is only set when configured explicitly under "limits".
+    limitFactor: 3
+    requests:
+      memory: "1Gi"
+      cpu: "1"
+      ephemeralStorage: "1Gi"
   delegation:
     # Replica count for this workload; 0 is allowed and scales it down.
     # The chart-global scaleDown flag takes precedence.
@@ -37,6 +99,31 @@ matrix:
         capabilities:
           drop:
             - ALL
+    livenessProbe:
+      httpGet:
+        path: /.well-known/matrix/server
+        port: http
+        scheme: HTTP
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /.well-known/matrix/server
+        port: http
+        scheme: HTTP
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+    # The startup probe gates liveness/readiness. Startup budget = 5s * 30 = 150s.
+    startupProbe:
+      httpGet:
+        path: /.well-known/matrix/server
+        port: http
+        scheme: HTTP
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 30
     resources:
       # Limits are optional: memory and ephemeral-storage limits default to
       # limitFactor x the request, an explicitly set limit always wins, and a
@@ -46,15 +133,6 @@ matrix:
         memory: "64Mi"
         cpu: "125m"
         ephemeralStorage: "50Mi"
-  resources:
-    # Limits are optional: memory and ephemeral-storage limits default to
-    # limitFactor x the request, an explicitly set limit always wins, and a
-    # CPU limit is only set when configured explicitly under "limits".
-    limitFactor: 3
-    requests:
-      memory: "1Gi"
-      cpu: "1"
-      ephemeralStorage: "1Gi"
 
 storage:
   amount: 10Gi
@@ -63,3 +141,7 @@ storage:
 ingress:
   domain: null
   clusterIssuer: null
+  className: nginx
+  # Extra annotations for the Ingress; merged with the cert-manager
+  # cluster-issuer annotation the chart always sets.
+  annotations: {}

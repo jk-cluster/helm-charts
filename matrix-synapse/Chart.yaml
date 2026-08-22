@@ -3,7 +3,7 @@ name: matrix-synapse
 description: A Helm chart to deploy a Matrix Synapse server on Kubernetes
 icon: https://raw.githubusercontent.com/element-hq/synapse/develop/docs/favicon.png
 type: application
-version: 4.2.1+upv1.159.0
+version: 5.0.0+upv1.159.0
 appVersion: "v1.159.0"
 maintainers:
   - name: jklein

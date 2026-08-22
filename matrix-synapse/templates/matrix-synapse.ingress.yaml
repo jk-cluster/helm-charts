@@ -4,8 +4,11 @@ metadata:
   name: {{ .Release.Name }}-{{ .Chart.Name }}-ingress
   annotations:
     cert-manager.io/cluster-issuer: {{ required "A Cluster-Issuer must be provided" .Values.ingress.clusterIssuer }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
-  ingressClassName: nginx
+  ingressClassName: {{ .Values.ingress.className }}
   rules:
     - host: {{ required "A Domain/Host must be provided" .Values.ingress.domain }}
       http:

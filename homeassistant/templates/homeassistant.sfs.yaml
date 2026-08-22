@@ -28,6 +28,26 @@ spec:
           env:
             - name: TZ
               value: "{{ .Values.core.timezone }}"
+            {{- range $value := .Values.env }}
+            {{- if $value.value }}
+            - name: {{ $value.name | quote }}
+              value: {{ tpl $value.value $ | quote }}
+            {{- else if $value.valueFrom }}
+            {{- if $value.valueFrom.secretKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ tpl $value.valueFrom.secretKeyRef.name $ | quote }}
+                  key: {{ tpl $value.valueFrom.secretKeyRef.key $ | quote }}
+            {{- else if $value.valueFrom.configMapKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ tpl $value.valueFrom.configMapKeyRef.name $ | quote }}
+                  key: {{ tpl $value.valueFrom.configMapKeyRef.key $ | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
           ports:
             - name: http
               containerPort: 8123

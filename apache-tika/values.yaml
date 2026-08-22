@@ -45,6 +45,9 @@ tika:
     periodSeconds: 5
     timeoutSeconds: 5
     failureThreshold: 30
+  # Extra environment variables. Values are rendered through tpl; value,
+  # secretKeyRef and configMapKeyRef forms are supported.
+  env: []
   resources:
     # Limits are optional: memory and ephemeral-storage limits default to
     # limitFactor x the request, an explicitly set limit always wins, and a

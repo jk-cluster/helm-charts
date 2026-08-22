@@ -10,7 +10,7 @@ secrets:
 
 ingress:
   enabled: true
-  clusterIssuer: "letsencrypt-issuer"
+  clusterIssuer: null
   domain: null
   className: nginx
   # Extra annotations for the Ingress; merged with the cert-manager

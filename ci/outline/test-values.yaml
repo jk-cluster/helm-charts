@@ -5,3 +5,6 @@ secrets:
 
 ingress:
   domain: outline.ci.local
+  # clusterIssuer is strictly required (no default); the Ingress just has to
+  # apply - there is no cert-manager in the CI cluster.
+  clusterIssuer: ci

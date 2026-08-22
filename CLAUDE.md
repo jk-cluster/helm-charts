@@ -47,19 +47,23 @@ Copy `template-chart/` and replace every `xxx` placeholder — in file names (`t
 
 Semver conventions for the chart part:
 
-- **Patch**: bug fixes without behavior or values-schema change.
+- **Patch**: bug fixes without behavior or values-schema change; plain app-version updates.
 - **Minor**: additive, backward-compatible changes (new optional values with unchanged defaults).
-- **Major**: runtime behavior changes or breaking values changes (e.g. probes, security hardening, computed limits).
+- **Major**: runtime behavior changes or breaking values changes (e.g. probes, security hardening, computed limits, values that become required).
 
 App-version updates go through PRs (so the validate and install-test pipelines run), not through the `change-app-version.yml` dispatch workflow (which commits directly to main and bypasses both). For app **major** jumps, update stepwise: first to the last release of the old major line (own PR, merge, publish), then to the newest major.
 
-## Chart conventions (from template-chart)
+## Chart conventions
 
-- All resources are named `{{ .Release.Name }}-{{ .Chart.Name }}-<kind>` (e.g. `...-deployment`, `...-service`, `...-secret`).
-- Image tags come from `{{ .Chart.AppVersion }}`.
+The binding style guide for all current and future charts lives in **README.md ("Chart style guidelines")**; `template-chart/` is the reference implementation. Compact summary:
+
+- Resources named `{{ .Release.Name }}-{{ .Chart.Name }}-<kind>`; template files `<app>.<kind>.yaml`; stateful apps use a StatefulSet (`<app>.sfs.yaml`). Documented exception: historical PVC names stay (renames would orphan data); StatefulSet renames only with a `--cascade=orphan` migration note in a major PR.
+- Main image tag from `{{ .Chart.AppVersion }}`; auxiliary/sidecar/init images pinned via values and reviewed on app-update rounds.
+- Ingress: `ingress.domain` and `ingress.clusterIssuer` `required` **without defaults**; `ingress.className` defaults to `nginx`; optional `ingress.annotations` merged with the cert-manager annotation; TLS secret `tls-<release>-<chart>-ingress`. Documented exception: homeassistant keeps its flexible upstream ingress style (className default `nginx`).
 - Secrets are 1Password `OnePasswordItem` CRs: values expose `secrets.<name>SecretRef` holding an `op://` item path; the operator materializes the Kubernetes Secret.
-- Ingress standard: `ingress.domain` and `ingress.clusterIssuer` (cert-manager) are `required` values; `ingress.className` defaults to `nginx`; optional `ingress.annotations` are merged with the cert-manager annotation; TLS secret named `tls-<release>-<chart>-ingress`.
-- `env` entries in values support Helm templating — the deployment renders them through `tpl`, and supports `value`, `secretKeyRef`, and `configMapKeyRef` forms.
-- Hardened defaults: `automountServiceAccountToken: false`, non-root user, `readOnlyRootFilesystem: true`, all capabilities dropped; probes and resource requests/limits always set. Security contexts are values-configurable (`securityContext.pod` / `securityContext.container`); image-forced deviations are documented with a comment in the chart's `values.yaml`.
-- Stateful apps use a StatefulSet in a `<app>.sfs.yaml` template instead of a deployment.
-- No chart has dependencies; `charts/` directories are empty.
+- Every container offers an additive `env` block rendered through `tpl` with `value`, `secretKeyRef`, and `configMapKeyRef` forms.
+- Hardening: `automountServiceAccountToken: false`, non-root, `readOnlyRootFilesystem: true`, caps dropped, `allowPrivilegeEscalation: false`; contexts values-configurable (`securityContext.pod` / `securityContext.container`); writable paths as emptyDirs; image-forced deviations MUST be documented with a comment in the chart's `values.yaml`.
+- Probes: liveness/readiness/startup on every workload (exception: paperless consume CronJob), values-configurable with calibrated defaults.
+- Resources: requests as values defaults; limits auto-computed by the `_helpers.tpl` helper (`limitFactor` default 3; no CPU limits unless set explicitly).
+- Replicas per workload (explicit `0` allowed) plus a chart-global `scaleDown` flag that overrides them.
+- `icon:` mandatory in every `Chart.yaml`; `helm lint --strict` without findings; CI fixtures under `ci/<chart>/` or a justified exclusion; no chart dependencies (`charts/` directories are empty).

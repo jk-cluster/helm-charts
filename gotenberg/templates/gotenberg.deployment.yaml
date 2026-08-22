@@ -22,6 +22,29 @@ spec:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
           image: "gotenberg/gotenberg:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
+          {{- if .Values.gotenberg.env }}
+          env:
+            {{- range $value := .Values.gotenberg.env }}
+            {{- if $value.value }}
+            - name: {{ $value.name | quote }}
+              value: {{ tpl $value.value $ | quote }}
+            {{- else if $value.valueFrom }}
+            {{- if $value.valueFrom.secretKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ tpl $value.valueFrom.secretKeyRef.name $ | quote }}
+                  key: {{ tpl $value.valueFrom.secretKeyRef.key $ | quote }}
+            {{- else if $value.valueFrom.configMapKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ tpl $value.valueFrom.configMapKeyRef.name $ | quote }}
+                  key: {{ tpl $value.valueFrom.configMapKeyRef.key $ | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+          {{- end }}
           securityContext:
             {{- toYaml .Values.gotenberg.securityContext.container | nindent 12 }}
           volumeMounts:

@@ -2,6 +2,9 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
+  # Documented exception from the "-<kind>" naming scheme (issue #32):
+  # renaming a PVC would provision a new, empty volume, so the historic
+  # "-smb-volume-claim" name stays.
   name: {{ .Release.Name }}-{{ .Chart.Name }}-smb-volume-claim
 spec:
   accessModes:

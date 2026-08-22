@@ -26,7 +26,7 @@ spec:
         # paperless.securityContext in values.yaml) so the main container can
         # run fully hardened (non-root, no privilege escalation).
         - name: init-run-ownership
-          image: busybox:1.28
+          image: "{{ .Values.paperless.busybox.image.repository }}:{{ .Values.paperless.busybox.image.tag }}"
           imagePullPolicy: IfNotPresent
           command:
             - sh
@@ -185,6 +185,26 @@ spec:
             - name: PAPERLESS_DISABLE_REGULAR_LOGIN
               value: "{{ .Values.oidc.disableRegularLogin }}"
             {{- end }}
+            {{- range $value := .Values.paperless.env }}
+            {{- if $value.value }}
+            - name: {{ $value.name }}
+              value: {{ tpl $value.value $ }}
+            {{- else if $value.valueFrom }}
+            {{- if $value.valueFrom.secretKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ tpl $value.valueFrom.secretKeyRef.name $ }}
+                  key: {{ tpl $value.valueFrom.secretKeyRef.key $ }}
+            {{- else if $value.valueFrom.configMapKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ tpl $value.valueFrom.configMapKeyRef.name $ }}
+                  key: {{ tpl $value.valueFrom.configMapKeyRef.key $ }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
           volumeMounts:
             - mountPath: "/usr/src/paperless/data"
               name: "paperless-volume"
@@ -206,32 +226,11 @@ spec:
           resources:
             {{- include "paperless-ngx.resources" .Values.paperless.resources | nindent 12 }}
           readinessProbe:
-            httpGet:
-              path: /
-              port: 8000
-            periodSeconds: 10
-            failureThreshold: 3
-            successThreshold: 1
-            timeoutSeconds: 5
+            {{- toYaml .Values.paperless.readinessProbe | nindent 12 }}
           livenessProbe:
-            httpGet:
-              path: /
-              port: 8000
-            periodSeconds: 30
-            failureThreshold: 3
-            successThreshold: 1
-            timeoutSeconds: 5
-          # The startup probe gates liveness/readiness. Paperless runs database
-          # migrations on startup, and since 3.0 the first start after an
-          # upgrade also rebuilds the search index from scratch (Whoosh ->
-          # Tantivy): budget 10s * 60 = 600s.
+            {{- toYaml .Values.paperless.livenessProbe | nindent 12 }}
           startupProbe:
-            httpGet:
-              path: /
-              port: 8000
-            periodSeconds: 10
-            failureThreshold: 60
-            timeoutSeconds: 5
+            {{- toYaml .Values.paperless.startupProbe | nindent 12 }}
       restartPolicy: Always
       volumes:
         - name: tmp

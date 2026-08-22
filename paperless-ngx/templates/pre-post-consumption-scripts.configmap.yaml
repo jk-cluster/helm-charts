@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ .Release.Name }}-{{ .Chart.Name }}-pre-post-consumption-scripts
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-pre-post-consumption-scripts-configmap
 data:
   pre-consume-script: |-
     #!/bin/sh

@@ -1,7 +1,7 @@
 secrets:
-  redisRef: op://ci/paperless-redis
-  databaseRef: op://ci/paperless-db
-  paperlessRef: op://ci/paperless
+  redisSecretRef: op://ci/paperless-redis
+  databaseSecretRef: op://ci/paperless-db
+  paperlessSecretRef: op://ci/paperless
 
 ingress:
   domain: paperless.ci.local

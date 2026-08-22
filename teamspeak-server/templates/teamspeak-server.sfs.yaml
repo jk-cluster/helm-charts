@@ -1,31 +1,33 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: {{ .Release.Name }}-server-sfs
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
   labels:
-    app: {{ .Release.Name }}
+    app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
 spec:
   replicas: {{ include "teamspeak-server.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.replicas) }}
   selector:
     matchLabels:
-      app: {{ .Release.Name }}-server-sfs
+      app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
   template:
     metadata:
-      name: {{ .Release.Name }}-server-sfs
+      name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
       labels:
-        app: {{ .Release.Name }}-server-sfs
+        app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
     spec:
       automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.securityContext.pod | nindent 8 }}
       containers:
-        - name: {{ .Release.Name }}-ts-server-container
+        - name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
           image: "teamspeaksystems/teamspeak6-server:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
           ports:
             - name: voice-port
-              containerPort: 30987
+              containerPort: {{ .Values.server.voicePort }}
               protocol: UDP
             - name: file-transfer
-              containerPort: 30033
+              containerPort: {{ .Values.server.fileTransferPort }}
               protocol: TCP
             - name: web-query
               containerPort: 10080
@@ -34,40 +36,47 @@ spec:
             - name: TSSERVER_LICENSE_ACCEPTED
               value: "accept"
             - name: TSSERVER_DEFAULT_PORT
-              value: "30987"
-          # The voice service is UDP and cannot be probed; probe the TCP
-          # file-transfer port instead.
+              value: {{ .Values.server.voicePort | quote }}
+            - name: TSSERVER_FILE_TRANSFER_PORT
+              value: {{ .Values.server.fileTransferPort | quote }}
+            {{- range $value := .Values.env }}
+            {{- if $value.value }}
+            - name: {{ $value.name }}
+              value: {{ tpl $value.value $ }}
+            {{- else if $value.valueFrom }}
+            {{- if $value.valueFrom.secretKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ tpl $value.valueFrom.secretKeyRef.name $ }}
+                  key: {{ tpl $value.valueFrom.secretKeyRef.key $ }}
+            {{- else if $value.valueFrom.configMapKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ tpl $value.valueFrom.configMapKeyRef.name $ }}
+                  key: {{ tpl $value.valueFrom.configMapKeyRef.key $ }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
           livenessProbe:
-            tcpSocket:
-              port: file-transfer
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
           readinessProbe:
-            tcpSocket:
-              port: file-transfer
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
-          # The startup probe gates liveness/readiness. Startup budget = 5s * 30 = 150s.
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
           startupProbe:
-            tcpSocket:
-              port: file-transfer
-            periodSeconds: 5
-            timeoutSeconds: 5
-            failureThreshold: 30
+            {{- toYaml .Values.startupProbe | nindent 12 }}
           resources:
             {{- include "teamspeak-server.resources" .Values.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext.container | nindent 12 }}
           volumeMounts:
             - name: "teamspeak-volume"
               mountPath: /var/tsserver/
       restartPolicy: Always
-      securityContext:
-        fsGroup: 9987
       volumes:
         - name: "teamspeak-volume"
           persistentVolumeClaim:
+            # Deliberate exception from the naming scheme: renaming the PVC
+            # would detach existing data (see README, naming exceptions).
             claimName: {{ .Release.Name }}-teamspeak-volume-claim
-  serviceName: {{ .Release.Name }}-service
-
-
+  serviceName: {{ .Release.Name }}-{{ .Chart.Name }}-service

@@ -134,12 +134,6 @@ spec:
               name: qbittorrent-config
             - mountPath: /downloads
               name: media-downloads
-            # Writable paths for s6-overlay so the root filesystem stays
-            # read-only (same pattern for all linuxserver.io containers).
-            - mountPath: /run
-              name: qbittorrent-run
-            - mountPath: /tmp
-              name: qbittorrent-tmp
         {{- end }}
         {{- if .Values.prowlarr.enabled }}
         - name: prowlarr
@@ -170,10 +164,6 @@ spec:
           volumeMounts:
             - mountPath: /config
               name: prowlarr-config
-            - mountPath: /run
-              name: prowlarr-run
-            - mountPath: /tmp
-              name: prowlarr-tmp
         {{- end }}
         {{- if .Values.flaresolverr.enabled }}
         - name: flaresolverr
@@ -239,10 +229,6 @@ spec:
               name: media-movies
             - mountPath: /downloads
               name: media-downloads
-            - mountPath: /run
-              name: radarr-run
-            - mountPath: /tmp
-              name: radarr-tmp
         {{- end }}
         {{- if .Values.recyclarr.enabled }}
         - name: recyclarr
@@ -307,10 +293,6 @@ spec:
               name: media-tv
             - mountPath: /downloads
               name: media-downloads
-            - mountPath: /run
-              name: sonarr-run
-            - mountPath: /tmp
-              name: sonarr-tmp
         {{- end }}
         {{- if .Values.seerr.enabled }}
         - name: seerr
@@ -375,10 +357,6 @@ spec:
               name: media-movies
             - mountPath: /tv
               name: media-tv
-            - mountPath: /run
-              name: bazarr-run
-            - mountPath: /tmp
-              name: bazarr-tmp
         {{- end }}
       restartPolicy: Always
       volumes:
@@ -402,18 +380,6 @@ spec:
           persistentVolumeClaim:
             claimName: {{ required "media.tv.existingClaim is required when sonarr or bazarr is enabled" .Values.media.tv.existingClaim }}
         {{- end }}
-        {{- if .Values.qbittorrent.enabled }}
-        - name: qbittorrent-run
-          emptyDir: {}
-        - name: qbittorrent-tmp
-          emptyDir: {}
-        {{- end }}
-        {{- if .Values.prowlarr.enabled }}
-        - name: prowlarr-run
-          emptyDir: {}
-        - name: prowlarr-tmp
-          emptyDir: {}
-        {{- end }}
         {{- if .Values.flaresolverr.enabled }}
         - name: flaresolverr-tmp
           emptyDir: {}
@@ -422,30 +388,12 @@ spec:
             medium: Memory
             sizeLimit: 512Mi
         {{- end }}
-        {{- if .Values.radarr.enabled }}
-        - name: radarr-run
-          emptyDir: {}
-        - name: radarr-tmp
-          emptyDir: {}
-        {{- end }}
         {{- if .Values.recyclarr.enabled }}
         - name: recyclarr-tmp
           emptyDir: {}
         {{- end }}
-        {{- if .Values.sonarr.enabled }}
-        - name: sonarr-run
-          emptyDir: {}
-        - name: sonarr-tmp
-          emptyDir: {}
-        {{- end }}
         {{- if .Values.seerr.enabled }}
         - name: seerr-tmp
-          emptyDir: {}
-        {{- end }}
-        {{- if .Values.bazarr.enabled }}
-        - name: bazarr-run
-          emptyDir: {}
-        - name: bazarr-tmp
           emptyDir: {}
         {{- end }}
   # Config volumes for gluetun and the enabled apps. NOTE: volumeClaimTemplates

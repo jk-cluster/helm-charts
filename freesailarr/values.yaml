@@ -192,17 +192,22 @@ qbittorrent:
       ephemeralStorage: 100Mi
   # Deviations from the hardening baseline, forced by the linuxserver.io
   # images (s6-overlay init that starts as root and drops to PUID/PGID):
-  # - no runAsNonRoot: s6-overlay must start as root to create the abc user
-  #   from PUID/PGID and chown /config.
+  # - no runAsNonRoot: s6-overlay must start as root to apply PUID/PGID and
+  #   chown /config.
+  # - readOnlyRootFilesystem: false: the s6 init applies PUID/PGID by
+  #   rewriting /etc/passwd and /etc/group and stages runtime state on the
+  #   root filesystem. With a read-only root filesystem the containers still
+  #   start, but silently keep the image's built-in uid/gid (911) instead of
+  #   PUID/PGID (verified at runtime) - unacceptable for the shared media
+  #   volumes.
   # - capabilities: ALL dropped except what the s6-overlay init needs:
   #   CHOWN/FOWNER/DAC_OVERRIDE (taking ownership of /config and /run) and
   #   SETUID/SETGID (dropping from root to the PUID/PGID user).
-  # readOnlyRootFilesystem stays true: the writable paths (/run, /tmp) are
-  # mounted as emptyDirs. (Same block for all linuxserver.io containers:
-  # qbittorrent, prowlarr, radarr, sonarr, bazarr.)
+  # (Same block for all linuxserver.io containers: qbittorrent, prowlarr,
+  # radarr, sonarr, bazarr.)
   securityContext:
     allowPrivilegeEscalation: false
-    readOnlyRootFilesystem: true
+    readOnlyRootFilesystem: false
     capabilities:
       drop:
         - ALL
@@ -255,7 +260,7 @@ prowlarr:
   # linuxserver.io image - see the qbittorrent securityContext comment.
   securityContext:
     allowPrivilegeEscalation: false
-    readOnlyRootFilesystem: true
+    readOnlyRootFilesystem: false
     capabilities:
       drop:
         - ALL
@@ -362,7 +367,7 @@ radarr:
   # linuxserver.io image - see the qbittorrent securityContext comment.
   securityContext:
     allowPrivilegeEscalation: false
-    readOnlyRootFilesystem: true
+    readOnlyRootFilesystem: false
     capabilities:
       drop:
         - ALL
@@ -467,7 +472,7 @@ sonarr:
   # linuxserver.io image - see the qbittorrent securityContext comment.
   securityContext:
     allowPrivilegeEscalation: false
-    readOnlyRootFilesystem: true
+    readOnlyRootFilesystem: false
     capabilities:
       drop:
         - ALL
@@ -571,7 +576,7 @@ bazarr:
   # linuxserver.io image - see the qbittorrent securityContext comment.
   securityContext:
     allowPrivilegeEscalation: false
-    readOnlyRootFilesystem: true
+    readOnlyRootFilesystem: false
     capabilities:
       drop:
         - ALL

@@ -1,8 +1,9 @@
 apiVersion: v2
 name: apache-tika
 description: A Helm chart to deploy Apache Tika on Kubernetes
+icon: https://www.apache.org/logos/res/tika/default.png
 
 type: application
 
-version: 7.1.1+up3.3.1.0.full
+version: 7.1.2+up3.3.1.0.full
 appVersion: "3.3.1.0-full"

@@ -1,10 +1,11 @@
 apiVersion: v2
 name: outline
 description: A Helm chart to deploy Outline on Kubernetes
+icon: https://raw.githubusercontent.com/outline/outline/main/public/images/icon-512.png
 
 type: application
 
-version: 3.1.0+up1.9.2
+version: 3.1.1+up1.9.2
 appVersion: 1.9.2
 
 maintainers:

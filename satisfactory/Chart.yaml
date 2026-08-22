@@ -1,8 +1,9 @@
 apiVersion: v2
 name: satisfactory
 description: A Helm chart to deploy a Satisfactory Gameserver on Kubernetes
+icon: https://raw.githubusercontent.com/wolveix/satisfactory-server/main/.github/logo.png
 type: application
-version: 3.1.0+upv1.9.10
+version: 3.1.1+upv1.9.10
 appVersion: "v1.9.10"
 maintainers:
   - name: jklein

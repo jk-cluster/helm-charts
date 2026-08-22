@@ -72,6 +72,7 @@ For runtime verification (do the workloads actually start, do probes/security se
 ## Chart conventions
 
 - Resources are named `{{ .Release.Name }}-{{ .Chart.Name }}-<kind>`; template files are named `<app>.<kind>.yaml` (StatefulSets use `.sfs.yaml`).
+  - **Deliberate exception — existing PVC names**: PVCs of already-published charts keep their historical names even where they deviate from the scheme. Renaming a PVC makes Kubernetes provision a new, empty volume, so a rename would orphan the existing data. New charts name PVCs `{{ .Release.Name }}-{{ .Chart.Name }}-pvc` per the scheme. StatefulSet names *are* being aligned (data survives because the charts use standalone PVC templates, not `volumeClaimTemplates`); each rename ships in its own major-bump PR with a one-time migration note (`kubectl delete statefulset <old> --cascade=orphan` before upgrading).
 - Image tags come from `{{ .Chart.AppVersion }}`.
 - Auxiliary/sidecar images (images other than the app image, currently only the delegation nginx in matrix-synapse) are pinned via values (`<workload>.image.repository` / `<workload>.image.tag`) instead of being hardcoded in templates, and their pinned versions are reviewed alongside every app-version update round.
 - Secrets are **1Password `OnePasswordItem` CRs**: values expose `secrets.<name>SecretRef` holding an `op://` item path; the 1Password operator materializes the Kubernetes Secret in-cluster.

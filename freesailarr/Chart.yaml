@@ -5,8 +5,8 @@ icon: https://raw.githubusercontent.com/qdm12/gluetun/master/doc/logo_256.png
 
 type: application
 
-version: 1.0.0+up3.41.1
-appVersion: "3.41.1"
+version: 1.0.0+upv3.41.1
+appVersion: "v3.41.1"
 
 maintainers:
   - name: jklein

@@ -5,7 +5,7 @@ metadata:
   name: {{ .Release.Name }}-{{ .Chart.Name }}-delegation-service
 spec:
   selector:
-    app: {{ .Release.Name }}-{{ .Chart.Name }}-delegation-nginx
+    app: {{ .Release.Name }}-{{ .Chart.Name }}-delegation-nginx-deployment
   ports:
     - protocol: TCP
       port: 80

@@ -2,18 +2,18 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}-{{ .Chart.Name }}-delegation-nginx
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-delegation-nginx-deployment
   labels:
-    app: {{ .Release.Name }}-{{ .Chart.Name }}-delegation-nginx
+    app: {{ .Release.Name }}-{{ .Chart.Name }}-delegation-nginx-deployment
 spec:
   replicas: {{ include "matrix-synapse.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.matrix.delegation.replicas) }}
   selector:
     matchLabels:
-      app: {{ .Release.Name }}-{{ .Chart.Name }}-delegation-nginx
+      app: {{ .Release.Name }}-{{ .Chart.Name }}-delegation-nginx-deployment
   template:
     metadata:
       labels:
-        app: {{ .Release.Name }}-{{ .Chart.Name }}-delegation-nginx
+        app: {{ .Release.Name }}-{{ .Chart.Name }}-delegation-nginx-deployment
     spec:
       automountServiceAccountToken: false
       securityContext:
@@ -38,36 +38,17 @@ spec:
           resources:
             {{- include "matrix-synapse.resources" .Values.matrix.delegation.resources | nindent 12 }}
           readinessProbe:
-            httpGet:
-              path: /.well-known/matrix/server
-              port: http
-              scheme: HTTP
-            periodSeconds: 10
-            timeoutSeconds: 3
-            failureThreshold: 3
+            {{- toYaml .Values.matrix.delegation.readinessProbe | nindent 12 }}
           livenessProbe:
-            httpGet:
-              path: /.well-known/matrix/server
-              port: http
-              scheme: HTTP
-            periodSeconds: 10
-            timeoutSeconds: 3
-            failureThreshold: 3
-          # The startup probe gates liveness/readiness. Startup budget = 5s * 30 = 150s.
+            {{- toYaml .Values.matrix.delegation.livenessProbe | nindent 12 }}
           startupProbe:
-            httpGet:
-              path: /.well-known/matrix/server
-              port: http
-              scheme: HTTP
-            periodSeconds: 5
-            timeoutSeconds: 3
-            failureThreshold: 30
+            {{- toYaml .Values.matrix.delegation.startupProbe | nindent 12 }}
       volumes:
         - name: tmp
           emptyDir: {}
         - name: nginx-config
           configMap:
-            name: {{ .Release.Name }}-{{ .Chart.Name }}-delegation-nginx-config
+            name: {{ .Release.Name }}-{{ .Chart.Name }}-delegation-nginx-configmap
             items:
               - key: nginx.conf
                 path: nginx.conf

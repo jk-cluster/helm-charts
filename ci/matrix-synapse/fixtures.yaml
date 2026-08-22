@@ -40,7 +40,7 @@ spec:
       containers:
         - name: generate
           # Same image the chart deploys (appVersion of matrix-synapse).
-          image: ghcr.io/element-hq/synapse:v1.149.1
+          image: ghcr.io/element-hq/synapse:v1.159.0
           args: ["generate"]
           env:
             - name: SYNAPSE_SERVER_NAME

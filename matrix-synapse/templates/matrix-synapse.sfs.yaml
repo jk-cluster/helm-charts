@@ -18,52 +18,49 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
-        fsGroup: 1000
-        fsGroupChangePolicy: Always
+        {{- toYaml .Values.matrix.securityContext.pod | nindent 8 }}
       containers:
         - name: "{{ .Release.Name }}-{{ .Chart.Name }}-container"
           image: "ghcr.io/element-hq/synapse:{{ .Chart.AppVersion }}"
+          securityContext:
+            {{- toYaml .Values.matrix.securityContext.container | nindent 12 }}
           env:
             - name: SYNAPSE_SERVER_NAME
               value: "{{ required "You must provide a Server-Name" .Values.matrix.serverName }}"
             - name: SYNAPSE_REPORT_STATS
               value: "no"
-            - name: UID
-              value: "1000"
-            - name: GID
-              value: "1000"
             - name: TZ
               value: "{{ .Values.matrix.timezone }}"
+            {{- range $value := .Values.matrix.env }}
+            {{- if $value.value }}
+            - name: {{ $value.name }}
+              value: {{ tpl $value.value $ }}
+            {{- else if $value.valueFrom }}
+            {{- if $value.valueFrom.secretKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ tpl $value.valueFrom.secretKeyRef.name $ }}
+                  key: {{ tpl $value.valueFrom.secretKeyRef.key $ }}
+            {{- else if $value.valueFrom.configMapKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ tpl $value.valueFrom.configMapKeyRef.name $ }}
+                  key: {{ tpl $value.valueFrom.configMapKeyRef.key $ }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
           ports:
             - name: http
               containerPort: 8008
               protocol: TCP
           readinessProbe:
-            httpGet:
-              path: /health
-              port: http
-              scheme: HTTP
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
+            {{- toYaml .Values.matrix.readinessProbe | nindent 12 }}
           livenessProbe:
-            httpGet:
-              path: /health
-              port: http
-              scheme: HTTP
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
-          # The startup probe gates liveness/readiness. Synapse can take a
-          # while to start (migrations, cache warmup): budget 10s * 30 = 300s.
+            {{- toYaml .Values.matrix.livenessProbe | nindent 12 }}
           startupProbe:
-            httpGet:
-              path: /health
-              port: http
-              scheme: HTTP
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 30
+            {{- toYaml .Values.matrix.startupProbe | nindent 12 }}
           resources:
             {{- include "matrix-synapse.resources" .Values.matrix.resources | nindent 12 }}
           volumeMounts:
@@ -76,7 +73,13 @@ spec:
             - name: matrix-synapse-config-secret
               mountPath: /data/homeserver.yaml
               subPath: homeserver.yaml
+            # Scratch space so the read-only root filesystem never blocks
+            # temp-file writes (e.g. URL-preview downloads).
+            - name: tmp
+              mountPath: /tmp
       volumes:
+        - name: tmp
+          emptyDir: {}
         - name: matrix-synapse-volume
           persistentVolumeClaim:
             claimName: {{ .Release.Name }}-{{ .Chart.Name }}-pvc

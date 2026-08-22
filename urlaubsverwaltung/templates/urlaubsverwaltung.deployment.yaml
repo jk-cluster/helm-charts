@@ -1,25 +1,25 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Chart.Name }}-{{ .Release.Name }}-uv-deployment
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
   labels:
-    app: {{ .Chart.Name }}-{{ .Release.Name }}
+    app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
 spec:
   replicas: {{ include "urlaubsverwaltung.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.urlaubsverwaltung.replicas) }}
   selector:
     matchLabels:
-      app: {{ .Chart.Name }}-{{ .Release.Name }}-uv-deployment
+      app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
   template:
     metadata:
-      name: {{ .Chart.Name }}-{{ .Release.Name }}-uv-deployment
+      name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
       labels:
-        app: {{ .Chart.Name }}-{{ .Release.Name }}-uv-deployment
+        app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
     spec:
       automountServiceAccountToken: false
       securityContext:
         {{- toYaml .Values.urlaubsverwaltung.securityContext.pod | nindent 8 }}
       containers:
-        - name: {{ .Chart.Name }}-{{ .Release.Name }}-uv-container
+        - name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
           image: "urlaubsverwaltung/urlaubsverwaltung:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
           securityContext:
@@ -38,17 +38,17 @@ spec:
             - name: SPRING_DATASOURCE_URL
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Chart.Name }}-{{ .Release.Name }}-uv-db-secret
+                  name: {{ .Release.Name }}-{{ .Chart.Name }}-db-secret
                   key: jdbc-url
             - name: SPRING_DATASOURCE_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Chart.Name }}-{{ .Release.Name }}-uv-db-secret
+                  name: {{ .Release.Name }}-{{ .Chart.Name }}-db-secret
                   key: username
             - name: SPRING_DATASOURCE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Chart.Name }}-{{ .Release.Name }}-uv-db-secret
+                  name: {{ .Release.Name }}-{{ .Chart.Name }}-db-secret
                   key: password
             # Mail
             - name: UV_MAIL_FROM
@@ -72,17 +72,17 @@ spec:
             - name: SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_DEFAULT_CLIENT-ID
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Chart.Name }}-{{ .Release.Name }}-uv-oidc-secret
+                  name: {{ .Release.Name }}-{{ .Chart.Name }}-oidc-secret
                   key: client-id
             - name: SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_DEFAULT_CLIENT-SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Chart.Name }}-{{ .Release.Name }}-uv-oidc-secret
+                  name: {{ .Release.Name }}-{{ .Chart.Name }}-oidc-secret
                   key: client-secret
             - name: SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_DEFAULT_CLIENT-NAME
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Chart.Name }}-{{ .Release.Name }}-uv-oidc-secret
+                  name: {{ .Release.Name }}-{{ .Chart.Name }}-oidc-secret
                   key: issuer-name
             - name: SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_DEFAULT_PROVIDER
               value: default
@@ -93,49 +93,50 @@ spec:
             - name: SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_DEFAULT_REDIRECT-URI
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Chart.Name }}-{{ .Release.Name }}-uv-oidc-secret
+                  name: {{ .Release.Name }}-{{ .Chart.Name }}-oidc-secret
                   key: redirect-uri
             - name: SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_DEFAULT_ISSUER-URI
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Chart.Name }}-{{ .Release.Name }}-uv-oidc-secret
+                  name: {{ .Release.Name }}-{{ .Chart.Name }}-oidc-secret
                   key: issuer-uri
             - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER-URI
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Chart.Name }}-{{ .Release.Name }}-uv-oidc-secret
+                  name: {{ .Release.Name }}-{{ .Chart.Name }}-oidc-secret
                   key: jwt-issuer-uri
             - name: UV_SECURITY_OIDC_CLAIM-MAPPERS_GROUP-CLAIM_ENABLED
               value: "true"
             - name: UV_SECURITY_OIDC_CLAIM-MAPPERS_GROUP-CLAIM_CLAIM-NAME
               value: "groups"
+            {{- range $value := .Values.urlaubsverwaltung.env }}
+            {{- if $value.value }}
+            - name: {{ $value.name | quote }}
+              value: {{ tpl $value.value $ | quote }}
+            {{- else if $value.valueFrom }}
+            {{- if $value.valueFrom.secretKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ tpl $value.valueFrom.secretKeyRef.name $ | quote }}
+                  key: {{ tpl $value.valueFrom.secretKeyRef.key $ | quote }}
+            {{- else if $value.valueFrom.configMapKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ tpl $value.valueFrom.configMapKeyRef.name $ | quote }}
+                  key: {{ tpl $value.valueFrom.configMapKeyRef.key $ | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
           resources:
             {{- include "urlaubsverwaltung.resources" .Values.urlaubsverwaltung.resources | nindent 12 }}
-          readinessProbe:
-            httpGet:
-              port: 8080
-              path: /actuator/health/readiness
-            periodSeconds: 5
-            failureThreshold: 3
-            successThreshold: 1
-            timeoutSeconds: 5
           livenessProbe:
-            httpGet:
-              port: 8080
-              path: /actuator/health/liveness
-            periodSeconds: 10
-            failureThreshold: 3
-            successThreshold: 1
-            timeoutSeconds: 5
-          # The startup probe gates liveness/readiness. Spring Boot startup
-          # (JVM + Liquibase migrations) gets a budget of 10s * 30 = 300s.
+            {{- toYaml .Values.urlaubsverwaltung.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.urlaubsverwaltung.readinessProbe | nindent 12 }}
           startupProbe:
-            httpGet:
-              port: 8080
-              path: /actuator/health/liveness
-            periodSeconds: 10
-            failureThreshold: 30
-            timeoutSeconds: 5
+            {{- toYaml .Values.urlaubsverwaltung.startupProbe | nindent 12 }}
       volumes:
         - name: tmp
           emptyDir: {}

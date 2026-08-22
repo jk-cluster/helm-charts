@@ -1,4 +1,4 @@
-name: Publish Zipline Helm Chart
+name: Publish Satisfactory Helm Chart
 on:
   workflow_dispatch:
   push:

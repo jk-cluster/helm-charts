@@ -21,20 +21,31 @@ paperless:
   replicas: 1
   ocr:
     languages: "eng"
-    mode: "skip"
+    # Paperless-ngx 3.x modes: auto (default, skips OCR when embedded text
+    # exists), redo, force, off. The 2.x values "skip"/"skip_noarchive" were
+    # removed upstream; "skip" maps to "auto".
+    mode: "auto"
+    # Archive (PDF/A) generation, decoupled from OCR in 3.0: auto (default,
+    # skip archive for born-digital PDFs), always (2.x behavior), never.
+    archiveFileGeneration: "auto"
     rotate_pages: "true"
     output_type: "pdfa"
   files:
     filenameFormat: "{{ created_year }}/{{ correspondent }}/{{ title }}"
     storage: 20Gi
     maxUploadFileSize: 10m
+    # The barcode scanner backend is no longer configurable: paperless-ngx 3.0
+    # removed pyzbar and PAPERLESS_CONSUMER_BARCODE_SCANNER; zxing-cpp is the
+    # only backend now.
     barcodes:
       enabled: true
       barcodeString: "PATCHT"
       retainBarcodePage: false
       asn:
         enabled: true
-      scanner: PYZBAR
+    # Paperless-ngx 3.0 no longer rejects duplicate documents by default; set
+    # to true to restore the 2.x behavior of deleting duplicates on consume.
+    deleteDuplicates: false
     tikaGotenberg:
       enabled: false
       tikaEndpoint: null
@@ -112,3 +123,7 @@ oidc:
     name: null
     clientId: null
     discoveryUrl: null
+    # Optional: explicit token endpoint auth method (e.g. client_secret_basic).
+    # Some providers need this since the allauth update in paperless-ngx 3.0
+    # (login fails at the callback with invalid_client otherwise).
+    tokenAuthMethod: null

@@ -126,6 +126,8 @@ spec:
               value: "{{ .Values.paperless.ocr.languages }}"
             - name: PAPERLESS_OCR_MODE
               value: "{{ .Values.paperless.ocr.mode }}"
+            - name: PAPERLESS_ARCHIVE_FILE_GENERATION
+              value: "{{ .Values.paperless.ocr.archiveFileGeneration }}"
             - name: PAPERLESS_OCR_ROTATE_PAGES
               value: "{{ .Values.paperless.ocr.rotate_pages }}"
             - name: PAPERLESS_OCR_OUTPUT_TYPE
@@ -142,8 +144,8 @@ spec:
               value: "{{ .Values.paperless.files.barcodes.barcodeString }}"
             - name: PAPERLESS_CONSUMER_BARCODE_RETAIN_SPLIT_PAGES
               value: "{{ .Values.paperless.files.barcodes.retainBarcodePage }}"
-            - name: PAPERLESS_CONSUMER_BARCODE_SCANNER
-              value: "{{ .Values.paperless.files.barcodes.scanner }}"
+            - name: PAPERLESS_CONSUMER_DELETE_DUPLICATES
+              value: "{{ .Values.paperless.files.deleteDuplicates }}"
             {{- if .Values.paperless.files.tikaGotenberg.enabled }}
             - name:  PAPERLESS_TIKA_ENABLED
               value: "{{ .Values.paperless.files.tikaGotenberg.enabled }}"
@@ -169,6 +171,9 @@ spec:
                           "fetch_userinfo": true,
                           "oauth_pkce_enabled": true,
                           "server_url": "{{ required "A OIDC-discovery-document-url must be provided" .Values.oidc.provider.discoveryUrl }}",
+                          {{- if .Values.oidc.provider.tokenAuthMethod }}
+                          "token_auth_method": "{{ .Values.oidc.provider.tokenAuthMethod }}",
+                          {{- end }}
                           "uid_field": "sub"
                         }
                       }
@@ -217,13 +222,15 @@ spec:
             successThreshold: 1
             timeoutSeconds: 5
           # The startup probe gates liveness/readiness. Paperless runs database
-          # migrations and index checks on startup: budget 10s * 30 = 300s.
+          # migrations on startup, and since 3.0 the first start after an
+          # upgrade also rebuilds the search index from scratch (Whoosh ->
+          # Tantivy): budget 10s * 60 = 600s.
           startupProbe:
             httpGet:
               path: /
               port: 8000
             periodSeconds: 10
-            failureThreshold: 30
+            failureThreshold: 60
             timeoutSeconds: 5
       restartPolicy: Always
       volumes:

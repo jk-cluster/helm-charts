@@ -170,6 +170,11 @@ spec:
           env:
             - name: TZ
               value: {{ .Values.timezone | quote }}
+            # flaresolverr writes chromedriver caches under $HOME (image
+            # default /app, which is read-only); point HOME at the writable
+            # /tmp emptyDir so the root filesystem can stay read-only.
+            - name: HOME
+              value: /tmp
             {{- include "freesailarr.env" (dict "root" $ "env" .Values.flaresolverr.env) | nindent 12 }}
           ports:
             - containerPort: 8191

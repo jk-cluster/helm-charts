@@ -27,17 +27,18 @@ spec:
         - name: gluetun
           image: "qmcgaw/gluetun:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
-          # An uncleanly exited gluetun (crash, OOM, node issue) leaves its ip
-          # rule behind in the shared pod network namespace, and the restarted
-          # container then fails forever with "ip rule 101 ... file exists".
-          # Upstream-recommended fix for Kubernetes: drop stale rules on start.
-          lifecycle:
-            postStart:
-              exec:
-                command:
-                  - /bin/sh
-                  - -c
-                  - (ip rule del table 51820; ip -6 rule del table 51820) || true
+          # An uncleanly exited gluetun (crash, OOM killer, node issue) leaves
+          # its ip rule, routing table and tun device behind in the shared pod
+          # network namespace, and the restarted container then fails forever
+          # ("adding ip rule 101 ... file exists" / silent tunnel breakage)
+          # while the kill switch blocks all egress. The upstream-recommended
+          # postStart hook is racy (it runs concurrently with the entrypoint
+          # and can delete the rule the new instance just created), so the
+          # stale state is cleaned synchronously before gluetun starts.
+          command:
+            - /bin/sh
+            - -c
+            - 'while ip rule del table 51820 2>/dev/null; do :; done; while ip -6 rule del table 51820 2>/dev/null; do :; done; ip link del tun0 2>/dev/null; exec /gluetun-entrypoint'
           env:
             - name: TZ
               value: {{ .Values.timezone | quote }}

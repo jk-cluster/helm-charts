@@ -1,9 +1,10 @@
 apiVersion: v2
 name: samba
 description: A Helm chart for Samba
+icon: https://avatars.githubusercontent.com/u/13281359
 
 type: application
 
-version: 3.1.1+up4.23.10
+version: 3.1.2+up4.23.10
 
 appVersion: 4.23.10

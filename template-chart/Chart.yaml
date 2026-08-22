@@ -1,6 +1,7 @@
 apiVersion: v2
 name: xxx
 description: A Helm chart to deploy xxx on Kubernetes
+icon: https://helm.sh/img/helm.svg
 
 type: application
 

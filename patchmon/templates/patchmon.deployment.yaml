@@ -143,6 +143,26 @@ spec:
             - name: GUACD_ADDRESS
               value: "127.0.0.1:4822"
             {{- end }}
+            {{- range $value := .Values.patchmon.server.env }}
+            {{- if $value.value }}
+            - name: {{ $value.name | quote }}
+              value: {{ tpl $value.value $ | quote }}
+            {{- else if $value.valueFrom }}
+            {{- if $value.valueFrom.secretKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ tpl $value.valueFrom.secretKeyRef.name $ | quote }}
+                  key: {{ tpl $value.valueFrom.secretKeyRef.key $ | quote }}
+            {{- else if $value.valueFrom.configMapKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ tpl $value.valueFrom.configMapKeyRef.name $ | quote }}
+                  key: {{ tpl $value.valueFrom.configMapKeyRef.key $ | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
           # Probe values are rendered through tpl (see values.yaml for the
           # defaults and why the probes send a Host header).
           livenessProbe:
@@ -162,6 +182,29 @@ spec:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-guacd
           image: {{ .Values.patchmon.guacd.image }}
           imagePullPolicy: IfNotPresent
+          {{- if .Values.patchmon.guacd.env }}
+          env:
+            {{- range $value := .Values.patchmon.guacd.env }}
+            {{- if $value.value }}
+            - name: {{ $value.name | quote }}
+              value: {{ tpl $value.value $ | quote }}
+            {{- else if $value.valueFrom }}
+            {{- if $value.valueFrom.secretKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ tpl $value.valueFrom.secretKeyRef.name $ | quote }}
+                  key: {{ tpl $value.valueFrom.secretKeyRef.key $ | quote }}
+            {{- else if $value.valueFrom.configMapKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ tpl $value.valueFrom.configMapKeyRef.name $ | quote }}
+                  key: {{ tpl $value.valueFrom.configMapKeyRef.key $ | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+          {{- end }}
           securityContext:
             {{- toYaml .Values.patchmon.guacd.securityContext.container | nindent 12 }}
           ports:

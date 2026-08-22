@@ -77,6 +77,10 @@ patchmon:
       periodSeconds: 10
       timeoutSeconds: 5
       failureThreshold: 60
+    # Extra environment variables, appended to the ones the chart always sets.
+    # Values are rendered through tpl; value, secretKeyRef and configMapKeyRef
+    # forms are supported.
+    env: []
   guacd:
     # In-browser RDP for Windows hosts (beta) via the Apache Guacamole daemon,
     # run as a sidecar container in the server pod. Disabled by default; when
@@ -126,6 +130,10 @@ patchmon:
       periodSeconds: 5
       timeoutSeconds: 5
       failureThreshold: 30
+    # Extra environment variables for the guacd sidecar (e.g. GUACD_LOG_LEVEL).
+    # Values are rendered through tpl; value, secretKeyRef and configMapKeyRef
+    # forms are supported.
+    env: []
 
 ingress:
   clusterIssuer: null

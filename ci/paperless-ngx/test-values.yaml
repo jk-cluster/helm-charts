@@ -5,6 +5,9 @@ secrets:
 
 ingress:
   domain: paperless.ci.local
+  # clusterIssuer is strictly required (no default); the Ingress just has to
+  # apply - there is no cert-manager in the CI cluster.
+  clusterIssuer: ci
 
 # smbConnection and oidc stay disabled (defaults): the SMB CSI driver and a
 # real OIDC login flow are out of scope for the CI install-test.

@@ -3,13 +3,16 @@ kind: Ingress
 metadata:
   name: {{ .Release.Name }}-{{ .Chart.Name }}-ingress
   annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-issuer
+    cert-manager.io/cluster-issuer: {{ required "A Cluster-Issuer must be provided" .Values.ingress.clusterIssuer }}
     nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.config.maxUploadFileSize }}
     nginx.org/client-max-body-size: {{ .Values.config.maxUploadFileSize }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
-  ingressClassName: nginx
+  ingressClassName: {{ .Values.ingress.className }}
   rules:
-    - host: {{ required "A Domain/Host must be provided" .Values.config.domain }}
+    - host: {{ required "A Domain/Host must be provided" .Values.ingress.domain }}
       http:
         paths:
           - backend:
@@ -21,5 +24,5 @@ spec:
             pathType: Prefix
   tls:
     - hosts:
-        - {{ required "A Domain/Host must be provided" .Values.config.domain }}
-      secretName: tls-{{ .Release.Name }}-{{ .Chart.Name }}-{{ .Values.config.domain }}-ingress
+        - {{ required "A Domain/Host must be provided" .Values.ingress.domain }}
+      secretName: tls-{{ .Release.Name }}-{{ .Chart.Name }}-ingress

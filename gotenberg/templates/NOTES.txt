@@ -1,0 +1,62 @@
+{{- $replicas := include "gotenberg.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.gotenberg.replicas) -}}
+{{- $limits := (include "gotenberg.resources" .Values.gotenberg.resources | fromYaml).limits | default dict -}}
+{{- $svc := printf "%s-%s-service" .Release.Name .Chart.Name -}}
+Gotenberg {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+ACCESS
+  This chart creates no Ingress. The API is cluster-internal:
+
+    http://{{ $svc }}.{{ .Release.Namespace }}.svc.cluster.local
+
+  Mind the port. The Service listens on 80 and forwards to the container's
+  3000, so consumers are configured without a port — e.g. paperless-ngx:
+
+    PAPERLESS_TIKA_GOTENBERG_ENDPOINT: http://{{ $svc }}.{{ .Release.Namespace }}.svc.cluster.local
+
+  To reach it from your machine:
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $svc }} 3000:80
+    curl http://localhost:3000/health
+
+  The health route reports Chromium and LibreOffice separately — it is the
+  quickest way to tell a broken converter from a broken caller. This chart has
+  no secrets and no volumes.
+{{ if eq $replicas "0" }}
+SCALED TO ZERO
+  {{ if .Values.scaleDown }}scaleDown: true{{ else }}gotenberg.replicas: 0{{ end }} — the deployment runs with replicas: 0. The Service
+  keeps its ClusterIP but has no endpoints, so callers fail with "connection
+  refused" rather than a timeout. Set it back and upgrade to return.
+{{ end }}
+NO AUTHENTICATION, AND THIS CHART CANNOT ADD ANY
+  Gotenberg's basic auth and OIDC, its SSRF guards for the downloadFrom
+  feature, and its request timeout are all command-line flags. This chart
+  passes no flags — it only offers gotenberg.env — so none of them can be
+  switched on through values. Everything that reaches the Service may convert,
+  and the URL routes make the server fetch whatever URL they are handed. Keep
+  it cluster-internal; do not put an Ingress in front of it without auth.
+
+MEMORY IS THE LIMIT YOU HIT FIRST
+  Chromium and LibreOffice hold the whole document in memory. With this
+  release's limit of {{ index $limits "memory" | default "(none set)" }}, a 20-page HTML converts in well under a second,
+  while a 25 MB HTML is enough to get the container OOM-killed.
+  How you notice: the caller gets no HTTP error — the connection is dropped
+  mid-request — and the pod's RESTARTS counter goes up. Confirm with
+
+    kubectl -n {{ .Release.Namespace }} get pod -l app={{ .Release.Name }}-{{ .Chart.Name }}-deployment -o jsonpath='{.items[*].status.containerStatuses[*].lastState.terminated.reason}'
+
+  which then prints OOMKilled. Raise gotenberg.resources.requests.memory (the
+  limit follows at limitFactor x request) or set an explicit limit.
+
+TEMP SPACE IS TIGHT, AND RUNNING OUT LOOKS DIFFERENT
+  /tmp and /home/gotenberg are emptyDirs, so they count against the container's
+  ephemeral-storage limit of {{ index $limits "ephemeral-storage" | default "(none set)" }}. Chromium's profile alone takes about 4 MB,
+  and the uploaded file plus the rendered PDF come on top.
+  How you notice: the pod does not restart, it disappears — a fresh one takes
+  its place and the old one is left in status Evicted, with the message naming
+  ephemeral-storage. Raise gotenberg.resources.requests.ephemeralStorage.
+
+REQUESTS TIME OUT AFTER 30 SECONDS
+  That is Gotenberg's own default, and since the chart passes no flags it
+  cannot be changed here. Large conversions get close: the 25 MB document
+  above still needed 19 seconds once it had memory enough to finish. Callers
+  that need longer must split the document instead.

@@ -1,4 +1,8 @@
 {{- $replicas := include "apache-tika.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.tika.replicas) -}}
+{{- /* effectiveResources, not resources: an erased "resources:" block falls back
+       to the chart defaults in the Deployment (#99), so the notes must report the
+       limits the release actually gets — and the heap figure below is derived from
+       that same effective limit, not from the raw value. */ -}}
 {{- $limits := (include "apache-tika.effectiveResources" .Values.tika.resources | fromYaml).limits | default dict -}}
 {{- $memLimit := index $limits "memory" -}}
 {{- $svc := printf "%s-%s-service" .Release.Name .Chart.Name -}}

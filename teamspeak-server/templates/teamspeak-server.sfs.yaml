@@ -17,7 +17,7 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
-        {{- toYaml .Values.securityContext.pod | nindent 8 }}
+        {{- include "teamspeak-server.podSecurityContext" .Values.securityContext | nindent 8 }}
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
           image: "teamspeaksystems/teamspeak6-server:{{ .Chart.AppVersion }}"
@@ -60,15 +60,15 @@ spec:
             {{- end }}
             {{- end }}
           livenessProbe:
-            {{- toYaml .Values.livenessProbe | nindent 12 }}
+            {{- include "teamspeak-server.livenessProbe" .Values.livenessProbe | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.readinessProbe | nindent 12 }}
+            {{- include "teamspeak-server.readinessProbe" .Values.readinessProbe | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.startupProbe | nindent 12 }}
+            {{- include "teamspeak-server.startupProbe" .Values.startupProbe | nindent 12 }}
           resources:
-            {{- include "teamspeak-server.resources" .Values.resources | nindent 12 }}
+            {{- include "teamspeak-server.effectiveResources" .Values.resources | nindent 12 }}
           securityContext:
-            {{- toYaml .Values.securityContext.container | nindent 12 }}
+            {{- include "teamspeak-server.containerSecurityContext" .Values.securityContext | nindent 12 }}
           volumeMounts:
             - name: "teamspeak-volume"
               mountPath: /var/tsserver/

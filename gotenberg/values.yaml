@@ -54,7 +54,27 @@ gotenberg:
     # limitFactor x the request, an explicitly set limit always wins, and a
     # CPU limit is only set when configured explicitly under "limits".
     limitFactor: 3
+    # The requests stay small on purpose: gotenberg idles at a few dozen MB,
+    # so reserving conversion-sized capacity on the node would waste it
+    # around the clock. Conversions are short bursts, and the limits below
+    # cover the burst instead (issue #106).
     requests:
       cpu: 0.1
       memory: 512Mi
       ephemeralStorage: 10Mi
+    # Set explicitly rather than left to limitFactor x request, because the
+    # computed limits (1536Mi / 30Mi) were too small for real documents.
+    # Measured with the official image, HTML converted via Chromium:
+    #   - 18 MB HTML: OOMKilled at 2Gi and 2560Mi, converts at 3Gi in ~22s
+    #     (21 MB PDF). 12 MB HTML already OOM-kills at the old 1536Mi.
+    #   - Raising memory alone only moves the failure: with 3Gi memory and
+    #     the old 30Mi ephemeral limit, /tmp peaked at 40 MB on a single
+    #     conversion and at ~125 MB over a short series, and the pod was
+    #     evicted ("ephemeral local storage usage exceeds the total limit of
+    #     containers 30Mi") instead of OOM-killed.
+    # Memory beyond 3Gi buys nothing: gotenberg's own request timeout is 30s
+    # and the chart passes no flags to change it, so a document that needs
+    # more memory than this has already run out of time.
+    limits:
+      memory: 3Gi
+      ephemeralStorage: 256Mi

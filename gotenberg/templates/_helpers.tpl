@@ -263,7 +263,8 @@ instead of a container without any resource accounting.
 {{- define "gotenberg.effectiveResources" -}}
 {{- $defaults := dict
       "limitFactor" 3
-      "requests" (dict "cpu" 0.1 "memory" "512Mi" "ephemeralStorage" "10Mi") -}}
+      "requests" (dict "cpu" 0.1 "memory" "512Mi" "ephemeralStorage" "10Mi")
+      "limits" (dict "memory" "3Gi" "ephemeralStorage" "256Mi") -}}
 {{- $merged := fromYaml (include "gotenberg.defaultedDict" (dict "defaults" $defaults "given" . "path" "gotenberg.resources")) -}}
 {{- include "gotenberg.resources" $merged -}}
 {{- end -}}

@@ -15,6 +15,18 @@ spec:
       labels:
         app: "{{ .Release.Name }}-{{ .Chart.Name }}"
       name: "{{ .Release.Name }}-{{ .Chart.Name }}-sfs"
+      annotations:
+        # Deliberately NOT a hash of the secret's content: the Kubernetes Secret
+        # is materialized by the 1Password operator, so Helm never sees what is
+        # in it. This hash covers the rendered OnePasswordItem, i.e. the op://
+        # item path - repointing secrets.configSecretRef at a different item now
+        # takes effect instead of silently leaving the old configuration in the
+        # running pod. A change of the item's CONTENT inside the vault is not
+        # covered; see the comment on secrets in values.yaml for why that gap
+        # cannot be closed here and what it means operationally.
+        # The name differs from checksum/config on purpose - that one promises
+        # "the config changed", this one only "the config source changed".
+        checksum/secret-ref: {{ include (print $.Template.BasePath "/homeassistant-core-config.secret.yaml") . | sha256sum }}
     spec:
       automountServiceAccountToken: false
       securityContext:

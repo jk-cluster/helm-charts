@@ -122,5 +122,32 @@ core:
 # - config
 # - http-config
 # - recorder-config
+#
+# Changing the op:// path below IS covered: the StatefulSet carries a
+# checksum/secret-ref annotation over the rendered OnePasswordItem, so pointing
+# this value at a different vault item restarts the pod.
+#
+# Known limitation (#82): changing the CONTENT of that item in the vault does
+# NOT restart Home Assistant. The operator updates the Kubernetes Secret, but
+# the running pod keeps the old files - they are mounted with subPath, which the
+# kubelet never refreshes, and Home Assistant reads its configuration only at
+# start. The change then takes effect at some unrelated later restart, possibly
+# months afterwards, and a broken value surfaces long after the edit that caused
+# it. That is especially likely for this release, which is currently kept at
+# zero replicas via scaleDown: whoever brings it back up gets whatever the vault
+# holds at that moment.
+#
+# The checksum/config mechanism the other charts use cannot close this gap:
+# Helm never sees the content (the operator fills the Secret in-cluster after
+# rendering), so there is nothing to hash. The operator's own
+# "operator.1password.io/auto-restart" annotation does not close it either - it
+# only ever restarts Deployments, never StatefulSets. Verified against
+# onepassword-operator 1.12.0: pkg/onepassword/secret_update_handler.go lists
+# exactly one workload type (appsv1.DeploymentList), and the PR adding
+# StatefulSets is still open. Setting the annotation here would look like a fix
+# and do nothing, so this chart deliberately does not set it.
+#
+# After changing the item, restart Home Assistant by hand:
+#   kubectl rollout restart statefulset <release>-homeassistant-sfs
 secrets:
   configSecretRef: null

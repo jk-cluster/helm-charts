@@ -1,0 +1,363 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "paperless-ngx values",
+  "description": "Strict values schema (issue #68). additionalProperties is false on every chart-owned object level, so a key that the chart does not read is rejected at render time instead of being silently ignored. The only objects that stay open are the ones passed verbatim into the Kubernetes pod spec (probes, security contexts, global) - the chart does not interpret their contents, so it cannot judge which keys are meaningful. The hardening, probe and resources blocks of BOTH workloads, and the barcodes block from issue #61, additionally accept null, because an erased block falls back to the chart defaults (issues #61 and #99).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "global": {
+      "description": "Helm's conventional cross-chart values. Unused by this chart, kept open so an umbrella install cannot break on it.",
+      "type": "object"
+    },
+    "scaleDown": {
+      "type": "boolean"
+    },
+    "secrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "redisSecretRef": {
+          "type": ["string", "null"]
+        },
+        "databaseSecretRef": {
+          "type": ["string", "null"]
+        },
+        "paperlessSecretRef": {
+          "type": ["string", "null"]
+        },
+        "smbConnectionSecretRef": {
+          "type": ["string", "null"]
+        },
+        "oidcSecretRef": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "clusterIssuer": {
+          "type": ["string", "null"]
+        },
+        "domain": {
+          "type": ["string", "null"]
+        },
+        "className": {
+          "type": ["string", "null"]
+        },
+        "annotations": {
+          "description": "Extra Ingress annotations, merged with the cert-manager and upload-size annotations the chart always sets. Free-form keys by nature.",
+          "type": "object"
+        }
+      }
+    },
+    "paperless": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "busybox": {
+          "description": "Auxiliary image for the /run-ownership init container and the SMB consume-mover CronJob. Pinned independently of appVersion.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "image": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "repository": {
+                  "type": ["string", "null"]
+                },
+                "tag": {
+                  "type": ["string", "number", "null"]
+                }
+              }
+            }
+          }
+        },
+        "ocr": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "languages": {
+              "type": ["string", "null"]
+            },
+            "mode": {
+              "description": "paperless-ngx 3.x modes. The 2.x values skip/skip_noarchive were removed upstream; skip maps to auto.",
+              "type": ["string", "null"],
+              "enum": ["auto", "redo", "force", "off", null]
+            },
+            "archiveFileGeneration": {
+              "description": "Archive (PDF/A) generation, decoupled from OCR in 3.0.",
+              "type": ["string", "null"],
+              "enum": ["auto", "always", "never", null]
+            },
+            "rotate_pages": {
+              "type": ["string", "boolean", "null"]
+            },
+            "output_type": {
+              "type": ["string", "null"]
+            }
+          }
+        },
+        "files": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "filenameFormat": {
+              "type": ["string", "null"]
+            },
+            "storage": {
+              "description": "Size of the media PVC. Not null-safe on purpose: an erased value yields an invalid PVC rather than a silently degraded workload.",
+              "type": ["string", "null"]
+            },
+            "maxUploadFileSize": {
+              "type": ["string", "null"]
+            },
+            "barcodes": {
+              "description": "May be null / empty: the chart then falls back to these defaults instead of letting a childless key erase them (issue #61). To switch barcode handling off, set enabled: false explicitly.",
+              "type": ["object", "null"],
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "barcodeString": {
+                  "type": ["string", "null"]
+                },
+                "retainBarcodePage": {
+                  "type": "boolean"
+                },
+                "asn": {
+                  "type": ["object", "null"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            },
+            "deleteDuplicates": {
+              "description": "paperless-ngx 3.0 no longer rejects duplicates by default; true restores the 2.x behaviour.",
+              "type": "boolean"
+            },
+            "tikaGotenberg": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "Boolean or string - all three production bundles write it as the string \"true\", and the value is passed straight through as PAPERLESS_TIKA_ENABLED. Note that the template gates on truthiness, so the STRING \"false\" still renders the block (and keeps the two endpoints required) even though the env value it emits is \"false\"; use a real boolean false to switch the block off.",
+                  "type": ["boolean", "string", "null"]
+                },
+                "tikaEndpoint": {
+                  "type": ["string", "null"]
+                },
+                "gotenbergEndpoint": {
+                  "type": ["string", "null"]
+                }
+              }
+            }
+          }
+        },
+        "scripts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "postConsumptionScripts": {
+              "type": ["array", "null"]
+            },
+            "preConsumptionScripts": {
+              "type": ["array", "null"]
+            }
+          }
+        },
+        "livenessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "readinessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "startupProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "env": {
+          "$ref": "#/definitions/env"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "securityContext": {
+          "$ref": "#/definitions/securityContext"
+        }
+      }
+    },
+    "smbConnection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "server": {
+          "type": ["string", "null"]
+        },
+        "cronJob": {
+          "description": "Cron schedule of the consume-mover job.",
+          "type": ["string", "null"]
+        },
+        "cron": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "securityContext": {
+              "$ref": "#/definitions/securityContext"
+            },
+            "resources": {
+              "$ref": "#/definitions/resources"
+            }
+          }
+        }
+      }
+    },
+    "oidc": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "autoLoginWithProvider": {
+          "type": "boolean"
+        },
+        "disableRegularLogin": {
+          "type": "boolean"
+        },
+        "provider": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": ["string", "null"]
+            },
+            "name": {
+              "type": ["string", "null"]
+            },
+            "clientId": {
+              "type": ["string", "null"]
+            },
+            "discoveryUrl": {
+              "type": ["string", "null"]
+            },
+            "tokenAuthMethod": {
+              "description": "Explicit token endpoint auth method (e.g. client_secret_basic). Some providers need this since the allauth update in paperless-ngx 3.0.",
+              "type": ["string", "null"]
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "resources": {
+      "description": "May be null / empty: the chart then falls back to its default requests and computed limits (issue #99) instead of rendering a container without resource accounting.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "limitFactor": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "requests": {
+          "$ref": "#/definitions/resourceList"
+        },
+        "limits": {
+          "$ref": "#/definitions/resourceList"
+        }
+      }
+    },
+    "resourceList": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "cpu": {
+          "type": ["string", "number", "null"]
+        },
+        "memory": {
+          "type": ["string", "number", "null"]
+        },
+        "ephemeral-storage": {
+          "type": ["string", "number", "null"]
+        },
+        "ephemeralStorage": {
+          "type": ["string", "number", "null"]
+        }
+      }
+    },
+    "env": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "valueFrom": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "secretKeyRef": {
+                "$ref": "#/definitions/keyRef"
+              },
+              "configMapKeyRef": {
+                "$ref": "#/definitions/keyRef"
+              }
+            }
+          }
+        }
+      }
+    },
+    "keyRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "key"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        }
+      }
+    },
+    "securityContext": {
+      "description": "May be null / empty at any level: the chart then falls back to its hardening defaults (issue #99) instead of rendering an unhardened workload. For the server the pod context is consumed twice - as the pod's securityContext and by the /run-ownership init container, which chowns /run to runAsUser:runAsGroup because s6-overlay requires /run to be owned by the runtime uid.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "pod": {
+          "description": "Merged onto the chart's pod hardening defaults and rendered as the pod's securityContext; kept open because the chart does not interpret the individual fields.",
+          "type": ["object", "null"]
+        },
+        "container": {
+          "description": "Merged onto the chart's container hardening defaults and rendered as the container's securityContext; kept open because the chart does not interpret the individual fields.",
+          "type": ["object", "null"]
+        }
+      }
+    },
+    "probe": {
+      "description": "Merged onto the chart's probe defaults and rendered as a container probe; kept open because the chart does not interpret the individual fields. May be null / empty, which means the defaults apply (issue #99) rather than the probe disappearing.",
+      "type": ["object", "null"]
+    }
+  }
+}

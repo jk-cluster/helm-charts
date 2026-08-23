@@ -23,6 +23,27 @@ rallly:
     pictureClaimPath: 'picture'
     emailClaimPath: 'email'
     nameClaimPath: 'name'
+  # Next.js writes its cache below the app directory (prerendered/ISR pages and
+  # the optimized images of /_next/image). The container runs as uid 20000
+  # while /app belongs to the image's own "nextjs" user, so that path is not
+  # writable for the app even without readOnlyRootFilesystem — the chart mounts
+  # a writable volume over it. The pod's fsGroup (1000) is what makes the
+  # mounted volume group-writable for the container.
+  #
+  # Deliberately an emptyDir, not a PVC: the cache is volatile. After every pod
+  # restart it starts out empty and Next.js rebuilds it on demand, which costs
+  # a little time on the first request after a restart. That is correct for a
+  # cache — its entries are derived data tied to the build id of the image, so
+  # a persistent volume would only carry stale entries across app updates.
+  cache:
+    # Mount path of the cache volume. Matches the Next.js cache directory of
+    # the upstream image; only needs changing if the image layout changes.
+    path: /app/apps/web/.next/cache
+    # Optional upper bound for the emptyDir, e.g. 512Mi. Unset means the volume
+    # is only bounded by the container's ephemeral-storage limit (computed as
+    # limitFactor x request, see resources below) — note that emptyDir usage
+    # counts against that limit, and exceeding either bound evicts the pod.
+    sizeLimit: null
   securityContext:
     pod:
       runAsNonRoot: true
@@ -34,10 +55,14 @@ rallly:
       allowPrivilegeEscalation: false
       readOnlyRootFilesystem: true
       runAsNonRoot: true
+      # No capabilities are added: the app is a plain Node process listening on
+      # the unprivileged port 3000, verified to run with all capabilities
+      # dropped. Do not reintroduce an "add:" key here — an empty list item
+      # under it renders as a null entry, which is what Trivy reported as
+      # AVD-KSV-0022 for the older chart version deployed in the cluster (#84).
       capabilities:
         drop:
           - ALL
-        add: []
   # Extra environment variables, appended to the ones the chart always sets.
   # Values are rendered through tpl; value, secretKeyRef and configMapKeyRef
   # forms are supported.

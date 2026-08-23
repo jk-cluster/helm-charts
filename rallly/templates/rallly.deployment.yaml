@@ -150,4 +150,18 @@ spec:
             {{- include "rallly.resources" .Values.rallly.resources | nindent 12 }}
           securityContext:
             {{- toYaml .Values.rallly.securityContext.container | nindent 12 }}
+          volumeMounts:
+            # Next.js writes prerendered pages and optimized images into its
+            # cache directory; with a read-only root filesystem this must be a
+            # writable volume (see rallly.cache in values.yaml).
+            - name: next-cache
+              mountPath: {{ required "A cache path must be provided (rallly.cache.path)" .Values.rallly.cache.path | quote }}
+      volumes:
+        - name: next-cache
+          {{- if .Values.rallly.cache.sizeLimit }}
+          emptyDir:
+            sizeLimit: {{ .Values.rallly.cache.sizeLimit | quote }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
       restartPolicy: Always

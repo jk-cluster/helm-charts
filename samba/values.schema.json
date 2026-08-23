@@ -82,10 +82,6 @@
         "securityContext": {
           "$ref": "#/definitions/securityContext"
         },
-        "globalConfig": {
-          "description": "Currently read by no template - see the note in the PR that introduced this schema. Kept allowed because it is part of the published values surface; whether it gets implemented or removed is a separate decision.",
-          "type": ["string", "null"]
-        },
         "storageClass": {
           "type": ["string", "null"]
         }

@@ -141,6 +141,15 @@ These guidelines are **binding for every current and future chart** in this repo
 - **The annotation is content-based, not time-based**: the hash is taken over the rendered ConfigMap, so an unchanged config renders an identical hash and `helm upgrade` is a no-op. It never degenerates into a restart-on-every-upgrade.
 - Adding the annotation to an existing chart is a **major** bump (§2): runtime behavior changes — a config change now costs a restart. Name that cost in the PR (some workloads take minutes to come back).
 - **Secrets from `OnePasswordItem` cannot use this mechanism.** Helm never sees their content — the 1Password operator fills the Secret in-cluster after rendering, so there is nothing to hash. A chart that mounts such a Secret as a file documents the limitation in its `values.yaml` where it cannot close the gap.
+- **What *can* be covered is the secret's `op://` path**, via a **separately named** `checksum/secret-ref` annotation over the rendered `OnePasswordItem`:
+
+  ```yaml
+  checksum/secret-ref: {{ include (print $.Template.BasePath "/<chart>.secret.yaml") . | sha256sum }}
+  ```
+
+  Repointing `secrets.<name>SecretRef` at a different vault item then takes effect instead of silently leaving the old credentials in the running pod. The separate name is deliberate: `checksum/config` promises "the config changed", `checksum/secret-ref` only "the config *source* changed" — merging them into one annotation would overstate the weaker guarantee. Reference implementations: `minecraft-server`, `homeassistant`.
+- **`operator.1password.io/auto-restart` only works for Deployments — do not set it on a StatefulSet.** Verified against onepassword-operator **1.12.0** (`pkg/onepassword/secret_update_handler.go`): `restartWorkloadsWithUpdatedSecrets` enumerates exactly one workload type, `appsv1.DeploymentList`, and `getPodTemplate` accepts only `*appsv1.Deployment`. The RBAC role grants `statefulsets`, and v1.11.0 generalized the restart code (`restartWorkload`, pod-template stamping via `operator.1password.io/last-restarted`), but the PR that would add StatefulSets is still open — so the annotation on a StatefulSet is a silent no-op. Setting it there is **worse than not setting it**: it advertises a guarantee that does not exist. Affected charts (`matrix-synapse`, `samba`, `homeassistant`) instead document the manual `kubectl rollout restart statefulset <release>-<chart>-sfs`. Re-check this when the operator version is bumped; a Deployment-based chart may set the annotation.
+- If a Deployment-based chart ever does set it, mind the precedence: the annotation on the **`OnePasswordItem`** is copied onto the Kubernetes Secret and read first, so a `false` there **overrides** a `true` on the workload — the opposite of what the operator's usage guide suggests. Lookup order is Secret (from the `OnePasswordItem`) → workload → namespace → the operator-global `AUTO_RESTART` env var. The trigger is the 1Password item's **version counter**, not its content, so a re-save with identical values still restarts.
 
 ### 10. Environment variables
 

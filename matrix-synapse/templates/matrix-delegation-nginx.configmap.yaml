@@ -26,12 +26,12 @@ data:
         listen 8080;
 
         location /.well-known/matrix/server {
-          return 200 '{"m.server": "{{ .Values.ingress.domain }}:443"}';
+          return 200 '{"m.server": "{{ required "A Domain/Host must be provided (ingress.domain)" .Values.ingress.domain }}:443"}';
           add_header Content-Type application/json;
         }
       
         location /.well-known/matrix/client {
-          return 200 '{"m.homeserver": {"base_url": "https://{{ .Values.ingress.domain }}"}}';
+          return 200 '{"m.homeserver": {"base_url": "https://{{ required "A Domain/Host must be provided (ingress.domain)" .Values.ingress.domain }}"}}';
           add_header Content-Type application/json;
           add_header "Access-Control-Allow-Origin" *;
         }

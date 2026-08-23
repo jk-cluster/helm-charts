@@ -24,12 +24,12 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
-        {{- toYaml .Values.matrix.delegation.securityContext.pod | nindent 8 }}
+        {{- include "matrix-synapse.delegation.podSecurityContext" .Values.matrix.delegation.securityContext | nindent 8 }}
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-delegation-nginx
           image: "{{ .Values.matrix.delegation.image.repository }}:{{ .Values.matrix.delegation.image.tag }}"
           securityContext:
-            {{- toYaml .Values.matrix.delegation.securityContext.container | nindent 12 }}
+            {{- include "matrix-synapse.delegation.containerSecurityContext" .Values.matrix.delegation.securityContext | nindent 12 }}
           ports:
             - containerPort: 8080
               name: http
@@ -43,13 +43,13 @@ spec:
             - name: tmp
               mountPath: /tmp
           resources:
-            {{- include "matrix-synapse.resources" .Values.matrix.delegation.resources | nindent 12 }}
+            {{- include "matrix-synapse.delegation.effectiveResources" .Values.matrix.delegation.resources | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.matrix.delegation.readinessProbe | nindent 12 }}
+            {{- include "matrix-synapse.delegation.readinessProbe" .Values.matrix.delegation.readinessProbe | nindent 12 }}
           livenessProbe:
-            {{- toYaml .Values.matrix.delegation.livenessProbe | nindent 12 }}
+            {{- include "matrix-synapse.delegation.livenessProbe" .Values.matrix.delegation.livenessProbe | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.matrix.delegation.startupProbe | nindent 12 }}
+            {{- include "matrix-synapse.delegation.startupProbe" .Values.matrix.delegation.startupProbe | nindent 12 }}
       volumes:
         - name: tmp
           emptyDir: {}

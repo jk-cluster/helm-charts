@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "{{ .Release.Name }}-{{ .Chart.Name }}-configmap"
+data:
+  # One bridge name per line. The application trims every line and drops empty
+  # ones, so the block scalar style is not load-bearing.
+  whitelist.txt: |-
+    {{- range $entry := required "A bridge whitelist must be provided (whitelist)" .Values.whitelist }}
+    {{ $entry }}
+    {{- end }}

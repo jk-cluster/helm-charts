@@ -34,6 +34,7 @@ on:
           - voucher-vault
           - minecraft-router
           - minecraft-server
+          - rss-bridge
   workflow_call:
     inputs:
       app-version:

@@ -1,0 +1,223 @@
+# Scale the whole chart down without uninstalling it: scaleDown: true renders
+# every Deployment/StatefulSet with replicas: 0 (and suspends CronJobs) and
+# takes precedence over any per-workload replicas value. PVCs, Secrets and
+# Services stay in place; scaleDown: false brings the workloads back up.
+scaleDown: false
+
+# The bridges RSS-Bridge offers, rendered into the ConfigMap as whitelist.txt
+# and mounted at /app/whitelist.txt.
+#
+# A list rather than a blob of file content: the file format is one bridge name
+# per line, and the application trims and filters every line before use
+# (lib/Configuration.php), so nothing is lost by modelling it as YAML - while a
+# hardcoded file body in the template could not be changed without editing the
+# chart.
+#
+# The single entry "*" is RSS-Bridge's own wildcard and enables every bridge.
+# It is the default here because it is exactly what the image does when no
+# whitelist.txt exists at all, so a default install behaves like stock
+# RSS-Bridge instead of silently serving nothing. Installations that want a
+# narrower set list the bridge names explicitly:
+#
+#   whitelist:
+#     - Youtube
+#     - Heise
+#
+# Changing this value rolls the pod - the deployment carries a checksum over
+# the rendered ConfigMap (see rss-bridge.deployment.yaml). Without that the
+# change would not reach the running container at all: the whitelist is a
+# subPath mount, which the kubelet never refreshes.
+whitelist:
+  - "*"
+
+rssBridge:
+  # Replica count for this workload; 0 is allowed and scales it down.
+  # The chart-global scaleDown flag takes precedence.
+  replicas: 1
+  # Verified against the image, not assumed (issue #128).
+  #
+  # The image ships no USER and runs everything as root by default. It does,
+  # however, run fully hardened once its writable paths are provided: nginx and
+  # php-fpm both start, the front page renders and real bridges fetch feeds.
+  #
+  # uid/gid 33 is www-data, and it is not interchangeable: /app and every file
+  # in it is owned by www-data in the image, nginx.conf declares "user
+  # www-data" and the php-fpm pool declares "user = www-data". Both emit a
+  # harmless notice that those directives are ignored when the master process
+  # is not root, and then serve normally as uid 33.
+  securityContext:
+    pod:
+      runAsNonRoot: true
+      runAsUser: 33
+      runAsGroup: 33
+      fsGroup: 33
+      fsGroupChangePolicy: Always
+      seccompProfile:
+        type: RuntimeDefault
+      # Why this chart listens on the privileged port 80, and why that is safe.
+      #
+      # nginx is configured for port 80 inside the image. The only lever the
+      # entrypoint offers is HTTP_PORT, which runs a sed against
+      # /etc/nginx/sites-enabled/default - impossible with a read-only root
+      # filesystem. So the choice is port 80 or readOnlyRootFilesystem, and
+      # port 80 is the cheaper of the two. (The Service selects the port by
+      # NAME, so the number is invisible to it either way.)
+      #
+      # Kubernetes sets net.ipv4.ip_unprivileged_port_start=0 in the pod
+      # network namespace, so binding 80 needs no capability at all. But that
+      # is a runtime default, not a guarantee, and relying on it silently is
+      # exactly the trap the template-chart warns about - so the chart pins the
+      # value instead of inheriting it.
+      #
+      # Measured in k3d (k3s v1.35.5), same pod spec, only this value changed:
+      #   sysctl 1024, capabilities.drop [ALL]        -> nginx: bind() to
+      #       0.0.0.0:80 failed (13: Permission denied)
+      #   sysctl 1024, plus NET_BIND_SERVICE added    -> identical failure.
+      #       Adding the capability does NOT help: for a non-root process it
+      #       lands in the permitted set but not the effective/ambient one, so
+      #       it buys nothing here. That is why this chart does not add it.
+      #   sysctl 0 (this default)                     -> binds, HTTP 200.
+      #
+      # Note how that failure looks without probes: the entrypoint starts nginx
+      # in the background and then execs php-fpm, so a failed bind leaves a
+      # container that reports Running with no web server at all. The probes on
+      # /?action=health turn that silent failure into a pod that never becomes
+      # Ready.
+      sysctls:
+        - name: net.ipv4.ip_unprivileged_port_start
+          value: "0"
+    container:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      capabilities:
+        drop:
+          - ALL
+  # All three probes hit RSS-Bridge's own health action, which renders a fixed
+  # 49-byte JSON document without touching the file cache or any remote site.
+  # That keeps liveness free of external dependencies (guideline 3): a scraped
+  # website going down, or a cache directory that is not writable, must not
+  # restart the pod.
+  #
+  # Deliberately not "/": the front page enumerates every enabled bridge and
+  # answers with roughly 1.5 MB, which is a wasteful thing to fetch every ten
+  # seconds forever.
+  livenessProbe:
+    httpGet:
+      path: /?action=health
+      port: rss-bridge-port
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /?action=health
+      port: rss-bridge-port
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # The startup probe gates liveness/readiness, so those need no
+  # initialDelaySeconds. Startup budget = 5s * 30 = 150s, which is generous:
+  # the container is ready in about two seconds (nginx plus php-fpm, no
+  # migrations, no warm-up).
+  startupProbe:
+    httpGet:
+      path: /?action=health
+      port: rss-bridge-port
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30
+  # Extra environment variables. Values are rendered through tpl; the value,
+  # secretKeyRef and configMapKeyRef forms are supported.
+  #
+  # RSS-Bridge maps RSSBRIDGE_<section>_<key> onto its config, so for example
+  # "RSSBRIDGE_system_timezone: Europe/Berlin" works here.
+  env: []
+  resources:
+    # Limits are optional: memory and ephemeral-storage limits default to
+    # limitFactor x the request, an explicitly set limit always wins, and a
+    # CPU limit is only set when configured explicitly under "limits".
+    limitFactor: 3
+    requests:
+      cpu: 0.1
+      # Measured with the shipped image: about 59 MiB resident while idle and
+      # roughly 89 MiB after serving feeds, so the previous 20Mi request was
+      # a third of what the workload actually occupies around the clock.
+      memory: 128Mi
+      # The previous manifest requested 2Gi of ephemeral storage - identical to
+      # its limit - and thereby reserved two gigabytes of node scheduling
+      # capacity for a workload that does not come close to using it.
+      #
+      # Everything RSS-Bridge writes was enumerated by running the image with a
+      # writable root filesystem, exercising every whitelisted bridge and then
+      # reading the container's diff layer. The only path that grows is the
+      # feed cache under /app/cache: 17 entries and 2.2 MB after fetching all
+      # five bridges, largest single entry 196 KB, and the application purges
+      # it on its own (FileCache enable_purge). /run and /var/lib/nginx add
+      # under 100 KB together.
+      #
+      # 64Mi is therefore roughly thirty times the measured footprint while
+      # freeing 97% of the old reservation. The limit below stays large, so
+      # the decoupling costs no safety margin (same shape as gotenberg, #106).
+      ephemeralStorage: 64Mi
+    limits:
+      # Set explicitly rather than left to limitFactor x request.
+      #
+      # memory: the manifest this chart replaces capped the container at
+      # 100Mi, but five concurrent feed fetches were measured peaking at
+      # 119 MiB - the old limit was already below the real peak, and php-fpm
+      # is configured for up to five workers with a 128M PHP memory_limit
+      # each. 512Mi covers the measured peak with room to spare and still
+      # bounds a runaway bridge.
+      memory: 512Mi
+      # Unchanged from the previous manifest on purpose: a large cap costs
+      # nothing (it reserves no capacity) and guarantees this change cannot
+      # make eviction more likely than it is today.
+      ephemeralStorage: 2Gi
+    # No CPU limit by default (repo standard): CPU is compressible, so a limit
+    # only throttles. The previous manifest capped CPU at 0.5.
+
+ingress:
+  # Gates the whole Ingress template. Checked in both directions per guideline
+  # 1: nothing outside this template reads an ingress value - the container
+  # takes no domain in its environment and nginx serves as default_server
+  # without a server_name - so switching the Ingress off frees every value
+  # below, and none of them needs a separate required().
+  enabled: true
+  clusterIssuer: null
+  className: nginx
+  # Extra annotations for the Ingress; merged with the cert-manager
+  # cluster-issuer annotation the chart always sets.
+  annotations: {}
+  # The hosts this Ingress serves. Required - the chart ships no default,
+  # because hostnames are installation data and have no business in a chart.
+  #
+  # Each entry is a host plus an OPTIONAL tlsSecretName:
+  #
+  #   hosts:
+  #     - host: rss-bridge.example.com
+  #     - host: feeds.example.com
+  #       tlsSecretName: tls-legacy-feeds-ingress
+  #
+  # Entries sharing a tlsSecretName are grouped into one tls entry, so they
+  # share a single certificate with several SANs. Entries with distinct names
+  # get one certificate each. Omitting tlsSecretName falls back to the repo
+  # convention, tls-<release>-<chart>-ingress.
+  #
+  # DOCUMENTED DEVIATION - why the secret name is configurable at all:
+  #
+  # The repo convention (guideline 4) is exactly one TLS secret per Ingress,
+  # named tls-<release>-<chart>-ingress. The installation this chart takes over
+  # has grown three separate secrets, one per host, from three years of
+  # kubectl apply. Renaming them would not be a cosmetic cleanup: cert-manager
+  # keys certificates by secret name, so three new names mean three fresh
+  # issuances, and the service is unreachable on each host until its
+  # certificate is issued. That is a self-inflicted outage plus three
+  # avoidable Let's Encrypt issuances, for a deployment that has been running
+  # untouched for over a year.
+  #
+  # Making host and secret name per-entry values keeps the existing names in
+  # place today and turns the eventual consolidation onto one certificate - or
+  # the retirement of the legacy hostnames - into a values change instead of a
+  # template change (the explicit ask from cluster-config#33).
+  hosts: null

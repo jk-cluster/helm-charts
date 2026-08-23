@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-service
+spec:
+  selector:
+    app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+  ports:
+    # Port 80 and the named targetPort are kept exactly as the manifest this
+    # chart replaces had them, so the takeover does not change how traffic
+    # reaches the container.
+    - protocol: TCP
+      port: 80
+      targetPort: rss-bridge-port
+  type: ClusterIP

@@ -1,0 +1,12 @@
+apiVersion: v2
+name: rss-bridge
+description: A Helm chart to deploy RSS-Bridge on Kubernetes
+icon: https://raw.githubusercontent.com/RSS-Bridge/rss-bridge/master/static/logo_300px.png
+
+type: application
+
+version: 1.0.0+up2025.06.03
+appVersion: "2025-06-03"
+
+maintainers:
+  - name: jklein

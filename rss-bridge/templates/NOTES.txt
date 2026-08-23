@@ -1,0 +1,42 @@
+RSS-Bridge {{ .Chart.AppVersion }} was installed as release "{{ .Release.Name }}".
+
+{{ if .Values.ingress.enabled -}}
+Reachable at:
+{{ range $entry := .Values.ingress.hosts }}  https://{{ $entry.host }}
+{{ end }}
+Each host serves the same instance. Certificates are issued by the
+cert-manager cluster issuer "{{ .Values.ingress.clusterIssuer }}" into these secrets:
+{{ range $secret := (fromYaml (include "rss-bridge.tlsGroups" (dict "hosts" .Values.ingress.hosts "root" $))).order }}  {{ $secret }}
+{{ end }}
+{{- else -}}
+The Ingress is disabled (ingress.enabled=false). Reach the instance with:
+
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-{{ .Chart.Name }}-service 8080:80
+
+and open http://localhost:8080
+{{- end }}
+
+Enabled bridges ({{ len .Values.whitelist }} entr{{ if eq (len .Values.whitelist) 1 }}y{{ else }}ies{{ end }} in whitelist.txt):
+{{ range $entry := .Values.whitelist }}  {{ $entry }}
+{{ end }}
+{{- if has "*" .Values.whitelist }}
+"*" enables every bridge the image ships. Narrow it down by listing bridge
+names in the "whitelist" value.
+{{- end }}
+
+Useful to know:
+
+  * Health endpoint: /?action=health - a fixed JSON document that touches
+    neither the cache nor any remote site. All three probes use it.
+  * Changing the "whitelist" value rolls the pod: the deployment carries a
+    checksum over the ConfigMap, because a subPath mount would otherwise never
+    reach the running container.
+  * The feed cache lives in an emptyDir at /app/cache and is therefore
+    deliberately lost on every restart. RSS-Bridge refills it on demand; it
+    holds only fetched feeds, no configuration and no user data.
+  * The container runs read-only and non-root as uid 33 (www-data).
+{{- if .Values.scaleDown }}
+
+WARNING: scaleDown is true, so this release is running with 0 replicas.
+Set scaleDown=false to bring it back up.
+{{- end }}

@@ -108,3 +108,8 @@ misconfigurations:
   - id: AVD-KSV-0119
     paths: ["**/homeassistant.yaml"]
     statement: "NET_RAW is the capability in question and is added on purpose for device discovery; see AVD-KSV-0022."
+
+  # --- rss-bridge: port 80 is fixed by the image ----------------------------
+  - id: AVD-KSV-0117
+    paths: ["**/rss-bridge.yaml"]
+    statement: "nginx inside the image listens on 80, and the only lever the entrypoint offers (HTTP_PORT) is a sed against /etc/nginx/sites-enabled/default, which a read-only root filesystem rejects - so the alternative to port 80 is giving up readOnlyRootFilesystem. The chart does not merely rely on the kubelet's ip_unprivileged_port_start=0 default, it pins the sysctl in the pod securityContext, so the bind does not depend on node configuration. Measured in k3d with only that value changed: at 1024 nginx fails with 'bind() to 0.0.0.0:80 failed (13: Permission denied)', and adding NET_BIND_SERVICE does NOT fix it (for a non-root process the capability lands in the permitted but not the effective set) - which is why this chart adds no capability, unlike samba. Justified in rss-bridge/values.yaml above securityContext.pod.sysctls."

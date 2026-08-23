@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "rss-bridge values",
+  "description": "Strict values schema (issue #68). additionalProperties is false on every chart-owned object level, so a key the chart does not read is rejected at render time instead of being silently ignored. Objects that go verbatim into the Kubernetes pod spec (probes, security contexts, global, free-form annotations) stay open, because the chart does not interpret their contents. The hardening, probe and resources blocks additionally accept null - the chart's null-safe helpers turn an erased block into 'chart defaults apply' (issue #99), and the widened types are what lets that null reach the helper instead of aborting validation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["whitelist"],
+  "properties": {
+    "global": {
+      "description": "Helm's conventional cross-chart values. Unused by this chart, kept open so an umbrella install cannot break on it.",
+      "type": "object"
+    },
+    "scaleDown": {
+      "type": "boolean"
+    },
+    "whitelist": {
+      "description": "Bridge names rendered into whitelist.txt, one per line. The single entry \"*\" enables every bridge. An empty list would disable every bridge, which is a silent way to serve nothing, so at least one entry is required.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "rssBridge": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "livenessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "readinessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "startupProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "securityContext": {
+          "$ref": "#/definitions/securityContext"
+        },
+        "env": {
+          "$ref": "#/definitions/env"
+        }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "Gates the whole Ingress template (issue #93). Nothing outside the Ingress template reads an ingress value in this chart - the container takes no host in its environment - so switching it off frees every value below (guideline 1, checked rather than assumed).",
+          "type": "boolean"
+        },
+        "clusterIssuer": {
+          "type": ["string", "null"]
+        },
+        "className": {
+          "type": ["string", "null"]
+        },
+        "annotations": {
+          "description": "Extra Ingress annotations, merged with the cert-manager annotation the chart always sets. Free-form keys by nature, so this object stays open.",
+          "type": "object"
+        },
+        "hosts": {
+          "description": "Hosts this Ingress serves. Each entry carries a host and an optional tlsSecretName; entries sharing a secret name are grouped into one tls entry. Null is accepted by the schema so the template's required() produces the readable error instead of a schema violation.",
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["host"],
+            "properties": {
+              "host": {
+                "type": "string",
+                "minLength": 1
+              },
+              "tlsSecretName": {
+                "description": "Overrides the conventional tls-<release>-<chart>-ingress name for this host. Set only where an existing certificate must keep its secret name - see the deviation note in values.yaml.",
+                "type": ["string", "null"]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "resources": {
+      "description": "May be null / empty: the chart then falls back to its default requests AND its explicit limits (issue #99). Reproducing only the requests would let limitFactor compute a memory limit below the measured peak.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "limitFactor": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "requests": {
+          "$ref": "#/definitions/resourceList"
+        },
+        "limits": {
+          "$ref": "#/definitions/resourceList"
+        }
+      }
+    },
+    "resourceList": {
+      "description": "Both spellings of the ephemeral-storage key are accepted because the resources helper normalizes camelCase to the Kubernetes key.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "cpu": {
+          "type": ["string", "number", "null"]
+        },
+        "memory": {
+          "type": ["string", "number", "null"]
+        },
+        "ephemeral-storage": {
+          "type": ["string", "number", "null"]
+        },
+        "ephemeralStorage": {
+          "type": ["string", "number", "null"]
+        }
+      }
+    },
+    "env": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "valueFrom": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "secretKeyRef": {
+                "$ref": "#/definitions/keyRef"
+              },
+              "configMapKeyRef": {
+                "$ref": "#/definitions/keyRef"
+              }
+            }
+          }
+        }
+      }
+    },
+    "keyRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "key"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        }
+      }
+    },
+    "securityContext": {
+      "description": "May be null / empty at any level: the chart then falls back to its hardening defaults (issue #99) instead of rendering an unhardened workload. The fallback reproduces THIS chart's defaults, including uid/gid 33 - the image owns /app as www-data, so a 'cleaner' high uid would leave the app unable to read its own bridge sources (guideline 4).",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "pod": {
+          "description": "Merged onto the chart's pod hardening defaults and rendered as the pod's securityContext; kept open because the chart does not interpret the individual fields.",
+          "type": ["object", "null"]
+        },
+        "container": {
+          "description": "Merged onto the chart's container hardening defaults and rendered as the container's securityContext; kept open because the chart does not interpret the individual fields.",
+          "type": ["object", "null"]
+        }
+      }
+    },
+    "probe": {
+      "description": "Merged onto the chart's probe defaults and rendered as a container probe; kept open because the chart does not interpret the individual fields. May be null / empty, which means the defaults apply (issue #99) rather than the probe disappearing. The chart's default carries the probe's context - the named port rss-bridge-port and the /?action=health query string - not just its timings (guideline 5).",
+      "type": ["object", "null"]
+    }
+  }
+}

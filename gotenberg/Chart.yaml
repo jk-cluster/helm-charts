@@ -5,7 +5,7 @@ icon: https://gotenberg.dev/img/logo.png
 
 type: application
 
-version: 7.0.0+up8.36.0
+version: 8.0.0+up8.36.0
 appVersion: "8.36.0"
 
 maintainers:

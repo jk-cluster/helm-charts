@@ -1,3 +1,8 @@
+{{- /*
+Barcode settings, defended against a null / empty "barcodes:" override:
+an empty block falls back to the chart defaults (issue #61).
+*/ -}}
+{{- $barcodes := fromYaml (include "paperless-ngx.barcodes" .Values.paperless.files.barcodes) -}}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -137,13 +142,13 @@ spec:
             - name: PAPERLESS_URL
               value: "https://{{ .Values.ingress.domain }}"
             - name: PAPERLESS_CONSUMER_ENABLE_ASN_BARCODE
-              value: "{{ .Values.paperless.files.barcodes.asn.enabled }}"
+              value: "{{ $barcodes.asn.enabled }}"
             - name: PAPERLESS_CONSUMER_ENABLE_BARCODES
-              value: "{{ .Values.paperless.files.barcodes.enabled }}"
+              value: "{{ $barcodes.enabled }}"
             - name: PAPERLESS_CONSUMER_BARCODE_STRING
-              value: "{{ .Values.paperless.files.barcodes.barcodeString }}"
+              value: "{{ $barcodes.barcodeString }}"
             - name: PAPERLESS_CONSUMER_BARCODE_RETAIN_SPLIT_PAGES
-              value: "{{ .Values.paperless.files.barcodes.retainBarcodePage }}"
+              value: "{{ $barcodes.retainBarcodePage }}"
             - name: PAPERLESS_CONSUMER_DELETE_DUPLICATES
               value: "{{ .Values.paperless.files.deleteDuplicates }}"
             {{- if .Values.paperless.files.tikaGotenberg.enabled }}

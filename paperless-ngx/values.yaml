@@ -48,6 +48,13 @@ paperless:
     # The barcode scanner backend is no longer configurable: paperless-ngx 3.0
     # removed pyzbar and PAPERLESS_CONSUMER_BARCODE_SCANNER; zxing-cpp is the
     # only backend now.
+    #
+    # An empty or null "barcodes:" block in an override means "the defaults
+    # below apply" — the chart merges the block onto these defaults instead of
+    # letting a childless key erase them (issue #61; the fallback copy lives in
+    # the paperless-ngx.barcodes helper and is kept in sync with this block).
+    # To switch barcode handling off, set barcodes.enabled: false explicitly;
+    # deleting the sub-keys does not disable it.
     barcodes:
       enabled: true
       barcodeString: "PATCHT"

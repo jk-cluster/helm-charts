@@ -57,13 +57,13 @@
               "type": "string"
             },
             "securityContext": {
-              "description": "guacd is a sidecar in the server pod, so only a container context applies - the pod context is the server's.",
-              "type": "object",
+              "description": "guacd is a sidecar in the server pod, so only a container context applies - the pod context is the server's. May be null / empty: the chart then falls back to its hardening defaults (issue #99).",
+              "type": ["object", "null"],
               "additionalProperties": false,
               "properties": {
                 "container": {
-                  "description": "Rendered verbatim as the container's securityContext; kept open because the chart does not interpret it.",
-                  "type": "object"
+                  "description": "Merged onto the chart's container hardening defaults and rendered as the container's securityContext; kept open because the chart does not interpret the individual fields.",
+                  "type": ["object", "null"]
                 }
               }
             },
@@ -130,7 +130,8 @@
   },
   "definitions": {
     "resources": {
-      "type": "object",
+      "description": "May be null / empty: the chart then falls back to its default requests and computed limits (issue #99) instead of rendering a container without resource accounting.",
+      "type": ["object", "null"],
       "additionalProperties": false,
       "properties": {
         "limitFactor": {
@@ -146,7 +147,7 @@
       }
     },
     "resourceList": {
-      "type": "object",
+      "type": ["object", "null"],
       "additionalProperties": false,
       "properties": {
         "cpu": {
@@ -205,22 +206,23 @@
       }
     },
     "securityContext": {
-      "type": "object",
+      "description": "May be null / empty at any level: the chart then falls back to its hardening defaults (issue #99) instead of rendering an unhardened workload.",
+      "type": ["object", "null"],
       "additionalProperties": false,
       "properties": {
         "pod": {
-          "description": "Rendered verbatim as the pod's securityContext; kept open because the chart does not interpret it.",
-          "type": "object"
+          "description": "Merged onto the chart's pod hardening defaults and rendered as the pod's securityContext; kept open because the chart does not interpret the individual fields.",
+          "type": ["object", "null"]
         },
         "container": {
-          "description": "Rendered verbatim as the container's securityContext; kept open because the chart does not interpret it.",
-          "type": "object"
+          "description": "Merged onto the chart's container hardening defaults and rendered as the container's securityContext; kept open because the chart does not interpret the individual fields.",
+          "type": ["object", "null"]
         }
       }
     },
     "probe": {
-      "description": "Rendered verbatim as a container probe; kept open because the chart does not interpret it.",
-      "type": "object"
+      "description": "Merged onto the chart's probe defaults and rendered as a container probe; kept open because the chart does not interpret the individual fields. May be null / empty, which means the defaults apply (issue #99) rather than the probe disappearing.",
+      "type": ["object", "null"]
     }
   }
 }

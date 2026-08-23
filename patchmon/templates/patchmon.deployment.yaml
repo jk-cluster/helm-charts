@@ -23,13 +23,13 @@ spec:
       # for the same reason).
       hostname: {{ .Release.Name }}-{{ .Chart.Name }}-server
       securityContext:
-        {{- toYaml .Values.patchmon.server.securityContext.pod | nindent 8 }}
+        {{- include "patchmon.server.podSecurityContext" .Values.patchmon.server.securityContext | nindent 8 }}
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-server
           image: "ghcr.io/patchmon/patchmon-server:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
           securityContext:
-            {{- toYaml .Values.patchmon.server.securityContext.container | nindent 12 }}
+            {{- include "patchmon.server.containerSecurityContext" .Values.patchmon.server.securityContext | nindent 12 }}
           ports:
             - containerPort: 3000
               protocol: TCP
@@ -166,13 +166,13 @@ spec:
           # Probe values are rendered through tpl (see values.yaml for the
           # defaults and why the probes send a Host header).
           livenessProbe:
-            {{- tpl (toYaml .Values.patchmon.server.livenessProbe) . | nindent 12 }}
+            {{- tpl (include "patchmon.server.livenessProbe" (dict "given" .Values.patchmon.server.livenessProbe "root" $)) . | nindent 12 }}
           readinessProbe:
-            {{- tpl (toYaml .Values.patchmon.server.readinessProbe) . | nindent 12 }}
+            {{- tpl (include "patchmon.server.readinessProbe" (dict "given" .Values.patchmon.server.readinessProbe "root" $)) . | nindent 12 }}
           startupProbe:
-            {{- tpl (toYaml .Values.patchmon.server.startupProbe) . | nindent 12 }}
+            {{- tpl (include "patchmon.server.startupProbe" (dict "given" .Values.patchmon.server.startupProbe "root" $)) . | nindent 12 }}
           resources:
-            {{- include "patchmon.resources" .Values.patchmon.server.resources | nindent 12 }}
+            {{- include "patchmon.server.effectiveResources" .Values.patchmon.server.resources | nindent 12 }}
           volumeMounts:
             # The image is stateless, but the Go server needs a writable /tmp
             # for scratch files with a read-only root filesystem.
@@ -206,19 +206,19 @@ spec:
             {{- end }}
           {{- end }}
           securityContext:
-            {{- toYaml .Values.patchmon.guacd.securityContext.container | nindent 12 }}
+            {{- include "patchmon.guacd.containerSecurityContext" .Values.patchmon.guacd.securityContext | nindent 12 }}
           ports:
             - containerPort: 4822
               protocol: TCP
               name: guacd
           livenessProbe:
-            {{- tpl (toYaml .Values.patchmon.guacd.livenessProbe) . | nindent 12 }}
+            {{- tpl (include "patchmon.guacd.livenessProbe" .Values.patchmon.guacd.livenessProbe) . | nindent 12 }}
           readinessProbe:
-            {{- tpl (toYaml .Values.patchmon.guacd.readinessProbe) . | nindent 12 }}
+            {{- tpl (include "patchmon.guacd.readinessProbe" .Values.patchmon.guacd.readinessProbe) . | nindent 12 }}
           startupProbe:
-            {{- tpl (toYaml .Values.patchmon.guacd.startupProbe) . | nindent 12 }}
+            {{- tpl (include "patchmon.guacd.startupProbe" .Values.patchmon.guacd.startupProbe) . | nindent 12 }}
           resources:
-            {{- include "patchmon.resources" .Values.patchmon.guacd.resources | nindent 12 }}
+            {{- include "patchmon.guacd.effectiveResources" .Values.patchmon.guacd.resources | nindent 12 }}
           volumeMounts:
             - name: guacd-tmp
               mountPath: /tmp

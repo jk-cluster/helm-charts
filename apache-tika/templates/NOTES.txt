@@ -1,0 +1,56 @@
+{{- $replicas := include "apache-tika.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.tika.replicas) -}}
+{{- $limits := (include "apache-tika.effectiveResources" .Values.tika.resources | fromYaml).limits | default dict -}}
+{{- $memLimit := index $limits "memory" -}}
+{{- $svc := printf "%s-%s-service" .Release.Name .Chart.Name -}}
+Apache Tika {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+ACCESS
+  This chart creates no Ingress. The server is cluster-internal:
+
+    http://{{ $svc }}.{{ .Release.Namespace }}.svc.cluster.local
+
+  Mind the port. The Service listens on 80 and forwards to the container's
+  9998, so consumers are configured without a port — e.g. paperless-ngx:
+
+    PAPERLESS_TIKA_ENDPOINT: http://{{ $svc }}.{{ .Release.Namespace }}.svc.cluster.local
+
+  To reach it from your machine:
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $svc }} 9998:80
+    curl http://localhost:9998/version
+    curl http://localhost:9998/parsers
+
+  /parsers lists every parser the running server actually has — the honest
+  answer to "why did this file come back empty". This chart has no secrets
+  and no volumes.
+{{ if eq $replicas "0" }}
+SCALED TO ZERO
+  {{ if .Values.scaleDown }}scaleDown: true{{ else }}tika.replicas: 0{{ end }} — the deployment runs with replicas: 0. The Service
+  keeps its ClusterIP but has no endpoints, so callers fail with "connection
+  refused" rather than a timeout. Set it back and upgrade to return.
+{{ end }}
+NO AUTHENTICATION — AND IT PARSES WHATEVER IT IS SENT
+  Tika has no authentication, and this chart adds none. It is a parser for
+  untrusted input by nature, and its parsers have a long history of being the
+  soft spot. Anything that can reach the Service can make this pod open a
+  file. Keep it cluster-internal; do not put an Ingress in front of it.
+
+THE IMAGE TAG HAS TO KEEP ITS -full SUFFIX
+  appVersion is pinned to {{ .Chart.AppVersion }}. The "-full" variant is the one that
+  ships Tesseract OCR (5.5.0, with the languages deu, eng, fra, ita, jpn, osd
+  and spa) plus the extra parsers; the plain apache/tika:<version> image has
+  no tesseract binary at all. Overriding the tag without "-full" does not fail
+  loudly — OCR simply stops happening and scanned documents come back with
+  empty text.
+{{- if $memLimit }}
+
+THE JVM ONLY GETS A QUARTER OF THE MEMORY LIMIT
+  The server starts without -Xmx, so the JVM derives its maximum heap from the
+  container limit at MaxRAMPercentage=25. With this release's limit of
+  {{ $memLimit }} that is roughly {{ include "apache-tika.multiplyQuantity" (dict "quantity" $memLimit "factor" 0.25) }} of usable heap — the number to reason about when
+  sizing, not the limit itself. Raising tika.resources.requests.memory raises
+  the limit (limitFactor x request) and the heap along with it.
+  Text extraction streams rather than buffering, so ordinary documents stay
+  cheap regardless; the heap is what matters for parsers that have to build a
+  whole document in memory, and for OCR.
+{{- end }}

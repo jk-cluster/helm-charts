@@ -151,6 +151,11 @@ storage:
   storageClass: longhorn-encrypted
 
 ingress:
+  # Set to false to omit the Ingress entirely. Note that ingress.domain is also
+  # read by the delegation nginx, which serves it in the /.well-known/matrix/*
+  # endpoints, so it stays required whenever matrix.delegation.enabled is true.
+  # Only clusterIssuer becomes unnecessary.
+  enabled: true
   domain: null
   clusterIssuer: null
   className: nginx

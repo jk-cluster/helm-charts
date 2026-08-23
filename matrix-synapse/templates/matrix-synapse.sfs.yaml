@@ -18,12 +18,12 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
-        {{- toYaml .Values.matrix.securityContext.pod | nindent 8 }}
+        {{- include "matrix-synapse.podSecurityContext" .Values.matrix.securityContext | nindent 8 }}
       containers:
         - name: "{{ .Release.Name }}-{{ .Chart.Name }}-container"
           image: "ghcr.io/element-hq/synapse:{{ .Chart.AppVersion }}"
           securityContext:
-            {{- toYaml .Values.matrix.securityContext.container | nindent 12 }}
+            {{- include "matrix-synapse.containerSecurityContext" .Values.matrix.securityContext | nindent 12 }}
           env:
             - name: SYNAPSE_SERVER_NAME
               value: "{{ required "You must provide a Server-Name" .Values.matrix.serverName }}"
@@ -56,13 +56,13 @@ spec:
               containerPort: 8008
               protocol: TCP
           readinessProbe:
-            {{- toYaml .Values.matrix.readinessProbe | nindent 12 }}
+            {{- include "matrix-synapse.readinessProbe" .Values.matrix.readinessProbe | nindent 12 }}
           livenessProbe:
-            {{- toYaml .Values.matrix.livenessProbe | nindent 12 }}
+            {{- include "matrix-synapse.livenessProbe" .Values.matrix.livenessProbe | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.matrix.startupProbe | nindent 12 }}
+            {{- include "matrix-synapse.startupProbe" .Values.matrix.startupProbe | nindent 12 }}
           resources:
-            {{- include "matrix-synapse.resources" .Values.matrix.resources | nindent 12 }}
+            {{- include "matrix-synapse.effectiveResources" .Values.matrix.resources | nindent 12 }}
           volumeMounts:
             - name: matrix-synapse-volume
               mountPath: /data

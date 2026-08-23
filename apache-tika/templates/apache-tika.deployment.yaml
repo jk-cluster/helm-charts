@@ -17,7 +17,7 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
-        {{- toYaml .Values.tika.securityContext.pod | nindent 8 }}
+        {{- include "apache-tika.podSecurityContext" .Values.tika.securityContext | nindent 8 }}
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
           image: "apache/tika:{{ .Chart.AppVersion }}"
@@ -46,7 +46,7 @@ spec:
             {{- end }}
           {{- end }}
           securityContext:
-            {{- toYaml .Values.tika.securityContext.container | nindent 12 }}
+            {{- include "apache-tika.containerSecurityContext" .Values.tika.securityContext | nindent 12 }}
           volumeMounts:
             # Tika writes temporary files during parsing; with a read-only
             # root filesystem /tmp must be a writable emptyDir.
@@ -57,13 +57,13 @@ spec:
               protocol: TCP
               name: tika-port
           livenessProbe:
-            {{- toYaml .Values.tika.livenessProbe | nindent 12 }}
+            {{- include "apache-tika.livenessProbe" .Values.tika.livenessProbe | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.tika.readinessProbe | nindent 12 }}
+            {{- include "apache-tika.readinessProbe" .Values.tika.readinessProbe | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.tika.startupProbe | nindent 12 }}
+            {{- include "apache-tika.startupProbe" .Values.tika.startupProbe | nindent 12 }}
           resources:
-            {{- include "apache-tika.resources" .Values.tika.resources | nindent 12 }}
+            {{- include "apache-tika.effectiveResources" .Values.tika.resources | nindent 12 }}
       volumes:
         - name: tmp
           emptyDir: {}

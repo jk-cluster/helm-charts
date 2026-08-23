@@ -1,0 +1,70 @@
+# Fixtures for the minecraft-server install-test (release name: ci).
+#
+# The chart hardcodes storageClassName "longhorn" in its PVC, which does not
+# exist in k3d: a no-provisioner StorageClass named "longhorn" plus a pre-bound
+# hostPath PV stand in for it. A node-setup Job pre-creates the hostPath
+# directory world-writable, because the image's entrypoint chowns /data to
+# uid 1000 and hostPath volumes do not support fsGroup.
+#
+# The Secret is what the 1Password operator would otherwise materialize from
+# the OnePasswordItem CR the chart renders (stub CRD in ci/common/).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn
+provisioner: kubernetes.io/no-provisioner
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: node-setup
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: setup
+          image: public.ecr.aws/docker/library/busybox:1.36
+          command:
+            - sh
+            - -c
+            - >
+              mkdir -p /pv/minecraft-server/mc-data /pv/minecraft-server/mc-modpacks &&
+              chmod -R 0777 /pv/minecraft-server
+          volumeMounts:
+            - name: pv
+              mountPath: /pv
+      volumes:
+        - name: pv
+          hostPath:
+            path: /var/lib/ci-pv
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ci-minecraft-server-data
+spec:
+  capacity:
+    storage: 5Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: longhorn
+  claimRef:
+    namespace: default
+    name: ci-mc-volume-claim
+  hostPath:
+    path: /var/lib/ci-pv/minecraft-server
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ci-mc-secret
+stringData:
+  rcon-password: ci-dummy-rcon-password
+  # Only consumed when curseforge.enabled is true; provided so the CI install
+  # keeps working if the test values ever enable a CurseForge modpack.
+  curseforge-api-key: ci-dummy-curseforge-key

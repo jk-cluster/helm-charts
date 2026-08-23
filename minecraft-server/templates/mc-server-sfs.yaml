@@ -1,0 +1,153 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-server-deployment
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  replicas: {{ include "minecraft-server.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.server.replicas) }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-server-deployment
+  template:
+    metadata:
+      name: {{ .Release.Name }}-server-deployment
+      labels:
+        app: {{ .Release.Name }}-server-deployment
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: {{ .Release.Name }}-mc-server-container
+          image: "itzg/minecraft-server:{{ .Chart.AppVersion }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: mc-port
+              containerPort: 35565
+            - name: minecraft-rcon
+              containerPort: 25575
+            - name: metrics
+              containerPort: 19565
+          env:
+            - name: EULA
+              value: "true"
+            - name: DUMP_SERVER_PROPERTIES
+              value: "true"
+            - name: MOTD
+              value: "{{ .Values.server.motd }}"
+            - name: DIFFICULTY
+              value: {{ .Values.minecraft.difficulty }}
+            {{- if .Values.minecraft.whitelist.enabled }}
+            - name: EXISTING_WHITELIST_FILE
+              value: {{ .Values.minecraft.whitelist.overridePolicy }}
+            - name: WHITELIST
+              value: {{ .Values.minecraft.whitelist.players }}
+            {{- end }}
+            - name: OPS
+              value: {{ .Values.minecraft.management.opPlayers }}
+            - name: EXISTING_OPS_FILE
+              value: "SYNCHRONIZE"
+            - name: RCON_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: rcon-password
+                  name: {{ .Release.Name }}-mc-secret
+            - name: MAX_PLAYERS
+              value: "{{ .Values.minecraft.management.maxPlayers }}"
+            - name: FORCE_GAMEMODE
+              value: "{{ .Values.minecraft.management.forceGameMode }}"
+            - name: SNOOPER_ENABLED
+              value: "false"
+            - name: MODE
+              value: "{{ .Values.minecraft.management.gameMode }}"
+            - name: LEVEL
+              value: "{{ .Values.minecraft.management.worldSaveName }}"
+            - name: SERVER_NAME
+              value: "{{ .Values.minecraft.management.serverName }}"
+            - name: VERSION
+              value: "{{ .Values.minecraft.version }}"
+            - name: ENABLE_RCON
+              value: "false"
+            - name: ENABLE_AUTOPAUSE
+              value: "false"
+            - name: MEMORY
+              value: "{{ .Values.minecraft.resources.memory }}G"
+            {{- if .Values.curseforge.enabled }}
+            - name: TYPE
+              value: "AUTO_CURSEFORGE"
+            - name: CF_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: curseforge-api-key
+                  name: {{ .Release.Name }}-mc-secret
+            - name: CF_SLUG
+              value: "{{ .Values.curseforge.modpack.slug }}"
+            - name: CF_FILE_ID
+              value: "{{ .Values.curseforge.modpack.versionId }}"
+            - name: CF_EXCLUDE_MODS
+              value: "{{ .Values.curseforge.modpack.exclude }}"
+            - name: CF_OVERRIDES_EXCLUSIONS
+              value: "{{ .Values.curseforge.modpack.excludeOverride }}"
+            - name: CF_FORCE_INCLUDE_MODS
+              value: "{{ .Values.curseforge.modpack.include }}"
+            - name: CF_FORCE_SYNCHRONIZE
+              value: "{{ .Values.curseforge.forceReload }}"
+            {{- end }}
+            {{- if .Values.curseforgeServerpack.enabled }}
+            - name: TYPE
+              value: "CURSEFORGE"
+            - name: CF_SERVER_MOD
+              value: "/modpacks/serverpack.zip"
+            - name: CF_BASE_DIR
+              value: "{{ .Values.curseforgeServerpack.workingDirectory }}"
+            {{- end }}
+            {{- if .Values.ftb.enabled }}
+            - name: TYPE
+              value: FTBA
+            - name: FTB_MODPACK_ID
+              value: "{{ .Values.ftb.modpackId }}"
+            - name: FTB_MODPACK_VERSION_ID
+              value: "{{ .Values.ftb.versionId }}"
+            {{- end }}
+          resources:
+            requests:
+              cpu: "2"
+              memory: "4Gi"
+              ephemeral-storage: "100Mi"
+            limits:
+              cpu: "4"
+              memory: "12Gi"
+              ephemeral-storage: "200Mi"
+          volumeMounts:
+            - name: "mc-volume"
+              mountPath: /data
+              subPath: mc-data/
+            - name: "mc-volume"
+              mountPath: /modpacks
+              subPath: mc-modpacks/
+      {{- if .Values.curseforgeServerpack }}
+      initContainers:
+        - name: download-serverpack
+          image: alpine
+          command: [ 'sh', '/init/init.sh' ]
+          volumeMounts:
+            - name: "mc-volume"
+              mountPath: /modpacks
+              subPath: mc-modpacks/
+            - name: "mc-volume"
+              mountPath: /data
+              subPath: mc-data/
+            - name: init-script
+              mountPath: /init/init.sh
+              subPath: init.sh
+      {{- end }}
+      restartPolicy: Always
+      volumes:
+        - name: "mc-volume"
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-mc-volume-claim
+        - name: init-script
+          configMap:
+            name: {{ .Release.Name }}-init-config
+  serviceName: {{ .Release.Name }}-service
+
+

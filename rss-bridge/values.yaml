@@ -54,6 +54,38 @@ rssBridge:
       fsGroupChangePolicy: Always
       seccompProfile:
         type: RuntimeDefault
+      # Why this chart listens on the privileged port 80, and why that is safe.
+      #
+      # nginx is configured for port 80 inside the image. The only lever the
+      # entrypoint offers is HTTP_PORT, which runs a sed against
+      # /etc/nginx/sites-enabled/default - impossible with a read-only root
+      # filesystem. So the choice is port 80 or readOnlyRootFilesystem, and
+      # port 80 is the cheaper of the two. (The Service selects the port by
+      # NAME, so the number is invisible to it either way.)
+      #
+      # Kubernetes sets net.ipv4.ip_unprivileged_port_start=0 in the pod
+      # network namespace, so binding 80 needs no capability at all. But that
+      # is a runtime default, not a guarantee, and relying on it silently is
+      # exactly the trap the template-chart warns about - so the chart pins the
+      # value instead of inheriting it.
+      #
+      # Measured in k3d (k3s v1.35.5), same pod spec, only this value changed:
+      #   sysctl 1024, capabilities.drop [ALL]        -> nginx: bind() to
+      #       0.0.0.0:80 failed (13: Permission denied)
+      #   sysctl 1024, plus NET_BIND_SERVICE added    -> identical failure.
+      #       Adding the capability does NOT help: for a non-root process it
+      #       lands in the permitted set but not the effective/ambient one, so
+      #       it buys nothing here. That is why this chart does not add it.
+      #   sysctl 0 (this default)                     -> binds, HTTP 200.
+      #
+      # Note how that failure looks without probes: the entrypoint starts nginx
+      # in the background and then execs php-fpm, so a failed bind leaves a
+      # container that reports Running with no web server at all. The probes on
+      # /?action=health turn that silent failure into a pod that never becomes
+      # Ready.
+      sysctls:
+        - name: net.ipv4.ip_unprivileged_port_start
+          value: "0"
     container:
       allowPrivilegeEscalation: false
       readOnlyRootFilesystem: true

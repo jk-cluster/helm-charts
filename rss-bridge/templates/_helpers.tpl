@@ -198,6 +198,10 @@ Two chart-specific facts a rebuilt default must not lose:
     everything in it owned by www-data, and both nginx and php-fpm are
     configured for that user. A "cleaner" high uid would leave the app unable
     to read its own bridge sources.
+  - the ip_unprivileged_port_start sysctl is what lets a non-root nginx bind
+    port 80, and this chart has no choice about that port - see the comment on
+    it in values.yaml. Dropping it from a rebuilt default does not fail at
+    render time; it fails on the first node whose default differs.
   - the probes address the port BY NAME (rss-bridge-port) and use the app's
     own health action. A default that drops the query string would probe the
     1.5 MB front page instead of a 49-byte JSON response, and a default that
@@ -211,7 +215,8 @@ Two chart-specific facts a rebuilt default must not lose:
       "runAsGroup" 33
       "fsGroup" 33
       "fsGroupChangePolicy" "Always"
-      "seccompProfile" (dict "type" "RuntimeDefault") -}}
+      "seccompProfile" (dict "type" "RuntimeDefault")
+      "sysctls" (list (dict "name" "net.ipv4.ip_unprivileged_port_start" "value" "0")) -}}
 {{- include "rss-bridge.defaultedDict" (dict "defaults" $defaults "given" $given "path" "rssBridge.securityContext.pod") -}}
 {{- end -}}
 

@@ -36,21 +36,27 @@ spec:
           env:
             {{- range $value := .Values.rssBridge.env }}
             {{- if $value.value }}
-            - name: {{ $value.name }}
-              value: {{ tpl $value.value $ }}
+            - name: {{ $value.name | quote }}
+              # quote is required, not cosmetic: a value like "5" or "true"
+              # renders unquoted as a YAML number/bool, and the API server then
+              # rejects the whole manifest with "cannot unmarshal number into
+              # Go struct field EnvVar.value of type string". RSS-Bridge takes
+              # numeric settings this way (RSSBRIDGE_http_timeout), so this is
+              # reachable with the very first env entry someone adds.
+              value: {{ tpl $value.value $ | quote }}
             {{- else if $value.valueFrom }}
             {{- if $value.valueFrom.secretKeyRef }}
-            - name: {{ $value.name }}
+            - name: {{ $value.name | quote }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ tpl $value.valueFrom.secretKeyRef.name $ }}
-                  key: {{ tpl $value.valueFrom.secretKeyRef.key $ }}
+                  name: {{ tpl $value.valueFrom.secretKeyRef.name $ | quote }}
+                  key: {{ tpl $value.valueFrom.secretKeyRef.key $ | quote }}
             {{- else if $value.valueFrom.configMapKeyRef }}
-            - name: {{ $value.name }}
+            - name: {{ $value.name | quote }}
               valueFrom:
                 configMapKeyRef:
-                  name: {{ tpl $value.valueFrom.configMapKeyRef.name $ }}
-                  key: {{ tpl $value.valueFrom.configMapKeyRef.key $ }}
+                  name: {{ tpl $value.valueFrom.configMapKeyRef.name $ | quote }}
+                  key: {{ tpl $value.valueFrom.configMapKeyRef.key $ | quote }}
             {{- end }}
             {{- end }}
             {{- end }}

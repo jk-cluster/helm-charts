@@ -108,3 +108,8 @@ misconfigurations:
   - id: AVD-KSV-0119
     paths: ["**/homeassistant.yaml"]
     statement: "NET_RAW is the capability in question and is added on purpose for device discovery; see AVD-KSV-0022."
+
+  # --- rss-bridge: port 80 is fixed by the image ----------------------------
+  - id: AVD-KSV-0117
+    paths: ["**/rss-bridge.yaml"]
+    statement: "nginx inside the image listens on 80, and the only way the entrypoint offers to change it (HTTP_PORT) is a sed against /etc/nginx/sites-enabled/default, which a read-only root filesystem rejects - so the alternative to port 80 would be giving up readOnlyRootFilesystem. The premise of the check does not apply here either: the container binds 80 as uid 33 with ALL capabilities dropped and no NET_BIND_SERVICE, verified in k3d. Renaming is also not free - the Service selects the port by name (rss-bridge-port), which is what keeps the takeover of the existing installation a no-op."

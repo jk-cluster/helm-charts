@@ -27,7 +27,11 @@ spec:
         {{- include "rss-bridge.podSecurityContext" .Values.rssBridge.securityContext | nindent 8 }}
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
-          image: "rssbridge/rss-bridge:{{ .Chart.AppVersion }}"
+          # Registry written out in full on purpose: an unqualified Docker Hub
+          # reference puts "rssbridge" in the registry position, which says
+          # nothing about where the image comes from and is reported as an
+          # untrusted registry (AVD-KSV-0125). See ci/trivy/data/ksv0125.yaml.
+          image: "docker.io/rssbridge/rss-bridge:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
           env:
             {{- range $value := .Values.rssBridge.env }}

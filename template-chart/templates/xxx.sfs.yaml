@@ -15,6 +15,13 @@ spec:
       name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
       labels:
         app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+      annotations:
+        # Hash of the rendered ConfigMap: a changed ConfigMap changes the pod
+        # template and thus restarts the pods. Without it a config change stays
+        # invisible to the running container - subPath mounts are never
+        # updated by the kubelet, and most apps read their config only at
+        # start. Add one line per ConfigMap the workload consumes.
+        checksum/config: {{ include (print $.Template.BasePath "/xxx.configmap.yaml") . | sha256sum }}
     spec:
       automountServiceAccountToken: false
       securityContext:

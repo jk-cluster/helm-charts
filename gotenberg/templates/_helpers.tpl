@@ -214,7 +214,8 @@ rebuilt default probe needs no further context.
 {{- $defaults := dict
       "runAsNonRoot" true
       "runAsUser" 1001
-      "runAsGroup" 1001 -}}
+      "runAsGroup" 1001
+      "seccompProfile" (dict "type" "RuntimeDefault") -}}
 {{- include "gotenberg.defaultedDict" (dict "defaults" $defaults "given" $given "path" "gotenberg.securityContext.pod") -}}
 {{- end -}}
 

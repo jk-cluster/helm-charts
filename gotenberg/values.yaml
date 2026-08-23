@@ -16,6 +16,20 @@ gotenberg:
       runAsNonRoot: true
       runAsUser: 1001
       runAsGroup: 1001
+      # RuntimeDefault applies the container runtime's default seccomp filter,
+      # which blocks the syscalls a normal workload never makes. It sits in the
+      # pod context on purpose: from here it covers every container in the pod
+      # including init containers, while a container-level seccompProfile would
+      # have to be repeated for each one (and silently missed on the next one
+      # added). A container that genuinely needs a different filter can still
+      # override it under securityContext.container, which wins over this value.
+      #
+      # Verified against both conversion engines, because a browser sandbox is
+      # the classic case where a syscall filter bites: Chromium HTML->PDF and
+      # LibreOffice document->PDF both still return real PDFs under the filter,
+      # and /health reports chromium and libreoffice as "up".
+      seccompProfile:
+        type: RuntimeDefault
     container:
       allowPrivilegeEscalation: false
       readOnlyRootFilesystem: true

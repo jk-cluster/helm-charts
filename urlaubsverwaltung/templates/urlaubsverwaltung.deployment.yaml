@@ -17,13 +17,13 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
-        {{- toYaml .Values.urlaubsverwaltung.securityContext.pod | nindent 8 }}
+        {{- include "urlaubsverwaltung.podSecurityContext" .Values.urlaubsverwaltung.securityContext | nindent 8 }}
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
           image: "urlaubsverwaltung/urlaubsverwaltung:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
           securityContext:
-            {{- toYaml .Values.urlaubsverwaltung.securityContext.container | nindent 12 }}
+            {{- include "urlaubsverwaltung.containerSecurityContext" .Values.urlaubsverwaltung.securityContext | nindent 12 }}
           volumeMounts:
             # The JVM (Tomcat work dir, temp files) needs a writable /tmp with
             # a read-only root filesystem.
@@ -130,13 +130,13 @@ spec:
             {{- end }}
             {{- end }}
           resources:
-            {{- include "urlaubsverwaltung.resources" .Values.urlaubsverwaltung.resources | nindent 12 }}
+            {{- include "urlaubsverwaltung.effectiveResources" .Values.urlaubsverwaltung.resources | nindent 12 }}
           livenessProbe:
-            {{- toYaml .Values.urlaubsverwaltung.livenessProbe | nindent 12 }}
+            {{- include "urlaubsverwaltung.livenessProbe" .Values.urlaubsverwaltung.livenessProbe | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.urlaubsverwaltung.readinessProbe | nindent 12 }}
+            {{- include "urlaubsverwaltung.readinessProbe" .Values.urlaubsverwaltung.readinessProbe | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.urlaubsverwaltung.startupProbe | nindent 12 }}
+            {{- include "urlaubsverwaltung.startupProbe" .Values.urlaubsverwaltung.startupProbe | nindent 12 }}
       volumes:
         - name: tmp
           emptyDir: {}

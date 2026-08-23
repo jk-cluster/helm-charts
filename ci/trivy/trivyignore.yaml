@@ -1,0 +1,95 @@
+# Documented exceptions for `trivy config` (ci/run-trivy-config.sh).
+#
+# Trivy's native ignore-file schema, so the same file drives the future gate
+# (`--ignorefile` + a non-zero exit) without being rewritten.
+#
+# House rule, same as ci/excluded-charts.txt: no entry without a `statement`.
+# An entry without a reason reads as negligence a year from now, an entry with
+# one reads as a decision. ci/run-trivy-config.sh refuses to run if a statement
+# is missing, and it prints every suppressed finding together with its reason
+# instead of hiding it.
+#
+# `paths` scopes an entry to a single chart: the scan renders each chart to
+# <chart>.yaml, so "**/samba.yaml" means "samba only" and every other chart
+# keeps being reported for that check.
+#
+# Not in here on purpose: AVD-KSV-0125 (untrusted registry). Suppressing it
+# would also stay silent when an image from a genuinely foreign source appears.
+# Instead the trusted-registry list is configured in ci/trivy/data/ksv0125.yaml
+# and the check keeps its meaning.
+
+misconfigurations:
+  # --- repo-wide conventions ------------------------------------------------
+  - id: AVD-KSV-0011
+    statement: "No CPU limits, on purpose: CPU is compressible, so a limit throttles where the missing limit merely shares - see README 'Resources (auto-limits)'. The chart helper renders a CPU limit only when one is set explicitly."
+
+  - id: AVD-KSV-0020
+    statement: "UIDs are pinned to the value the image expects, not raised above 10000: minecraft-server 1000 (gosu default), teamspeak-server 9987, voucher-vault 33, the matrix-synapse delegation nginx 101. calibre-web-automated shows the risk - a runtime uid moving from 1000 to 911 makes existing volume data inaccessible, and every chart with a PVC carries that same risk class."
+
+  - id: AVD-KSV-0021
+    statement: "GIDs follow the pinned UIDs above; the same image expectation and the same PVC ownership risk apply."
+
+  - id: AVD-KSV-0110
+    statement: "Artifact of scanning rendered manifests: no chart pins a namespace (the release does), so Trivy reads every workload as living in 'default'. Nothing to fix in the charts."
+
+  # --- samba: deviations forced by the ghcr.io/dockur/samba entrypoint ------
+  # All four are justified in samba/values.yaml above its securityContext.
+  - id: AVD-KSV-0012
+    paths: ["**/samba.yaml"]
+    statement: "samba starts as root: the entrypoint creates the Unix users from users.conf and smbd impersonates the authenticated share user per session, both of which require uid 0."
+
+  - id: AVD-KSV-0014
+    paths: ["**/samba.yaml"]
+    statement: "samba writes to its root filesystem at startup (/etc/passwd, /etc/group, the /etc/samba.conf healthcheck symlink, the TDB databases under /var/lib/samba), so readOnlyRootFilesystem cannot be true."
+
+  - id: AVD-KSV-0022
+    paths: ["**/samba.yaml"]
+    statement: "samba drops ALL and adds back only what a multi-user file server needs: NET_BIND_SERVICE (445/139), SETUID/SETGID (per-session impersonation), CHOWN/FOWNER/DAC_OVERRIDE (share files owned by the users)."
+
+  - id: AVD-KSV-0106
+    paths: ["**/samba.yaml"]
+    statement: "Same added capability set as AVD-KSV-0022; the check wants NET_BIND_SERVICE alone, which a file server that impersonates users cannot do."
+
+  - id: AVD-KSV-0117
+    paths: ["**/samba.yaml"]
+    statement: "SMB is served on its registered ports 445 and 139, which are privileged by definition - that is why NET_BIND_SERVICE is added."
+
+  # --- calibre-web-automated: deviations forced by the s6-overlay image -----
+  # All three are justified in calibre-web-automated/values.yaml.
+  - id: AVD-KSV-0012
+    paths: ["**/calibre-web-automated.yaml"]
+    statement: "The CWA image boots via s6-overlay, whose stage-1/2 setup runs as uid 0 before dropping the application to PUID/PGID 1000; the supervisors stay root."
+
+  - id: AVD-KSV-0014
+    paths: ["**/calibre-web-automated.yaml"]
+    statement: "readOnlyRootFilesystem must stay false: in read-only mode the image disables its PUID/PGID remapping, the runtime uid silently moves from 1000 to the built-in 911 and existing volume data becomes inaccessible."
+
+  - id: AVD-KSV-0022
+    paths: ["**/calibre-web-automated.yaml"]
+    statement: "ALL dropped except the minimal s6 set verified against v4.0.6: CHOWN/DAC_OVERRIDE/FOWNER/SETGID/SETUID for the ownership fix-up and the root->PUID drop, KILL so the root supervisor can signal the uid-1000 services."
+
+  - id: AVD-KSV-0106
+    paths: ["**/calibre-web-automated.yaml"]
+    statement: "Same added capability set as AVD-KSV-0022; restricting it to NET_BIND_SERVICE would break the s6 init."
+
+  # --- homeassistant: deviations forced by the upstream image ---------------
+  # All justified in homeassistant/values.yaml above its securityContext.
+  - id: AVD-KSV-0012
+    paths: ["**/homeassistant.yaml"]
+    statement: "The official Home Assistant container boots via s6-overlay as uid 0 and supports no non-root user, so runAsNonRoot/runAsUser are deliberately unset."
+
+  - id: AVD-KSV-0118
+    paths: ["**/homeassistant.yaml"]
+    statement: "The empty pod securityContext is the deliberate form of the same deviation: the image must start as root. The container context is hardened (no privilege escalation, read-only root filesystem, ALL dropped)."
+
+  - id: AVD-KSV-0022
+    paths: ["**/homeassistant.yaml"]
+    statement: "ALL dropped, NET_RAW added back because Home Assistant's device discovery (DHCP watcher, ping/arp integrations) uses raw sockets and logs 'Operation not permitted' without it."
+
+  - id: AVD-KSV-0106
+    paths: ["**/homeassistant.yaml"]
+    statement: "Same NET_RAW addition as AVD-KSV-0022."
+
+  - id: AVD-KSV-0119
+    paths: ["**/homeassistant.yaml"]
+    statement: "NET_RAW is the capability in question and is added on purpose for device discovery; see AVD-KSV-0022."

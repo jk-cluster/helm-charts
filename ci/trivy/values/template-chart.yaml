@@ -1,0 +1,15 @@
+# Render values for the misconfiguration scan only (ci/run-trivy-config.sh).
+#
+# Used for charts that have no ci/<chart>/test-values.yaml because they are
+# excluded from the install-test. template-chart is excluded there for its
+# placeholder image, which a static scan never pulls - so it is still scanned:
+# it is the scaffold every new chart is copied from, and a finding in it is
+# inherited by every chart that follows.
+#
+# Only the values the chart declares `required` - nothing that would change the
+# security posture the scan is meant to look at.
+ingress:
+  domain: scan.example.com
+  clusterIssuer: letsencrypt
+secrets:
+  xxxSecretRef: op://Vault/scan/placeholder

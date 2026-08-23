@@ -1,0 +1,22 @@
+# Trusted registries for AVD-KSV-0125 ("Restrict container images to trusted
+# registries"), loaded via `trivy config --config-data ci/trivy/data`.
+#
+# Deliberately configured instead of ignored. An ignored check also stays quiet
+# when an image from a genuinely foreign source shows up; a configured list only
+# removes the noise and leaves the check able to say something.
+#
+# How the check reads this (builtin.kubernetes.KSV0125): it takes the part of
+# the image reference before the first "/" and requires it to end with one of
+# these entries. Setting the list *replaces* Trivy's built-in default (ACR, ECR
+# and GCR domains) - none of which this fleet uses, so nothing is lost.
+#
+# Note what this does NOT silence: an unqualified Docker Hub image such as
+# "apache/tika:3.2.3" puts "apache" in the registry position, which matches
+# nothing here and is still reported. That is a real finding, not noise - the
+# manifest does not say where the image comes from. It goes away by writing
+# such images as "docker.io/apache/tika", which is why docker.io is listed.
+ksv0125:
+  trusted_registries:
+    - cr.jk-dev.de
+    - ghcr.io
+    - docker.io

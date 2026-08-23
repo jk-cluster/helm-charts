@@ -25,7 +25,7 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
-        {{- toYaml .Values.xxx.securityContext.pod | nindent 8 }}
+        {{- include "xxx.podSecurityContext" .Values.xxx.securityContext | nindent 8 }}
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
           image: "registry/image:{{ .Chart.AppVersion }}"
@@ -53,14 +53,19 @@ spec:
             {{- end }}
           ports:
             {{- toYaml .Values.xxx.ports | nindent 12 }}
+          # Probes, resources and both security contexts go through the
+          # null-safe helpers (#99): an erased block means "chart defaults
+          # apply" instead of a vanished probe or an unhardened container.
+          # Never wrap these in an "if" - a guard hides the erased case
+          # completely instead of rendering a visible null.
           livenessProbe:
-            {{- toYaml .Values.xxx.livenessProbe | nindent 12 }}
+            {{- include "xxx.livenessProbe" .Values.xxx.livenessProbe | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.xxx.readinessProbe | nindent 12 }}
+            {{- include "xxx.readinessProbe" .Values.xxx.readinessProbe | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.xxx.startupProbe | nindent 12 }}
+            {{- include "xxx.startupProbe" .Values.xxx.startupProbe | nindent 12 }}
           resources:
-            {{- include "xxx.resources" .Values.xxx.resources | nindent 12 }}
+            {{- include "xxx.effectiveResources" .Values.xxx.resources | nindent 12 }}
           securityContext:
-            {{- toYaml .Values.xxx.securityContext.container | nindent 12 }}
+            {{- include "xxx.containerSecurityContext" .Values.xxx.securityContext | nindent 12 }}
       restartPolicy: Always

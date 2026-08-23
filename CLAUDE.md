@@ -35,7 +35,7 @@ helm template <chart-name> --set ingress.domain=example.com --set ingress.cluste
 
 ## Creating a new chart
 
-Copy `template-chart/` and replace every `xxx` placeholder — in file names (`templates/xxx.deployment.yaml` → `templates/<app>.deployment.yaml`), in `Chart.yaml`, and in the `values.yaml` keys and their `.Values.xxx.*` references inside templates. Then wire up CI:
+Copy `template-chart/` and replace every `xxx` placeholder — in file names (`templates/xxx.deployment.yaml` → `templates/<app>.deployment.yaml`), in `Chart.yaml`, in the `values.yaml` keys and their `.Values.xxx.*` references inside templates, and in `values.schema.json` (both the values paths and the `xxx.` helper prefixes). The schema and the null-safe fallback helpers come with the template but their content is chart-specific — adapt them along the five points of the README section "Values that must not lie", and validate the result against the chart's real bundle values, not only against its defaults. Then wire up CI:
 
 1. Add `.github/workflows/publish-<chart-name>.yml` (copy an existing one, e.g. `publish-outline.yml`) — it triggers on pushes to `main` touching `<chart-name>/**` and calls the reusable `publish-helm-chart.yml`.
 2. Add the chart name to the `chart-name` choice list in `.github/workflows/change-app-version.yml`.

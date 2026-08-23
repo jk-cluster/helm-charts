@@ -13,7 +13,7 @@ Collection of some self-made helm-charts. Each top-level directory is a standalo
 | `homeassistant` | Home Assistant | StatefulSet, has `NOTES.txt` and Helm tests |
 | `matrix-synapse` | Matrix Synapse | StatefulSet plus an nginx delegation Deployment/Service |
 | `minecraft-router` | itzg/mc-router | Deployment + routing ConfigMap + NodePort Service (TCP only, no ingress); `mappings` is a required value |
-| `minecraft-server` | itzg/minecraft-server | StatefulSet + PVC + Service + init-script ConfigMap (no ingress); service type is a value (`ClusterIP` by default, routed via `minecraft-router`). Published once per Java line — the image tag comes from `.Chart.AppVersion`, so the Java line is chosen by picking the chart version, and `minecraft.version` ships a default matching that line. Since chart 2.0.0 the tag is an **immutable dated upstream release** (`appVersion: <release>-java8` / `-java17` / `-java21`, e.g. `2026.8.2-java8`) instead of the continuously rebuilt rolling line tag. First chart with a strict `values.schema.json` (pilot, #68) |
+| `minecraft-server` | itzg/minecraft-server | StatefulSet + PVC + Service + init-script ConfigMap (no ingress); service type is a value (`ClusterIP` by default, routed via `minecraft-router`). Published once per Java line — the image tag comes from `.Chart.AppVersion`, so the Java line is chosen by picking the chart version, and `minecraft.version` ships a default matching that line. Since chart 2.0.0 the tag is an **immutable dated upstream release** (`appVersion: <release>-java8` / `-java17` / `-java21`, e.g. `2026.8.2-java8`) instead of the continuously rebuilt rolling line tag. Pilot for the strict `values.schema.json` (#68), which is now binding for every chart |
 | `outline` | Outline | StatefulSet, separate DB/Redis secrets |
 | `paperless-ngx` | Paperless-ngx | Largest chart: consume CronJob, SMB-connector PV/PVC, pre/post-consumption scripts ConfigMap |
 | `patchmon` | PatchMon | Two Deployments (frontend + backend), OIDC secret |
@@ -56,7 +56,7 @@ Fixture images avoid Docker Hub where possible (`public.ecr.aws`/`ghcr.io`) to d
 
 ## Creating a new chart
 
-1. Copy `template-chart/` to `<chart-name>/` and replace every `xxx` placeholder: template file names (`xxx.deployment.yaml` → `<app>.deployment.yaml`), `Chart.yaml`, the `values.yaml` keys, and the `.Values.xxx.*` references inside the templates.
+1. Copy `template-chart/` to `<chart-name>/` and replace every `xxx` placeholder: template file names (`xxx.deployment.yaml` → `<app>.deployment.yaml`), `Chart.yaml`, the `values.yaml` keys, the `.Values.xxx.*` references inside the templates, **and both the `xxx.` helper prefixes and the values paths in `values.schema.json`**. Then walk the five points in "Values that must not lie" below — the schema and the null-safe fallbacks are copied with the template, but their content is chart-specific and wrong until you adapt it.
 2. Add `.github/workflows/publish-<chart-name>.yml` (copy an existing one, e.g. `publish-outline.yml`).
 3. Add the chart name to the choice list in `.github/workflows/change-app-version.yml`.
 
@@ -162,7 +162,34 @@ These guidelines are **binding for every current and future chart** in this repo
 - Every chart has a global `scaleDown` flag (default `false`): `scaleDown: true` takes precedence over all `replicas` values, renders every Deployment/StatefulSet with `replicas: 0` and suspends CronJobs. It **stops** the app but does not uninstall it — PVCs, Secrets, Services and Ingress stay in place; setting it back to `false` brings the workloads back up.
 - Implemented via a per-chart `<chart>.replicas` helper in `_helpers.tpl` (reference in `template-chart`); the helper uses an explicit nil check (`kindIs "invalid"`) because Helm's `default` would swallow an explicit `0`.
 
-### 12. Everything else
+### 12. Values that must not lie (#68, #93, #99)
+
+Every chart ships a **`values.schema.json`** with `additionalProperties: false` on **every chart-owned object level** — not just the top one. The gap this closes is a key that looks like configuration and does nothing: the pilot (#68) found three of them in one chart, one of them nested three levels deep and quietly leaving a game world unpinned. Objects that are passed **verbatim** into the pod spec stay open (probes, `securityContext.pod`/`.container`, `global`, free-form annotation maps): Kubernetes owns their schema, and restricting them would only reject fields that do not exist yet. The schema **adds to** `required()`, it does not replace it.
+
+Reference implementation: `template-chart/values.schema.json` and `template-chart/templates/_helpers.tpl`.
+
+**1. A value read outside its obvious template needs its own guard.** Before putting an Ingress behind `ingress.enabled`, check whether anything else reads `ingress.domain` — **in `templates/` and in `values.yaml`**, because `env` entries are rendered through `tpl` and hide such reads. If something does, that read needs its own `required()`; the gate then frees `clusterIssuer` but *not* `domain`. This happened in six charts, and matrix-synapse shows why it matters more than the count: its delegation nginx serves `ingress.domain` in the `/.well-known/matrix/{server,client}` endpoints through which **federation finds the homeserver**. Gating without the guard publishes
+
+```
+{"m.server": ":443"}     {"m.homeserver": {"base_url": "https://"}}
+```
+
+— rendered cleanly, pod green, federation broken. Check per chart and in both directions: in `calibre-web-automated` nothing outside the Ingress reads the domain, and there the gate frees both values.
+
+**2. Probes, security contexts and resources go through the null-safe helper, never behind an `if`.** An override written without children is YAML null and erases the block: the container renders `securityContext: null` (unhardened, healthy, silent), a probe disappears, or `resources` loses its requests and computed limits. The `defaultedDict` helper defines the opposite semantics — an empty block means "chart defaults apply" — while an explicitly set value still wins, **including `false` and `0`** (hence the `kindIs "invalid"` check; `default` and `mergeOverwrite` both swallow zero values). Do **not** wrap these blocks in `{{- if }}`: a guard does not render a visible `null`, it removes the probe entirely, which is the same bug with no evidence left.
+
+**3. Do not hang liveness on an external dependency where a dependency-free path exists.** `zipline` deliberately probes `/` for liveness and `/api/healthcheck` only for readiness and startup, so a database outage cannot restart the pod. Where no such path exists — `outline` returns 500 on `/` when the database is down — all three probes may share the endpoint, but the reason belongs in a comment on the helper, or the next reader will "fix" the inconsistency.
+
+**4. A fallback reproduces *this chart's* defaults, not the repo standard.** Five charts deviate from the hardening baseline on purpose. A "cleaned up" standard default is not tidying, it is an outage: `calibre-web-automated` must keep `readOnlyRootFilesystem: false`, because in read-only mode the image disables its PUID/PGID remapping and the runtime uid silently moves from 1000 to 911 — **making existing volume data inaccessible**. The same applies to non-standard values that look like mistakes: `satisfactory` keeps `limitFactor: 2` (that is what holds the memory limit at the published 8Gi) and `fsGroupChangePolicy: OnRootMismatch` (which avoids a recursive chown of multi-GB game files on every start).
+
+**5. A probe default carries the probe's context, not just its timings.** Two different symptoms, both from real charts: `teamspeak-server` addresses its TCP port by the name `file-transfer` because the voice service is UDP and cannot be probed — a default without that name leaves the workload **with no working probe at all**. `patchmon` sends a `Host` header because the server answers **403** to any request whose Host is neither loopback nor a CORS_ORIGIN host — a default without it means the pod never becomes Ready. Port names, `Host` headers and `exec` commands belong in the fallback; where the context is dynamic, pass the root context in and rebuild it (patchmon derives the header from `ingress.domain`).
+
+**Two things about the mechanics that are easy to lose:**
+
+- **`null` reaches the schema in one case and not the other.** For a key **with** a chart default, Helm's coalescing treats the `null` as a deletion and removes it *before* schema validation — the schema never sees it, and only the helper can catch it. For a key **without** a default (e.g. `resources.limits`), there is nothing to delete, the `null` survives into validation, and a strict `"type": "object"` aborts the render. That is why the helper **and** the widened `["object", "null"]` types are both needed: each covers a case the other cannot. Everything else stays strictly typed.
+- **Validate every schema against the real values, not only against chart defaults.** Defaults are valid by construction, so they prove nothing. Render each chart against its bundle in `cluster-config/fleet-cd/` **and** against `helm get values` — the two differ more often than expected (four of ten bundles in one wave, always with the repo file being the worse one). This step caught a schema of mine that would have broken three live paperless releases, because all three write `tikaGotenberg.enabled` as the string `"true"` and the first draft demanded a boolean. Result per chart is a **list of rejected keys**, which is the cluster side's work order before the version is pulled up.
+
+### 13. Everything else
 
 - `icon:` is mandatory in every `Chart.yaml`.
 - `helm lint --strict` must pass without findings.

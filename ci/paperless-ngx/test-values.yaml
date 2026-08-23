@@ -9,5 +9,12 @@ ingress:
   # apply - there is no cert-manager in the CI cluster.
   clusterIssuer: ci
 
+paperless:
+  files:
+    # Regression guard for issue #61: a childless "barcodes:" key is YAML null.
+    # It must fall back to the chart defaults (barcodes enabled, "PATCHT") and
+    # neither erase them nor break rendering.
+    barcodes:
+
 # smbConnection and oidc stay disabled (defaults): the SMB CSI driver and a
 # real OIDC login flow are out of scope for the CI install-test.

@@ -114,3 +114,78 @@ template-chart is the reference implementation.
 1
 {{- end -}}
 {{- end -}}
+
+{{/*
+Merge a user-supplied values sub-tree onto a dict of chart defaults so that a
+null / empty override falls back to the defaults instead of erasing them.
+
+Input: dict "defaults" <dict> "given" <dict|nil> "path" <string, optional
+values path used in error messages>. Output: YAML of the merged dict (consume
+it with fromYaml).
+
+Why this exists (issue #61): Helm merges values maps recursively, but an
+override key written without children — e.g. a leftover
+
+  barcodes:
+
+after deleting its last remaining sub-key — is YAML null and replaces the
+whole default sub-tree. The chart then renders with no barcode settings at
+all. This helper defines the opposite semantics: an empty block means "chart
+defaults apply".
+
+Rules:
+  - a nil "given" is treated as an empty dict (all defaults apply).
+  - a key whose override value is null keeps the default (nulls never delete).
+  - a key present in both as a map is merged recursively, so a partially
+    filled block only overrides the keys it actually sets.
+  - a scalar override for a key the defaults define as a map is rejected with
+    a message naming the values path, instead of failing later with a template
+    field error.
+  - any other set value wins as given, including an explicit false or 0 —
+    Helm's "default" and sprig's "mergeOverwrite" would both swallow those
+    zero values, hence the explicit kindIs "invalid" nil check.
+  - keys only present in the override are passed through unchanged.
+*/}}
+{{- define "paperless-ngx.defaultedDict" -}}
+{{- $defaults := .defaults | default dict -}}
+{{- $given := .given -}}
+{{- $path := .path | default "value" -}}
+{{- if kindIs "invalid" $given -}}
+{{- $given = dict -}}
+{{- end -}}
+{{- if not (kindIs "map" $given) -}}
+{{- fail (printf "%s must be a mapping or null, got %s (%v)" $path (kindOf $given) $given) -}}
+{{- end -}}
+{{- $out := deepCopy $defaults -}}
+{{- range $key, $value := $given -}}
+{{- if not (kindIs "invalid" $value) -}}
+{{- $default := index $defaults $key -}}
+{{- if and (kindIs "map" $value) (kindIs "map" $default) -}}
+{{- $_ := set $out $key (fromYaml (include "paperless-ngx.defaultedDict" (dict "defaults" $default "given" $value "path" (printf "%s.%s" $path $key)))) -}}
+{{- else if kindIs "map" $default -}}
+{{- fail (printf "%s.%s must be a mapping or null, got %s (%v)" $path $key (kindOf $value) $value) -}}
+{{- else -}}
+{{- $_ := set $out $key $value -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- toYaml $out -}}
+{{- end -}}
+
+{{/*
+The effective barcode settings, rendered as YAML (consume with fromYaml).
+
+Input: .Values.paperless.files.barcodes (may be nil, empty or partial).
+
+The defaults below MUST stay in sync with the barcodes block in values.yaml,
+which stays the documented, user-facing place for them; this copy is only the
+fallback for the case where an override has erased the block.
+*/}}
+{{- define "paperless-ngx.barcodes" -}}
+{{- $defaults := dict
+      "enabled" true
+      "barcodeString" "PATCHT"
+      "retainBarcodePage" false
+      "asn" (dict "enabled" true) -}}
+{{- include "paperless-ngx.defaultedDict" (dict "defaults" $defaults "given" . "path" "paperless.files.barcodes") -}}
+{{- end -}}

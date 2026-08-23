@@ -73,7 +73,12 @@ spec:
                   name: {{ .Release.Name }}-{{ .Chart.Name }}-smtp-secret
                   key: password
             - name: SMTP_REJECT_UNAUTHORIZED
-              value: "{{ .Values.rallly.smtp.rejectUnauthorized }}"
+              {{- /* Not "| default true": an explicit false is a zero value, and
+                     "default" would swallow it and silently re-enable the check
+                     the operator just switched off. A nil (erased key) falls back
+                     to the chart default true, so the variable can never reach
+                     the app as an empty string (issues #109, #99). */}}
+              value: "{{ if kindIs "invalid" .Values.rallly.smtp.rejectUnauthorized }}true{{ else }}{{ .Values.rallly.smtp.rejectUnauthorized }}{{ end }}"
             - name: SMTP_TLS_SERVERNAME
               valueFrom:
                 secretKeyRef:

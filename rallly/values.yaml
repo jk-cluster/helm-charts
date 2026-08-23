@@ -16,6 +16,17 @@ rallly:
   replicas: 1
   smtp:
     enabled: false
+    # Verify the mail server's TLS certificate (passed to the app as
+    # SMTP_REJECT_UNAUTHORIZED). Leave this at true.
+    #
+    # Set it to false ONLY for a mail server with a self-signed certificate.
+    # Without that hint the symptom is misleading: the send fails with a
+    # certificate error naming the mail server, so the search starts at the
+    # mail server or its CA chain rather than at this value.
+    #
+    # false disables the certificate check entirely and exposes the SMTP
+    # session to a man-in-the-middle; prefer trusting the CA over setting it.
+    rejectUnauthorized: true
   allowedEmails: '*'
   supportEmail: null
   oidc:

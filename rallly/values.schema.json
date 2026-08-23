@@ -46,8 +46,8 @@
               "type": "boolean"
             },
             "rejectUnauthorized": {
-              "description": "Passed to the app as SMTP_REJECT_UNAUTHORIZED. Read by the chart but deliberately without a default in values.yaml - see the note in the PR that introduced this schema.",
-              "type": ["boolean", "string", "null"]
+              "description": "Verify the mail server's TLS certificate; passed to the app as SMTP_REJECT_UNAUTHORIZED. Defaults to true (issue #109). Set false only for a mail server with a self-signed certificate. Strings are rejected: the env var is rendered from this value, and a string like \"yes\" would reach the app as a value it does not read as a boolean. Null means the chart default (true), as elsewhere in this chart (issue #99).",
+              "type": ["boolean", "null"]
             }
           }
         },

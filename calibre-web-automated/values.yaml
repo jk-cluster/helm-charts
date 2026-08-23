@@ -84,6 +84,10 @@ cwa:
   env: []
 
 ingress:
+  # Set to false to omit the Ingress entirely. Unlike some other charts here,
+  # ingress.domain is read nowhere but in the Ingress template, so switching
+  # the Ingress off makes both domain and clusterIssuer unnecessary.
+  enabled: true
   clusterIssuer: null
   domain: null
   className: nginx

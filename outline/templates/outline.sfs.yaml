@@ -18,7 +18,7 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
-        {{- toYaml .Values.outline.securityContext.pod | nindent 8 }}
+        {{- include "outline.podSecurityContext" .Values.outline.securityContext | nindent 8 }}
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
           image: "outlinewiki/outline:{{ .Chart.AppVersion }}"
@@ -26,8 +26,12 @@ spec:
           env:
             - name: PORT
               value: "3000"
+            # ingress.domain is not a pure Ingress value: it is also Outline's
+            # public URL, used for generated links and the OIDC redirect URI,
+            # so it stays required even when the Ingress is switched off (an
+            # empty value would render "https://" and break logins silently).
             - name: URL
-              value: "https://{{ .Values.ingress.domain }}"
+              value: "https://{{ required "A Domain/Host must be provided (ingress.domain)" .Values.ingress.domain }}"
             - name: SECRET_KEY
               valueFrom:
                 secretKeyRef:
@@ -100,15 +104,15 @@ spec:
               protocol: TCP
               name: http
           livenessProbe:
-            {{- toYaml .Values.outline.livenessProbe | nindent 12 }}
+            {{- include "outline.livenessProbe" .Values.outline.livenessProbe | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.outline.readinessProbe | nindent 12 }}
+            {{- include "outline.readinessProbe" .Values.outline.readinessProbe | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.outline.startupProbe | nindent 12 }}
+            {{- include "outline.startupProbe" .Values.outline.startupProbe | nindent 12 }}
           resources:
-            {{- include "outline.resources" .Values.outline.resources | nindent 12 }}
+            {{- include "outline.effectiveResources" .Values.outline.resources | nindent 12 }}
           securityContext:
-            {{- toYaml .Values.outline.securityContext.container | nindent 12 }}
+            {{- include "outline.containerSecurityContext" .Values.outline.securityContext | nindent 12 }}
           volumeMounts:
             - mountPath: "/outline-data/data"
               name: outline-data

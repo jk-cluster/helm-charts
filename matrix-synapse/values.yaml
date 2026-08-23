@@ -5,6 +5,18 @@
 scaleDown: false
 
 secrets:
+  # homeserver.yaml is mounted into the Synapse StatefulSet from the Secret the
+  # 1Password operator materializes from this item.
+  #
+  # Known limitation (#82): a change to the item in the vault does NOT restart
+  # Synapse. Helm cannot hash the content (it never sees it - the operator fills
+  # the Secret in-cluster after rendering), so the checksum/config mechanism the
+  # delegation nginx uses does not apply here. The operator's own
+  # "operator.1password.io/auto-restart" annotation is no help either: it only
+  # ever restarts Deployments, and this workload is a StatefulSet (verified
+  # against onepassword-operator 1.12.0). After changing the item, restart
+  # Synapse by hand:
+  #   kubectl rollout restart statefulset <release>-matrix-synapse-sfs
   configSecretRef: null
 
 matrix:

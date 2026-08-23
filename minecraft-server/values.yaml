@@ -184,8 +184,8 @@ minecraft:
   # This value must match the Java line of the chart version: the image tag
   # comes from .Chart.AppVersion, so the JVM is fixed per published chart
   # version. Java 8 runs Minecraft up to 1.16.5, 1.18-1.20.4 need Java 17 and
-  # 1.20.5+ need Java 21. This chart publishes appVersion "java8".
-  version: "1.12.2"
+  # 1.20.5+ need Java 21. This chart publishes appVersion "java17".
+  version: "1.20.1"
 
 # curseforge, ftb and curseforgeServerpack are mutually exclusive - enabling
 # more than one is rejected by the chart (before 1.0.0 it silently rendered a

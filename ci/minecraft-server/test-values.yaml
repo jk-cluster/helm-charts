@@ -3,13 +3,13 @@
 #
 # 1. minecraft.version: the image tag comes from .Chart.AppVersion, so the JVM
 #    in the image is fixed per published chart version and the Minecraft
-#    version has to match that Java line - Java 8 runs Minecraft up to 1.16.5,
-#    modern versions need Java 17/21 and refuse to start otherwise. This chart
-#    version publishes appVersion "java8", hence 1.12.2 (a classic Java 8 era
-#    release). This value is bumped together with appVersion in the java17 and
-#    java21 follow-up PRs.
+#    version has to match that Java line - Java 8 runs Minecraft only up to
+#    1.16.5, 1.18-1.20.4 need Java 17, and 1.20.5+ need Java 21. No single
+#    Minecraft version boots on all three lines, so this value is bumped
+#    together with appVersion in every Java-line PR.
+#    This chart version publishes appVersion "java17", hence 1.20.1.
 #    The production default is "LATEST", which would pull a 1.21.x server that
-#    a Java 8 JVM cannot load at all.
+#    needs Java 21 and would not start on this line.
 # 2. minecraft.resources.storage: the production 32Gi world volume is backed by
 #    a static hostPath PV in CI (see fixtures.yaml); 2Gi is plenty for a server
 #    that only has to boot.
@@ -25,7 +25,7 @@ secrets:
   minecraftServerRef: vaults/CI/items/minecraft-server
 
 minecraft:
-  version: "1.12.2"
+  version: "1.20.1"
   management:
     # opPlayers deliberately stays at the default (null): the image resolves
     # every name in OPS against the external Playerdb API and aborts the whole

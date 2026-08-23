@@ -13,7 +13,7 @@ jobs:
       any-scan: ${{ steps.detect.outputs.any-scan }}
     steps:
       - name: "Checkout Repository"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: "Detect changed charts"
@@ -65,7 +65,7 @@ jobs:
         chart: ${{ fromJSON(needs.detect-changed-charts.outputs.charts) }}
     steps:
       - name: "Checkout Repository"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: "Install Helm"
@@ -112,7 +112,7 @@ jobs:
       TRIVY_CONFIG_MODE: report
     steps:
       - name: "Checkout Repository"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: "Install Helm"
         uses: azure/setup-helm@v4
       - name: "Install Trivy"
@@ -145,7 +145,7 @@ jobs:
       K3S_IMAGE: docker.io/rancher/k3s:v1.35.5-k3s1
     steps:
       - name: "Checkout Repository"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: "Install Helm"
         uses: azure/setup-helm@v4
       - name: "Install k3d"

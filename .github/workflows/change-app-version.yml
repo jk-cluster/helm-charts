@@ -67,7 +67,7 @@ jobs:
           JK_CLUSTER_BOT_TOKEN: op://GitHub-Actions/github-helm-charts-push-token/credential
           JK_CLUSTER_USERNAME: op://GitHub-Actions/github-helm-charts-push-token/username
           JK_CLUSTER_EMAIL: op://GitHub-Actions/github-helm-charts-push-token/email
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           token: ${{ env.JK_CLUSTER_BOT_TOKEN }}
       - name: "Get Chart Version"

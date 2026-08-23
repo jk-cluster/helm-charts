@@ -68,6 +68,25 @@ spec:
               value: {{ .Values.minecraft.difficulty }}
             - name: SERVER_PORT
               value: "{{ .Values.server.port }}"
+            # ENABLE_WHITELIST is set in both positions on purpose - it is the
+            # only variable that can switch the whitelist OFF again. The image
+            # enables the whitelist when WHITELIST/WHITELIST_FILE is non-empty
+            # OR ENABLE_WHITELIST is true, and disables it (white-list=false)
+            # when ENABLE_WHITELIST is false, rewriting an existing
+            # server.properties on the volume. Because a non-empty WHITELIST
+            # wins over ENABLE_WHITELIST=false, players must stay unset while
+            # disabled - hence the guard below rather than emitting both.
+            - name: ENABLE_WHITELIST
+              value: "{{ .Values.minecraft.whitelist.enabled }}"
+            # enforce-whitelist is mapped from ENFORCE_WHITELIST in the image's
+            # property-definitions.json. The image only ever sets it to true (in
+            # its enable branch) and never resets it, so without this line a
+            # server that once had the whitelist on keeps enforce-whitelist=true
+            # in its persisted server.properties after switching off. It is
+            # inert while white-list=false, but leaving stale state behind is
+            # exactly what this chart version fixes, so it follows the switch.
+            - name: ENFORCE_WHITELIST
+              value: "{{ .Values.minecraft.whitelist.enabled }}"
             {{- if .Values.minecraft.whitelist.enabled }}
             - name: EXISTING_WHITELIST_FILE
               value: {{ .Values.minecraft.whitelist.overridePolicy }}

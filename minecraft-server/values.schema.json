@@ -156,13 +156,16 @@
           "additionalProperties": false,
           "properties": {
             "enabled": {
+              "description": "Wired to the image's ENABLE_WHITELIST in both positions: true sets white-list=true (and enforce-whitelist=true), false rewrites white-list=false into an existing server.properties on the volume. true without players locks everyone out - that is the image's semantics and it is intended.",
               "type": "boolean"
             },
             "overridePolicy": {
+              "description": "EXISTING_WHITELIST_FILE - how an already existing whitelist.json is treated. Only applies while enabled is true.",
               "type": "string",
               "enum": ["SKIP", "MERGE", "SYNCHRONIZE"]
             },
             "players": {
+              "description": "Comma-separated players, passed as WHITELIST only while enabled is true (a non-empty WHITELIST would otherwise enable the whitelist despite ENABLE_WHITELIST=false).",
               "type": ["string", "null"]
             }
           }

@@ -1,9 +1,121 @@
+# Scale the whole chart down without uninstalling it: scaleDown: true renders
+# every Deployment/StatefulSet with replicas: 0 (and suspends CronJobs) and
+# takes precedence over any per-workload replicas value. PVCs, Secrets and
+# Services stay in place; scaleDown: false brings the workloads back up.
+scaleDown: false
+
+# Routing table of the router: which client-facing hostname is proxied to which
+# backend Minecraft server. Required and must not be empty - a router without
+# routes is not operable, and there is no sensible default.
+# Every entry needs "domain" and "internalUrl"; the optional "port" overrides
+# server.backendPort for that single backend:
+#   mappings:
+#     - domain: mc.example.com
+#       internalUrl: survival-service.minecraft.svc.cluster.local
+#     - domain: creative.example.com
+#       internalUrl: creative-service.minecraft.svc.cluster.local
+#       port: 25566
+mappings: null
+
 server:
+  # Replica count for this workload; 0 is allowed and scales it down.
+  # The chart-global scaleDown flag takes precedence.
+  replicas: 1
   # nodePort of the router Service. 25565 is the Minecraft default port and is
   # deliberately outside the Kubernetes default node-port range (30000-32767) -
   # the cluster runs an extended --service-node-port-range. Do NOT "fix" this
   # into the default range: the Minecraft clients connect to this exact port.
   outwardPort: 25565
-mappings:
-  - domain: null
-    internalUrl: null
+  # Port the router listens on for Minecraft client connections (mc-router
+  # --port); used as containerPort and as the Service's cluster-internal port.
+  port: 25565
+  # Default port of the backend Minecraft servers, used for every mapping that
+  # does not carry its own "port".
+  backendPort: 25565
+  # Port of the mc-router HTTP API (--api-binding). Not exposed by the Service;
+  # only the probes talk to it.
+  apiPort: 8080
+  resources:
+    # Limits are optional: memory and ephemeral-storage limits default to
+    # limitFactor x the request, an explicitly set limit always wins, and a
+    # CPU limit is only set when configured explicitly under "limits".
+    limitFactor: 3
+    requests:
+      cpu: 100m
+      memory: 50Mi
+      ephemeral-storage: 50Mi
+  # The probes query the mc-router API. GET /routes answers with the live
+  # routing table, but only with the "Accept: application/json" header - the
+  # API router matches on it and answers 404 without it. The API server is
+  # started after the routes config has been read and the Minecraft listener is
+  # up, so a 200 here means the router is actually serving clients.
+  livenessProbe:
+    httpGet:
+      path: /routes
+      port: api-port
+      httpHeaders:
+        - name: Accept
+          value: application/json
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /routes
+      port: api-port
+      httpHeaders:
+        - name: Accept
+          value: application/json
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # The startup probe gates liveness/readiness. mc-router is a single static Go
+  # binary that reads one config file and serves the API in well under a
+  # second; budget = periodSeconds * failureThreshold = 30s.
+  startupProbe:
+    httpGet:
+      path: /routes
+      port: api-port
+      httpHeaders:
+        - name: Accept
+          value: application/json
+    periodSeconds: 2
+    timeoutSeconds: 5
+    failureThreshold: 15
+  securityContext:
+    pod:
+      runAsNonRoot: true
+      # The itzg/mc-router image is built FROM scratch and declares no user, so
+      # it would run as root by default. The statically linked binary needs no
+      # particular uid/gid, so the chart pins an unprivileged one.
+      runAsUser: 10000
+      runAsGroup: 10000
+      # Keeps the mounted routing-config ConfigMap readable for that gid.
+      fsGroup: 10000
+      fsGroupChangePolicy: Always
+    container:
+      allowPrivilegeEscalation: false
+      # No deviation needed: the scratch image writes nothing, and the only
+      # mount is the read-only routing config.
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      capabilities:
+        drop:
+          - ALL
+        add: []
+  # Extra environment variables for the router container, appended to the ones
+  # the chart always sets (ROUTES_CONFIG). Values are rendered through tpl and
+  # support the value, secretKeyRef and configMapKeyRef forms:
+  #   - name: SOME_ENV
+  #     value: "{{ .Release.Name }}"
+  #   - name: FROM_SECRET
+  #     valueFrom:
+  #       secretKeyRef:
+  #         name: "some-secret"
+  #         key: "someKey"
+  #   - name: FROM_CONFIGMAP
+  #     valueFrom:
+  #       configMapKeyRef:
+  #         name: "some-configmap"
+  #         key: "someKey"
+  env: []

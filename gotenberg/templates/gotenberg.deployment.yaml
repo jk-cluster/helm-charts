@@ -17,7 +17,7 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
-        {{- toYaml .Values.gotenberg.securityContext.pod | nindent 8 }}
+        {{- include "gotenberg.podSecurityContext" .Values.gotenberg.securityContext | nindent 8 }}
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
           image: "gotenberg/gotenberg:{{ .Chart.AppVersion }}"
@@ -46,7 +46,7 @@ spec:
             {{- end }}
           {{- end }}
           securityContext:
-            {{- toYaml .Values.gotenberg.securityContext.container | nindent 12 }}
+            {{- include "gotenberg.containerSecurityContext" .Values.gotenberg.securityContext | nindent 12 }}
           volumeMounts:
             # Gotenberg (and the Chromium/LibreOffice it drives) needs writable
             # /tmp and home directories; with a read-only root filesystem these
@@ -60,13 +60,13 @@ spec:
               protocol: TCP
               name: gotenberg-port
           livenessProbe:
-            {{- toYaml .Values.gotenberg.livenessProbe | nindent 12 }}
+            {{- include "gotenberg.livenessProbe" .Values.gotenberg.livenessProbe | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.gotenberg.readinessProbe | nindent 12 }}
+            {{- include "gotenberg.readinessProbe" .Values.gotenberg.readinessProbe | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.gotenberg.startupProbe | nindent 12 }}
+            {{- include "gotenberg.startupProbe" .Values.gotenberg.startupProbe | nindent 12 }}
           resources:
-            {{- include "gotenberg.resources" .Values.gotenberg.resources | nindent 12 }}
+            {{- include "gotenberg.effectiveResources" .Values.gotenberg.resources | nindent 12 }}
       volumes:
         - name: tmp
           emptyDir: {}

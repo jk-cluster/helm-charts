@@ -1,5 +1,8 @@
 {{- $replicas := include "gotenberg.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.gotenberg.replicas) -}}
-{{- $limits := (include "gotenberg.resources" .Values.gotenberg.resources | fromYaml).limits | default dict -}}
+{{- /* effectiveResources, not resources: an erased "resources:" block falls back
+       to the chart defaults in the Deployment (#99), so the notes must report the
+       limits the release actually gets, not "(none set)". */ -}}
+{{- $limits := (include "gotenberg.effectiveResources" .Values.gotenberg.resources | fromYaml).limits | default dict -}}
 {{- $svc := printf "%s-%s-service" .Release.Name .Chart.Name -}}
 Gotenberg {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
 

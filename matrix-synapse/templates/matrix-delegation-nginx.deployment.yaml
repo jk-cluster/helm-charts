@@ -14,6 +14,13 @@ spec:
     metadata:
       labels:
         app: {{ .Release.Name }}-{{ .Chart.Name }}-delegation-nginx-deployment
+      annotations:
+        # Hash of the rendered delegation ConfigMap: a changed nginx.conf
+        # changes the pod template and thus rolls the pods. Without it the
+        # running nginx keeps serving the old .well-known documents - the
+        # config is mounted with subPath (never refreshed by the kubelet) and
+        # nginx reads it only at start.
+        checksum/config: {{ include (print $.Template.BasePath "/matrix-delegation-nginx.configmap.yaml") . | sha256sum }}
     spec:
       automountServiceAccountToken: false
       securityContext:

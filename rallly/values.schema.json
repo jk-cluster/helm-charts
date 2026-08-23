@@ -1,0 +1,232 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "rallly values",
+  "description": "Strict values schema (issue #68). additionalProperties is false on every chart-owned object level, so a key that the chart does not read is rejected at render time instead of being silently ignored. The only objects that stay open are the ones passed verbatim into the Kubernetes pod spec (probes, security contexts, global) - the chart does not interpret their contents, so it cannot judge which keys are meaningful. The hardening, probe and resources blocks additionally accept null, because an erased block falls back to the chart defaults (issue #99).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "global": {
+      "description": "Helm's conventional cross-chart values. Unused by this chart, kept open so an umbrella install cannot break on it.",
+      "type": "object"
+    },
+    "scaleDown": {
+      "type": "boolean"
+    },
+    "secrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ralllySecretRef": {
+          "type": ["string", "null"]
+        },
+        "oidcSecretRef": {
+          "type": ["string", "null"]
+        },
+        "databaseSecretRef": {
+          "type": ["string", "null"]
+        },
+        "smtpSecretRef": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "rallly": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "smtp": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "rejectUnauthorized": {
+              "description": "Passed to the app as SMTP_REJECT_UNAUTHORIZED. Read by the chart but deliberately without a default in values.yaml - see the note in the PR that introduced this schema.",
+              "type": ["boolean", "string", "null"]
+            }
+          }
+        },
+        "allowedEmails": {
+          "type": ["string", "null"]
+        },
+        "supportEmail": {
+          "type": ["string", "null"]
+        },
+        "oidc": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": ["string", "null"]
+            },
+            "pictureClaimPath": {
+              "type": ["string", "null"]
+            },
+            "emailClaimPath": {
+              "type": ["string", "null"]
+            },
+            "nameClaimPath": {
+              "type": ["string", "null"]
+            }
+          }
+        },
+        "cache": {
+          "description": "The writable emptyDir mounted over the Next.js cache directory. Not null-safe on purpose: cache.path is required(), so an erased block fails loudly instead of silently (issue #99 covers only the silent class).",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": ["string", "null"]
+            },
+            "sizeLimit": {
+              "type": ["string", "number", "null"]
+            }
+          }
+        },
+        "securityContext": {
+          "$ref": "#/definitions/securityContext"
+        },
+        "env": {
+          "$ref": "#/definitions/env"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "livenessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "readinessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "startupProbe": {
+          "$ref": "#/definitions/probe"
+        }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "Gates the whole Ingress template (issue #93). false omits the Ingress and makes clusterIssuer unnecessary - but NOT domain, which is also the app's public base URL.",
+          "type": "boolean"
+        },
+        "clusterIssuer": {
+          "type": ["string", "null"]
+        },
+        "domain": {
+          "type": ["string", "null"]
+        },
+        "className": {
+          "type": ["string", "null"]
+        },
+        "annotations": {
+          "description": "Extra Ingress annotations, merged with the cert-manager annotation the chart always sets. Free-form keys by nature.",
+          "type": "object"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "resources": {
+      "description": "May be null / empty: the chart then falls back to its default requests and computed limits (issue #99) instead of rendering a container without resource accounting.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "limitFactor": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "requests": {
+          "$ref": "#/definitions/resourceList"
+        },
+        "limits": {
+          "$ref": "#/definitions/resourceList"
+        }
+      }
+    },
+    "resourceList": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "cpu": {
+          "type": ["string", "number", "null"]
+        },
+        "memory": {
+          "type": ["string", "number", "null"]
+        },
+        "ephemeral-storage": {
+          "type": ["string", "number", "null"]
+        },
+        "ephemeralStorage": {
+          "type": ["string", "number", "null"]
+        }
+      }
+    },
+    "env": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "valueFrom": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "secretKeyRef": {
+                "$ref": "#/definitions/keyRef"
+              },
+              "configMapKeyRef": {
+                "$ref": "#/definitions/keyRef"
+              }
+            }
+          }
+        }
+      }
+    },
+    "keyRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "key"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        }
+      }
+    },
+    "securityContext": {
+      "description": "May be null / empty at any level: the chart then falls back to its hardening defaults (issue #99) instead of rendering an unhardened workload.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "pod": {
+          "description": "Merged onto the chart's pod hardening defaults and rendered as the pod's securityContext; kept open because the chart does not interpret the individual fields.",
+          "type": ["object", "null"]
+        },
+        "container": {
+          "description": "Merged onto the chart's container hardening defaults and rendered as the container's securityContext; kept open because the chart does not interpret the individual fields.",
+          "type": ["object", "null"]
+        }
+      }
+    },
+    "probe": {
+      "description": "Merged onto the chart's probe defaults and rendered as a container probe; kept open because the chart does not interpret the individual fields. May be null / empty, which means the defaults apply (issue #99) rather than the probe disappearing.",
+      "type": ["object", "null"]
+    }
+  }
+}

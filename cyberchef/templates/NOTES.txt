@@ -1,6 +1,8 @@
 {{- $replicas := include "cyberchef.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.cyberchef.replicas) -}}
 CyberChef {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
 
+{{- if .Values.ingress.enabled }}
+
 ACCESS
   https://{{ .Values.ingress.domain }}
 
@@ -11,11 +13,25 @@ ACCESS
 
   This chart has no secrets and no volumes — the two ingress values above are
   everything an installation needs.
+{{- else }}
+
+ACCESS — NO INGRESS
+  ingress.enabled is false, so this release has no Ingress and no certificate;
+  ingress.domain and ingress.clusterIssuer are not needed. The app is only
+  reachable inside the cluster, as
+  {{ .Release.Name }}-{{ .Chart.Name }}-service:80. To open it locally:
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-{{ .Chart.Name }}-service 8080:80
+
+  Then browse to http://localhost:8080. Set ingress.enabled=true together with
+  ingress.domain and ingress.clusterIssuer to publish it instead.
+{{- end }}
 {{ if eq $replicas "0" }}
 SCALED TO ZERO
-  {{ if .Values.scaleDown }}scaleDown: true{{ else }}cyberchef.replicas: 0{{ end }} — the deployment runs with replicas: 0, so the URL
-  above answers 503 until you set it back and upgrade again. Service and
-  Ingress stay in place, so the certificate is not re-issued.
+  {{ if .Values.scaleDown }}scaleDown: true{{ else }}cyberchef.replicas: 0{{ end }} — the deployment runs with replicas: 0, so the endpoint
+  above does not answer until you set it back and upgrade again. Service{{ if .Values.ingress.enabled }} and
+  Ingress stay in place, so the certificate is not re-issued.{{ else }} stays in
+  place.{{ end }}
 {{ end }}
 ANYONE WHO REACHES THE URL CAN USE IT
   CyberChef has no login, and this chart adds none. If it must not be open to

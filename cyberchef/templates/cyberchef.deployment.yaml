@@ -17,7 +17,7 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
-        {{- toYaml .Values.cyberchef.securityContext.pod | nindent 8 }}
+        {{- include "cyberchef.podSecurityContext" .Values.cyberchef.securityContext | nindent 8 }}
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
           image: "ghcr.io/gchq/cyberchef:{{ .Chart.AppVersion }}"
@@ -46,7 +46,7 @@ spec:
             {{- end }}
           {{- end }}
           securityContext:
-            {{- toYaml .Values.cyberchef.securityContext.container | nindent 12 }}
+            {{- include "cyberchef.containerSecurityContext" .Values.cyberchef.securityContext | nindent 12 }}
           volumeMounts:
             # nginx-unprivileged keeps its pid file and temp/cache dirs under
             # /tmp, which needs to be writable with a read-only root filesystem.
@@ -57,13 +57,13 @@ spec:
               protocol: TCP
               name: http
           livenessProbe:
-            {{- toYaml .Values.cyberchef.livenessProbe | nindent 12 }}
+            {{- include "cyberchef.livenessProbe" .Values.cyberchef.livenessProbe | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.cyberchef.readinessProbe | nindent 12 }}
+            {{- include "cyberchef.readinessProbe" .Values.cyberchef.readinessProbe | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.cyberchef.startupProbe | nindent 12 }}
+            {{- include "cyberchef.startupProbe" .Values.cyberchef.startupProbe | nindent 12 }}
           resources:
-            {{- include "cyberchef.resources" .Values.cyberchef.resources | nindent 12 }}
+            {{- include "cyberchef.effectiveResources" .Values.cyberchef.resources | nindent 12 }}
       volumes:
         - name: tmp
           emptyDir: {}

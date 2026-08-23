@@ -153,11 +153,33 @@ minecraft:
   # Valid values are: peaceful, easy, normal, and hard
   difficulty: "easy"
   whitelist:
-    # Boolean. Before chart 1.0.0 this was the string "true" and was evaluated
-    # with a plain truthiness test, so even "false" enabled the block.
-    enabled: true
+    # Boolean, wired to the image's ENABLE_WHITELIST in BOTH positions since
+    # chart 2.0.0 - which is what makes "false" actually switch the whitelist
+    # off. server.properties lives on the PVC, so before 2.0.0 a release that
+    # had once written white-list=true kept it forever: the chart only ever
+    # emitted whitelist variables while enabled was true and had no way to say
+    # "off". Now enabled: false emits ENABLE_WHITELIST=false, and the image
+    # rewrites white-list=false into the existing file.
+    #
+    # >>> enabled: true WITHOUT players locks the server down completely. <<<
+    # That is the image's own semantics and it is intended: white-list=true with
+    # an empty whitelist.json means nobody can join - not even the ops. Set
+    # players whenever this is turned on, or leave it at false.
+    #
+    # The default is false, matching both the image and vanilla Minecraft, which
+    # start with white-list=false. (Before chart 2.0.0 the default was true with
+    # players: null; that combination did nothing back then, because an empty
+    # WHITELIST never enabled anything - under the new semantics it would be a
+    # locked-out server, so the default is flipped.)
+    enabled: false
+    # How the image treats an ALREADY EXISTING whitelist.json on the volume:
+    # SKIP leaves it alone, MERGE adds players to it, SYNCHRONIZE makes it match
+    # players exactly (removing everyone else). Only applies while enabled.
     overridePolicy: "MERGE"
-    # Comma-separated List of Players
+    # Comma-separated List of Players. Only passed to the image (as WHITELIST)
+    # while enabled is true - a non-empty WHITELIST turns the whitelist on in
+    # the image regardless of ENABLE_WHITELIST, so leaving it out is what keeps
+    # enabled: false switched off even for a release that still lists players.
     players: null
   management:
     # Comma-separated List of Players. The image resolves every name against
@@ -184,8 +206,8 @@ minecraft:
   # This value must match the Java line of the chart version: the image tag
   # comes from .Chart.AppVersion, so the JVM is fixed per published chart
   # version. Java 8 runs Minecraft up to 1.16.5, 1.18-1.20.4 need Java 17 and
-  # 1.20.5+ need Java 21. This chart publishes appVersion "java21".
-  version: "1.21.1"
+  # 1.20.5+ need Java 21. This chart publishes appVersion "2026.8.2-java8".
+  version: "1.12.2"
 
 # curseforge, ftb and curseforgeServerpack are mutually exclusive - enabling
 # more than one is rejected by the chart (before 1.0.0 it silently rendered a

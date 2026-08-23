@@ -30,13 +30,13 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
-        {{- toYaml .Values.securityContext.pod | nindent 8 }}
+        {{- include "homeassistant.podSecurityContext" .Values.securityContext | nindent 8 }}
       containers:
         - name: "{{ .Release.Name }}-{{ .Chart.Name }}"
           image: "ghcr.io/home-assistant/home-assistant:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
           securityContext:
-            {{- toYaml .Values.securityContext.container | nindent 12 }}
+            {{- include "homeassistant.containerSecurityContext" .Values.securityContext | nindent 12 }}
           env:
             - name: TZ
               value: "{{ .Values.core.timezone }}"
@@ -65,13 +65,13 @@ spec:
               containerPort: 8123
               protocol: TCP
           livenessProbe:
-            {{- toYaml .Values.livenessProbe | nindent 12 }}
+            {{- include "homeassistant.livenessProbe" .Values.livenessProbe | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.readinessProbe | nindent 12 }}
+            {{- include "homeassistant.readinessProbe" .Values.readinessProbe | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.startupProbe | nindent 12 }}
+            {{- include "homeassistant.startupProbe" .Values.startupProbe | nindent 12 }}
           resources:
-            {{- include "homeassistant.resources" .Values.resources | nindent 12 }}
+            {{- include "homeassistant.effectiveResources" .Values.resources | nindent 12 }}
           volumeMounts:
             - mountPath: /config/configuration.yaml
               subPath: configuration.yaml

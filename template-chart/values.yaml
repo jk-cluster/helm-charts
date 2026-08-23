@@ -50,6 +50,15 @@ xxx:
       runAsGroup: 1000
       fsGroup: 1000
       fsGroupChangePolicy: Always
+      # RuntimeDefault applies the container runtime's default seccomp filter,
+      # which blocks the syscalls a normal workload never makes. It sits in the
+      # pod context on purpose: from here it covers every container in the pod
+      # including init containers, while a container-level seccompProfile would
+      # have to be repeated for each one (and silently missed on the next one
+      # added). A container that genuinely needs a different filter can still
+      # override it under securityContext.container, which wins over this value.
+      seccompProfile:
+        type: RuntimeDefault
     container:
       allowPrivilegeEscalation: false
       readOnlyRootFilesystem: true
@@ -59,7 +68,29 @@ xxx:
           - ALL
         add: []
   ports:
-    - containerPort: 80
+    # An unprivileged port on purpose (AVD-KSV-0117 flags containerPort < 1024).
+    #
+    # Note what the reason is NOT: on current Kubernetes a non-root container
+    # can bind port 80 just fine. The kubelet sets
+    # net.ipv4.ip_unprivileged_port_start=0 in the pod network namespace, so
+    # the classic "ports below 1024 need NET_BIND_SERVICE" rule does not apply
+    # inside a pod. Measured in k3d (k3s v1.35.5): the sysctl reads 0, and a
+    # container running as runAsUser 20000 with capabilities.drop: [ALL] binds
+    # port 80 successfully. Anyone who "fixes" this back to 80 after testing it
+    # once will find that it works - which is exactly why the reason is written
+    # down here.
+    #
+    # The reason to stay above 1024 is that this is a runtime default, not a
+    # guarantee: a cluster that restores ip_unprivileged_port_start=1024 (node
+    # sysctl or a hardened distribution) breaks every workload that copied the
+    # 80, and the failure then appears in the copied chart, not here. Every
+    # real chart in this repo listens above 1024 (3000, 8080, 8123, 9998, ...);
+    # the one exception is samba, which needs 139/445 and adds NET_BIND_SERVICE
+    # with a documented justification.
+    #
+    # containerPort is declarative - it does not force the application onto the
+    # port. Point the application at the same port when copying this template.
+    - containerPort: 8080
       protocol: TCP
       name: http
   env:

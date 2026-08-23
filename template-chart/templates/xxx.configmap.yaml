@@ -3,4 +3,8 @@ kind: ConfigMap
 metadata:
   name: "{{ .Release.Name }}-{{ .Chart.Name }}-configmap"
 data:
-  key: "value"
+  # Placeholder for the chart's real configuration keys. Named for what it is:
+  # a key literally called "key" matches the patterns secret scanners use to
+  # find hardcoded credentials, so every copy of this template inherited a
+  # false positive.
+  example-setting: "value"

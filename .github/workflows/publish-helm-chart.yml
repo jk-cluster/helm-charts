@@ -40,7 +40,7 @@ jobs:
       - name: "Install Helm"
         uses: azure/setup-helm@v4
       - name: "Configure OP-Connect"
-        uses: 1password/load-secrets-action/configure@v2
+        uses: 1password/load-secrets-action/configure@v5
         with:
           connect-host: https://op-connect.jk-dev.de
       - name: "Package Helm Chart"
@@ -55,7 +55,7 @@ jobs:
         working-directory: ${{ inputs.chart-location }}
       - name: "Load Helm Registry Credentials"
         id: load-jk-cr-creds
-        uses: 1password/load-secrets-action@v2
+        uses: 1password/load-secrets-action@v5
         env:
           OP_CONNECT_TOKEN: ${{ secrets.OP_CONNECT_TOKEN }}
           JK_CR_TOKEN: op://GitHub-Actions/jk-registry-access/password

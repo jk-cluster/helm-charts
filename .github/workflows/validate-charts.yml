@@ -9,6 +9,8 @@ jobs:
     outputs:
       charts: ${{ steps.detect.outputs.charts }}
       any-chart-changed: ${{ steps.detect.outputs.any-chart-changed }}
+      scan-charts: ${{ steps.detect.outputs.scan-charts }}
+      any-scan: ${{ steps.detect.outputs.any-scan }}
     steps:
       - name: "Checkout Repository"
         uses: actions/checkout@v4
@@ -17,8 +19,9 @@ jobs:
       - name: "Detect changed charts"
         id: detect
         run: |
+          CHANGED_FILES=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
           CHARTS="[]"
-          CHANGED_DIRS=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" | cut -d/ -f1 | sort -u)
+          CHANGED_DIRS=$(echo "$CHANGED_FILES" | cut -d/ -f1 | sort -u)
           for DIR in $CHANGED_DIRS; do
             if [ -f "$DIR/Chart.yaml" ]; then
               CHARTS=$(echo "$CHARTS" | jq -c --arg dir "$DIR" '. + [$dir]')
@@ -31,6 +34,24 @@ jobs:
           else
             echo "any-chart-changed=true" >> "$GITHUB_OUTPUT"
             echo "Changed charts: $CHARTS"
+          fi
+
+          # The Trivy scan normally follows the changed charts. But a PR that
+          # changes the scanner itself touches no chart at all, and would leave
+          # the change untested. In that case scan a fixed sample instead, one
+          # chart per interesting case: a documented deviation (samba), a fully
+          # hardened one (cyberchef), and one with two workloads
+          # (matrix-synapse).
+          SCAN_CHARTS="$CHARTS"
+          if [ "$CHARTS" = "[]" ] && echo "$CHANGED_FILES" | grep -qE '^(ci/(run-trivy-config\.sh|trivy/)|\.github/workflows/validate-charts\.yml)'; then
+            SCAN_CHARTS='["samba","cyberchef","matrix-synapse"]'
+            echo "Scanner changed without a chart change - scanning the sample: $SCAN_CHARTS"
+          fi
+          echo "scan-charts=$SCAN_CHARTS" >> "$GITHUB_OUTPUT"
+          if [ "$SCAN_CHARTS" = "[]" ]; then
+            echo "any-scan=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "any-scan=true" >> "$GITHUB_OUTPUT"
           fi
 
   build-chart:
@@ -67,6 +88,43 @@ jobs:
           else
             echo "Version bump OK: $BASE_VERSION -> $NEW_VERSION"
           fi
+
+  trivy-config:
+    name: "Trivy config ${{ matrix.chart }}"
+    needs: detect-changed-charts
+    if: needs.detect-changed-charts.outputs.any-scan == 'true'
+    runs-on: ubuntu-latest
+    # Reporting only (issue #84): the scan renders each changed chart and lists
+    # what `trivy config` finds, but it never fails the job - see
+    # TRIVY_CONFIG_MODE below. Deliberately not a gate yet: the repo has several
+    # documented deviations, and a check that goes red on those every time is one
+    # people learn to scroll past. Depends only on detect-changed-charts, so it
+    # runs beside build-chart and adds no wall-clock time to the pipeline.
+    strategy:
+      fail-fast: false
+      matrix:
+        chart: ${{ fromJSON(needs.detect-changed-charts.outputs.scan-charts) }}
+    env:
+      TRIVY_VERSION: v0.74.0
+      # "report" always exits 0. Switch to "gate" to make a finding that no
+      # documented exception covers fail the job - the intended step once the
+      # seccomp gap (#84) is closed.
+      TRIVY_CONFIG_MODE: report
+    steps:
+      - name: "Checkout Repository"
+        uses: actions/checkout@v4
+      - name: "Install Helm"
+        uses: azure/setup-helm@v4
+      - name: "Install Trivy"
+        uses: aquasecurity/setup-trivy@v0.3.1
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          cache: true
+      # Findings land in the job summary, not only in the log: exceptions with
+      # their reasons come from ci/trivy/trivyignore.yaml, the trusted-registry
+      # list from ci/trivy/data/ksv0125.yaml.
+      - name: "Scan rendered manifests"
+        run: ci/run-trivy-config.sh "${{ matrix.chart }}"
 
   install-test:
     name: "Install-test ${{ matrix.chart }}"

@@ -161,6 +161,41 @@ qbittorrent:
     enabled: true
   storage:
     size: 1Gi
+  # Network interface qBittorrent binds its BitTorrent session to - gluetun's
+  # Wireguard device. Without this binding libtorrent listens and announces on
+  # every interface in the shared pod network namespace, including eth0 (the
+  # pod IP) and loopback. Those announces bypass the tunnel, so gluetun's kill
+  # switch (OUTPUT DROP except tun0 and the allowed cluster subnets) drops
+  # them: trackers report "skipping tracker announce (unreachable)", no peers
+  # are found and torrents stall at 0 bytes in stalledDL. Binding to tun0 is
+  # therefore both the functional fix and a leak fix - it stops qBittorrent
+  # from listening on the pod IP past the tunnel. The value is written into
+  # /config/qBittorrent/qBittorrent.conf by the config-interface init
+  # container below; setting it to null or "" removes that init container and
+  # leaves the binding to the user (not recommended).
+  networkInterface: tun0
+  # The init container that seeds qbittorrent.networkInterface into the
+  # persisted qBittorrent config before the app starts. Runs as puid/pgid so
+  # the config file keeps the ownership the app expects.
+  configInit:
+    # Auxiliary busybox image. Pinned independently of appVersion (which
+    # tracks gluetun); reviewed alongside every app-version update round.
+    image:
+      repository: busybox
+      tag: "1.38.0"
+    resources:
+      limitFactor: 3
+      requests:
+        cpu: 10m
+        memory: 16Mi
+        ephemeralStorage: 1Mi
+    securityContext:
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop:
+          - ALL
   env: []
   livenessProbe:
     httpGet:

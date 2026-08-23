@@ -19,6 +19,63 @@ spec:
       automountServiceAccountToken: false
       securityContext:
         {{- toYaml .Values.securityContext.pod | nindent 8 }}
+      {{- if and .Values.qbittorrent.enabled .Values.qbittorrent.networkInterface }}
+      initContainers:
+        # qBittorrent has no environment variable for the session's network
+        # interface - it only reads it from the persisted config file, which
+        # the app itself creates on first start. Without the binding
+        # libtorrent listens and announces on every interface of the shared
+        # pod network namespace (eth0/pod IP and loopback included); gluetun's
+        # kill switch drops those packets, trackers stay unreachable and
+        # torrents stall at 0 bytes. Seeding the two keys before qbittorrent
+        # starts closes that leak and makes a fresh install work out of the
+        # box. The edit is idempotent and preserves all other settings:
+        # existing keys are replaced, missing ones are inserted into the
+        # [BitTorrent] section (qBittorrent 5.x reads them there), and a
+        # missing file or section is created.
+        - name: qbittorrent-config-interface
+          image: "{{ .Values.qbittorrent.configInit.image.repository }}:{{ .Values.qbittorrent.configInit.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              conf=/config/qBittorrent/qBittorrent.conf
+              mkdir -p /config/qBittorrent
+              [ -f "$conf" ] || printf '[BitTorrent]\n' > "$conf"
+              # A file without a trailing newline would glue an appended
+              # section header onto the last key.
+              if [ -s "$conf" ] && [ -n "$(tail -c 1 "$conf")" ]; then
+                printf '\n' >> "$conf"
+              fi
+              grep -q '^\[BitTorrent\]$' "$conf" || printf '[BitTorrent]\n' >> "$conf"
+              # Drop any existing binding keys, then re-insert them directly
+              # after the [BitTorrent] header.
+              awk -v ifc="$QBT_INTERFACE" '
+                /^Session\\Interface=/ { next }
+                /^Session\\InterfaceName=/ { next }
+                { print }
+                /^\[BitTorrent\]$/ {
+                  print "Session\\Interface=" ifc
+                  print "Session\\InterfaceName=" ifc
+                }
+              ' "$conf" > "${conf}.tmp"
+              mv "${conf}.tmp" "$conf"
+              echo "qBittorrent session bound to interface $QBT_INTERFACE"
+          env:
+            - name: QBT_INTERFACE
+              value: {{ .Values.qbittorrent.networkInterface | quote }}
+          resources:
+            {{- include "freesailarr.resources" .Values.qbittorrent.configInit.resources | nindent 12 }}
+          securityContext:
+            runAsUser: {{ .Values.puid }}
+            runAsGroup: {{ .Values.pgid }}
+            {{- toYaml .Values.qbittorrent.configInit.securityContext | nindent 12 }}
+          volumeMounts:
+            - mountPath: /config
+              name: qbittorrent-config
+      {{- end }}
       containers:
         # gluetun is the VPN gateway: all app containers share the pod's
         # network namespace, talk to each other over localhost and reach the

@@ -24,7 +24,7 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
-        {{- toYaml .Values.server.securityContext.pod | nindent 8 }}
+        {{- include "minecraft-router.podSecurityContext" .Values.server.securityContext | nindent 8 }}
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
           image: "itzg/mc-router:{{ .Chart.AppVersion }}"
@@ -65,15 +65,15 @@ spec:
               protocol: TCP
               containerPort: {{ .Values.server.apiPort }}
           livenessProbe:
-            {{- toYaml .Values.server.livenessProbe | nindent 12 }}
+            {{- include "minecraft-router.livenessProbe" .Values.server.livenessProbe | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.server.readinessProbe | nindent 12 }}
+            {{- include "minecraft-router.readinessProbe" .Values.server.readinessProbe | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.server.startupProbe | nindent 12 }}
+            {{- include "minecraft-router.startupProbe" .Values.server.startupProbe | nindent 12 }}
           resources:
-            {{- include "minecraft-router.resources" .Values.server.resources | nindent 12 }}
+            {{- include "minecraft-router.effectiveResources" .Values.server.resources | nindent 12 }}
           securityContext:
-            {{- toYaml .Values.server.securityContext.container | nindent 12 }}
+            {{- include "minecraft-router.containerSecurityContext" .Values.server.securityContext | nindent 12 }}
           volumeMounts:
             - name: config-mount
               mountPath: /data/custom-routing-config.json

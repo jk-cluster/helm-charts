@@ -1,0 +1,22 @@
+{{- $message := "minecraft-router: .Values.mappings is required and must not be empty - set at least one mapping with a domain and an internalUrl (see values.yaml)" -}}
+{{- $mappings := required $message .Values.mappings -}}
+{{- if and (not (kindIs "invalid" $mappings)) (or (not (kindIs "slice" $mappings)) (empty $mappings)) }}{{- fail $message -}}{{- end -}}
+{{- $routes := dict -}}
+{{/* "helm lint" reports a missing required value but keeps rendering, so the
+     loop has to tolerate the nil it hands back; "helm template" and "helm
+     install" abort on the required above. */}}
+{{- range $index, $mapping := ($mappings | default list) -}}
+{{- $domain := required (printf "minecraft-router: .Values.mappings[%d].domain is required" $index) $mapping.domain -}}
+{{- $internalUrl := required (printf "minecraft-router: .Values.mappings[%d].internalUrl is required" $index) $mapping.internalUrl -}}
+{{- $port := $mapping.port | default $.Values.server.backendPort -}}
+{{- $_ := set $routes $domain (printf "%v:%v" $internalUrl $port) -}}
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-configmap
+  labels:
+    app: {{ .Release.Name }}-{{ .Chart.Name }}-configmap
+data:
+  custom-routing-config.json: |
+{{ dict "mappings" $routes | toPrettyJson | indent 4 }}

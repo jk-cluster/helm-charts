@@ -158,6 +158,15 @@ spec:
               name: gluetun-config
             - mountPath: /dev/net/tun
               name: dev-net-tun
+            # gluetun creates /tmp/gluetun (its public-IP cache) mode 0644,
+            # i.e. without the execute bit it needs to enter its own
+            # directory. It runs as root but with all capabilities except
+            # NET_ADMIN dropped, so DAC_OVERRIDE no longer papers over that
+            # and every write fails with "clearing public IP data: open
+            # /tmp/gluetun/ip: permission denied". An emptyDir provides the
+            # path with usable permissions.
+            - mountPath: /tmp/gluetun
+              name: gluetun-tmp
         {{- if .Values.qbittorrent.enabled }}
         - name: qbittorrent
           image: "{{ .Values.qbittorrent.image.repository }}:{{ .Values.qbittorrent.image.tag }}"
@@ -422,6 +431,9 @@ spec:
           hostPath:
             path: /dev/net/tun
             type: CharDevice
+        # Writable /tmp/gluetun for gluetun's public-IP cache (see the mount).
+        - name: gluetun-tmp
+          emptyDir: {}
         {{- if or .Values.qbittorrent.enabled .Values.radarr.enabled .Values.sonarr.enabled }}
         - name: media-downloads
           persistentVolumeClaim:

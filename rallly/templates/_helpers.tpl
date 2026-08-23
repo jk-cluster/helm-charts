@@ -220,7 +220,8 @@ AVD-KSV-0022 for the older deployed chart version (#84).
       "runAsUser" 20000
       "runAsGroup" 1000
       "fsGroup" 1000
-      "fsGroupChangePolicy" "Always" -}}
+      "fsGroupChangePolicy" "Always"
+      "seccompProfile" (dict "type" "RuntimeDefault") -}}
 {{- include "rallly.defaultedDict" (dict "defaults" $defaults "given" $given "path" "rallly.securityContext.pod") -}}
 {{- end -}}
 

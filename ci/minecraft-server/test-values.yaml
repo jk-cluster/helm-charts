@@ -1,0 +1,38 @@
+# Values for the minecraft-server install-test. Kept as close to the real
+# deployments as possible; only what a CI runner cannot provide is overridden.
+#
+# 1. minecraft.version: the image tag comes from .Chart.AppVersion, so the JVM
+#    in the image is fixed per published chart version and the Minecraft
+#    version has to match that Java line - Java 8 runs Minecraft up to 1.16.5,
+#    modern versions need Java 17/21 and refuse to start otherwise. This chart
+#    version publishes appVersion "java8", hence 1.12.2 (a classic Java 8 era
+#    release). This value is bumped together with appVersion in the java17 and
+#    java21 follow-up PRs.
+#    The production default is "LATEST", which would pull a 1.21.x server that
+#    a Java 8 JVM cannot load at all.
+# 2. minecraft.resources.storage: the production 32Gi world volume is backed by
+#    a static hostPath PV in CI (see fixtures.yaml); 2Gi is plenty for a server
+#    that only has to boot.
+# 3. minecraft.resources.memory: sets the JVM heap (-Xmx); 1G instead of 4G
+#    keeps the runner comfortable. The container resource *requests* are
+#    hardcoded in the template (cpu 2 / memory 4Gi) and cannot be overridden -
+#    they fit a 4-vCPU/16GB GitHub runner, and making them configurable is part
+#    of the stage-2 convention alignment.
+# 4. server.outwardPort stays at the chart default 30565: unlike minecraft-router
+#    that default is already inside the Kubernetes node-port range
+#    (30000-32767), so the k3d API server accepts it unchanged.
+secrets:
+  minecraftServerRef: vaults/CI/items/minecraft-server
+
+minecraft:
+  version: "1.12.2"
+  management:
+    # opPlayers deliberately stays at the default (null): the image resolves
+    # every name in OPS against the external Playerdb API and aborts the whole
+    # startup when a name does not resolve, so any placeholder name would break
+    # the install-test and a real name would make CI depend on a third-party
+    # lookup.
+    maxPlayers: 2
+  resources:
+    storage: 2Gi
+    memory: "1"

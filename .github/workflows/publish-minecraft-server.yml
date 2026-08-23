@@ -1,0 +1,15 @@
+name: Publish Minecraft-Server Helm Chart
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - minecraft-server/**
+jobs:
+  publish-minecraft-server:
+    name: Publish Minecraft-Server Helm Chart
+    uses: ./.github/workflows/publish-helm-chart.yml
+    with:
+      chart-name: 'minecraft-server'
+    secrets: inherit

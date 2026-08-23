@@ -1,0 +1,55 @@
+# Scale the whole chart down without uninstalling it: scaleDown: true renders
+# every Deployment/StatefulSet with replicas: 0 (and suspends CronJobs) and
+# takes precedence over any per-workload replicas value. PVCs, Secrets and
+# Services stay in place; scaleDown: false brings the workloads back up.
+scaleDown: false
+
+secrets:
+  minecraftServerRef: null
+server:
+  # Replica count for this workload; 0 is allowed and scales it down.
+  # The chart-global scaleDown flag takes precedence.
+  replicas: 1
+  outwardPort: 30565
+  motd: 'Running \u00A72\u00A7o%MODPACK_NAME% \u00A70version \u00A7r%env:MODPACK_VERSION%'
+minecraft:
+  # Valid values are: peaceful, easy, normal, and hard
+  difficulty: "easy"
+  whitelist:
+    enabled: "true"
+    overridePolicy: "MERGE"
+    # Comma-separated List of Players
+    players: null
+  management:
+    # Comma-separated List of Players
+    opPlayers: null
+    maxPlayers: 10
+    forceGameMode: true
+    # Valid values are: creative, survival, adventure, spectator (only for Minecraft 1.8 or later)
+    gameMode: survival
+    worldSaveName: world
+    serverName: mc-server
+  resources:
+    storage: "32Gi"
+    memory: "4"
+  version: "LATEST"
+curseforge:
+  enabled: false
+  forceReload: false
+  modpack:
+    slug: null
+    versionId: null
+    exclude: null
+    excludeOverride: null
+    include: null
+ftb:
+  enabled: false
+  modpackId: null
+  versionId: null
+curseforgeServerpack:
+  enabled: false
+  downloadUrl: null
+  workingDirectory: '/data/serverpack'
+mcRouterIntegration:
+  enabled: false
+  domain: null

@@ -33,6 +33,7 @@ on:
           - rallly
           - voucher-vault
           - minecraft-router
+          - minecraft-server
   workflow_call:
     inputs:
       app-version:

@@ -14,13 +14,13 @@ spec:
         spec:
           automountServiceAccountToken: false
           securityContext:
-            {{- toYaml .Values.smbConnection.cron.securityContext.pod | nindent 12 }}
+            {{- include "paperless-ngx.cron.podSecurityContext" .Values.smbConnection.cron.securityContext | nindent 12 }}
           containers:
             - name: paperless-consume-cronjob
               image: "{{ .Values.paperless.busybox.image.repository }}:{{ .Values.paperless.busybox.image.tag }}"
               imagePullPolicy: IfNotPresent
               securityContext:
-                {{- toYaml .Values.smbConnection.cron.securityContext.container | nindent 16 }}
+                {{- include "paperless-ngx.cron.containerSecurityContext" .Values.smbConnection.cron.securityContext | nindent 16 }}
               command:
                 - /bin/sh
                 - -c
@@ -33,7 +33,7 @@ spec:
                   mountPath: "/mnt/consume"
                   readOnly: false
               resources:
-                {{- include "paperless-ngx.resources" .Values.smbConnection.cron.resources | nindent 16 }}
+                {{- include "paperless-ngx.cron.effectiveResources" .Values.smbConnection.cron.resources | nindent 16 }}
           restartPolicy: Never
           volumes:
             - name: smb-share

@@ -189,3 +189,133 @@ fallback for the case where an override has erased the block.
       "asn" (dict "enabled" true) -}}
 {{- include "paperless-ngx.defaultedDict" (dict "defaults" $defaults "given" . "path" "paperless.files.barcodes") -}}
 {{- end -}}
+
+{{/*
+Pick one sub-block out of a values block that may itself be null.
+
+Input: dict "block" <dict|nil> "key" <string> "path" <string>.
+Returns YAML of dict "value" <the sub-block, may be nil>, after rejecting a
+non-mapping block with a message that names the values path. Needed because
+".Values.paperless.securityContext" can itself be erased.
+*/}}
+{{- define "paperless-ngx.subBlock" -}}
+{{- $block := .block -}}
+{{- if kindIs "invalid" $block -}}
+{{- $block = dict -}}
+{{- end -}}
+{{- if not (kindIs "map" $block) -}}
+{{- fail (printf "%s must be a mapping or null, got %s (%v)" .path (kindOf $block) $block) -}}
+{{- end -}}
+{{- toYaml (dict "value" (index $block .key)) -}}
+{{- end -}}
+
+{{/*
+The effective security contexts, probes and resources of both workloads
+(issue #99), built on the same defaultedDict the barcodes block already uses
+(issue #61) - one mechanism, not two.
+
+The defaults below MUST stay in sync with the corresponding blocks in
+values.yaml, which stays the documented, user-facing place for them; this copy
+is only the fallback for the case where an override has erased the block.
+
+The pod context is consumed twice: as the pod's securityContext and by the
+/run-ownership init container, which chowns the /run emptyDir to
+runAsUser:runAsGroup because s6-overlay refuses to start unless /run is OWNED
+by the runtime uid. Both reads go through this helper, so the chown can never
+disagree with the context it is supposed to match.
+*/}}
+{{- define "paperless-ngx.podSecurityContext" -}}
+{{- $given := (fromYaml (include "paperless-ngx.subBlock" (dict "block" . "key" "pod" "path" "paperless.securityContext"))).value -}}
+{{- $defaults := dict
+      "runAsNonRoot" true
+      "runAsUser" 1000
+      "runAsGroup" 1000
+      "fsGroup" 1000
+      "fsGroupChangePolicy" "Always" -}}
+{{- include "paperless-ngx.defaultedDict" (dict "defaults" $defaults "given" $given "path" "paperless.securityContext.pod") -}}
+{{- end -}}
+
+{{- define "paperless-ngx.containerSecurityContext" -}}
+{{- $given := (fromYaml (include "paperless-ngx.subBlock" (dict "block" . "key" "container" "path" "paperless.securityContext"))).value -}}
+{{- $defaults := dict
+      "allowPrivilegeEscalation" false
+      "readOnlyRootFilesystem" true
+      "runAsNonRoot" true
+      "capabilities" (dict "drop" (list "ALL")) -}}
+{{- include "paperless-ngx.defaultedDict" (dict "defaults" $defaults "given" $given "path" "paperless.securityContext.container") -}}
+{{- end -}}
+
+{{- define "paperless-ngx.livenessProbe" -}}
+{{- $defaults := dict
+      "httpGet" (dict "path" "/" "port" 8000)
+      "periodSeconds" 30
+      "failureThreshold" 3
+      "successThreshold" 1
+      "timeoutSeconds" 5 -}}
+{{- include "paperless-ngx.defaultedDict" (dict "defaults" $defaults "given" . "path" "paperless.livenessProbe") -}}
+{{- end -}}
+
+{{- define "paperless-ngx.readinessProbe" -}}
+{{- $defaults := dict
+      "httpGet" (dict "path" "/" "port" 8000)
+      "periodSeconds" 10
+      "failureThreshold" 3
+      "successThreshold" 1
+      "timeoutSeconds" 5 -}}
+{{- include "paperless-ngx.defaultedDict" (dict "defaults" $defaults "given" . "path" "paperless.readinessProbe") -}}
+{{- end -}}
+
+{{/*
+The startup budget is deliberately large (10s x 60 = 600s): paperless runs
+database migrations on startup, and since 3.0 the first start after an upgrade
+also rebuilds the search index from scratch (Whoosh -> Tantivy).
+*/}}
+{{- define "paperless-ngx.startupProbe" -}}
+{{- $defaults := dict
+      "httpGet" (dict "path" "/" "port" 8000)
+      "periodSeconds" 10
+      "failureThreshold" 60
+      "timeoutSeconds" 5 -}}
+{{- include "paperless-ngx.defaultedDict" (dict "defaults" $defaults "given" . "path" "paperless.startupProbe") -}}
+{{- end -}}
+
+{{- define "paperless-ngx.effectiveResources" -}}
+{{- $defaults := dict
+      "limitFactor" 3
+      "requests" (dict "cpu" 0.2 "memory" "1024Mi" "ephemeralStorage" "200Mi") -}}
+{{- $merged := fromYaml (include "paperless-ngx.defaultedDict" (dict "defaults" $defaults "given" . "path" "paperless.resources")) -}}
+{{- include "paperless-ngx.resources" $merged -}}
+{{- end -}}
+
+{{/*
+The same three fallbacks for the SMB consume-mover CronJob. It has no probes
+(documented exception), so only the two contexts and resources apply.
+*/}}
+{{- define "paperless-ngx.cron.podSecurityContext" -}}
+{{- $given := (fromYaml (include "paperless-ngx.subBlock" (dict "block" . "key" "pod" "path" "smbConnection.cron.securityContext"))).value -}}
+{{- $defaults := dict
+      "runAsNonRoot" true
+      "runAsUser" 1000
+      "runAsGroup" 1000
+      "fsGroup" 1000
+      "fsGroupChangePolicy" "Always" -}}
+{{- include "paperless-ngx.defaultedDict" (dict "defaults" $defaults "given" $given "path" "smbConnection.cron.securityContext.pod") -}}
+{{- end -}}
+
+{{- define "paperless-ngx.cron.containerSecurityContext" -}}
+{{- $given := (fromYaml (include "paperless-ngx.subBlock" (dict "block" . "key" "container" "path" "smbConnection.cron.securityContext"))).value -}}
+{{- $defaults := dict
+      "allowPrivilegeEscalation" false
+      "readOnlyRootFilesystem" true
+      "runAsNonRoot" true
+      "capabilities" (dict "drop" (list "ALL")) -}}
+{{- include "paperless-ngx.defaultedDict" (dict "defaults" $defaults "given" $given "path" "smbConnection.cron.securityContext.container") -}}
+{{- end -}}
+
+{{- define "paperless-ngx.cron.effectiveResources" -}}
+{{- $defaults := dict
+      "limitFactor" 3
+      "requests" (dict "cpu" "10m" "memory" "16Mi" "ephemeralStorage" "10Mi") -}}
+{{- $merged := fromYaml (include "paperless-ngx.defaultedDict" (dict "defaults" $defaults "given" . "path" "smbConnection.cron.resources")) -}}
+{{- include "paperless-ngx.resources" $merged -}}
+{{- end -}}

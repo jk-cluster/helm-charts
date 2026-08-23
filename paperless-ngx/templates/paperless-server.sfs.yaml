@@ -23,7 +23,7 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
-        {{- toYaml .Values.paperless.securityContext.pod | nindent 8 }}
+        {{- include "paperless-ngx.podSecurityContext" .Values.paperless.securityContext | nindent 8 }}
       initContainers:
         # s6-overlay refuses to start unless /run is owned by the runtime uid,
         # but emptyDirs are always created root-owned. This minimal init
@@ -36,7 +36,8 @@ spec:
           command:
             - sh
             - -c
-            - chown {{ .Values.paperless.securityContext.pod.runAsUser }}:{{ .Values.paperless.securityContext.pod.runAsGroup }} /run
+            {{- $podCtx := fromYaml (include "paperless-ngx.podSecurityContext" .Values.paperless.securityContext) }}
+            - chown {{ $podCtx.runAsUser }}:{{ $podCtx.runAsGroup }} /run
           securityContext:
             runAsNonRoot: false
             runAsUser: 0
@@ -64,7 +65,7 @@ spec:
           image: "ghcr.io/paperless-ngx/paperless-ngx:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
           securityContext:
-            {{- toYaml .Values.paperless.securityContext.container | nindent 12 }}
+            {{- include "paperless-ngx.containerSecurityContext" .Values.paperless.securityContext | nindent 12 }}
           ports:
             - containerPort: 8000
               protocol: TCP
@@ -229,13 +230,13 @@ spec:
             - mountPath: /run
               name: run
           resources:
-            {{- include "paperless-ngx.resources" .Values.paperless.resources | nindent 12 }}
+            {{- include "paperless-ngx.effectiveResources" .Values.paperless.resources | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.paperless.readinessProbe | nindent 12 }}
+            {{- include "paperless-ngx.readinessProbe" .Values.paperless.readinessProbe | nindent 12 }}
           livenessProbe:
-            {{- toYaml .Values.paperless.livenessProbe | nindent 12 }}
+            {{- include "paperless-ngx.livenessProbe" .Values.paperless.livenessProbe | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.paperless.startupProbe | nindent 12 }}
+            {{- include "paperless-ngx.startupProbe" .Values.paperless.startupProbe | nindent 12 }}
       restartPolicy: Always
       volumes:
         - name: tmp

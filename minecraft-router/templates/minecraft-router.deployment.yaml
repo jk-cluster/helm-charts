@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+  labels:
+    app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+spec:
+  replicas: {{ include "minecraft-router.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.server.replicas) }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+  template:
+    metadata:
+      name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+      labels:
+        app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.server.securityContext.pod | nindent 8 }}
+      containers:
+        - name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+          image: "itzg/mc-router:{{ .Chart.AppVersion }}"
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--port"
+            - "{{ .Values.server.port }}"
+            - "--api-binding"
+            - ":{{ .Values.server.apiPort }}"
+          env:
+            - name: ROUTES_CONFIG
+              value: /data/custom-routing-config.json
+            {{- range $value := .Values.server.env }}
+            {{- if $value.value }}
+            - name: {{ $value.name }}
+              value: {{ tpl $value.value $ }}
+            {{- else if $value.valueFrom }}
+            {{- if $value.valueFrom.secretKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ tpl $value.valueFrom.secretKeyRef.name $ }}
+                  key: {{ tpl $value.valueFrom.secretKeyRef.key $ }}
+            {{- else if $value.valueFrom.configMapKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ tpl $value.valueFrom.configMapKeyRef.name $ }}
+                  key: {{ tpl $value.valueFrom.configMapKeyRef.key $ }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+          ports:
+            - name: proxy-port
+              protocol: TCP
+              containerPort: {{ .Values.server.port }}
+            - name: api-port
+              protocol: TCP
+              containerPort: {{ .Values.server.apiPort }}
+          livenessProbe:
+            {{- toYaml .Values.server.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.server.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.server.startupProbe | nindent 12 }}
+          resources:
+            {{- include "minecraft-router.resources" .Values.server.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.server.securityContext.container | nindent 12 }}
+          volumeMounts:
+            - name: config-mount
+              mountPath: /data/custom-routing-config.json
+              subPath: custom-routing-config.json
+              readOnly: true
+      volumes:
+        - name: config-mount
+          configMap:
+            name: {{ .Release.Name }}-{{ .Chart.Name }}-configmap
+      restartPolicy: Always

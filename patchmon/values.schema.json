@@ -1,0 +1,228 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "patchmon values",
+  "description": "Strict values schema (issue #68). additionalProperties is false on every chart-owned object level, so a key that the chart does not read is rejected at render time instead of being silently ignored. The only objects that stay open are the ones passed verbatim into the Kubernetes pod spec (probes, security contexts, global) - the chart does not interpret their contents, so it cannot judge which keys are meaningful.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "global": {
+      "description": "Helm's conventional cross-chart values. Unused by this chart, kept open so an umbrella install cannot break on it.",
+      "type": "object"
+    },
+    "scaleDown": {
+      "type": "boolean"
+    },
+    "patchmon": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "server": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "replicas": {
+              "description": "The server registers itself under a stable identity (the pinned pod hostname); more than one replica is not supported by this chart.",
+              "type": "integer",
+              "minimum": 0
+            },
+            "securityContext": {
+              "$ref": "#/definitions/securityContext"
+            },
+            "livenessProbe": {
+              "$ref": "#/definitions/probe"
+            },
+            "readinessProbe": {
+              "$ref": "#/definitions/probe"
+            },
+            "startupProbe": {
+              "$ref": "#/definitions/probe"
+            },
+            "env": {
+              "$ref": "#/definitions/env"
+            },
+            "resources": {
+              "$ref": "#/definitions/resources"
+            }
+          }
+        },
+        "guacd": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "image": {
+              "description": "guacd is an independent upstream application, so its image is pinned here instead of following the chart's appVersion.",
+              "type": "string"
+            },
+            "securityContext": {
+              "description": "guacd is a sidecar in the server pod, so only a container context applies - the pod context is the server's. May be null / empty: the chart then falls back to its hardening defaults (issue #99).",
+              "type": ["object", "null"],
+              "additionalProperties": false,
+              "properties": {
+                "container": {
+                  "description": "Merged onto the chart's container hardening defaults and rendered as the container's securityContext; kept open because the chart does not interpret the individual fields.",
+                  "type": ["object", "null"]
+                }
+              }
+            },
+            "livenessProbe": {
+              "$ref": "#/definitions/probe"
+            },
+            "readinessProbe": {
+              "$ref": "#/definitions/probe"
+            },
+            "startupProbe": {
+              "$ref": "#/definitions/probe"
+            },
+            "env": {
+              "$ref": "#/definitions/env"
+            },
+            "resources": {
+              "$ref": "#/definitions/resources"
+            }
+          }
+        }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "Gates the whole Ingress template (issue #93). false omits the Ingress, and the required domain/clusterIssuer values are then not needed either.",
+          "type": "boolean"
+        },
+        "clusterIssuer": {
+          "type": ["string", "null"]
+        },
+        "domain": {
+          "type": ["string", "null"]
+        },
+        "className": {
+          "type": ["string", "null"]
+        },
+        "annotations": {
+          "description": "Extra Ingress annotations, merged with the cert-manager annotation the chart always sets. Free-form keys by nature.",
+          "type": "object"
+        }
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "redisSecretRef": {
+          "type": ["string", "null"]
+        },
+        "postgresSecretRef": {
+          "type": ["string", "null"]
+        },
+        "oidcSecretRef": {
+          "type": ["string", "null"]
+        },
+        "patchmonSecretRef": {
+          "type": ["string", "null"]
+        }
+      }
+    }
+  },
+  "definitions": {
+    "resources": {
+      "description": "May be null / empty: the chart then falls back to its default requests and computed limits (issue #99) instead of rendering a container without resource accounting.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "limitFactor": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "requests": {
+          "$ref": "#/definitions/resourceList"
+        },
+        "limits": {
+          "$ref": "#/definitions/resourceList"
+        }
+      }
+    },
+    "resourceList": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "cpu": {
+          "type": ["string", "number", "null"]
+        },
+        "memory": {
+          "type": ["string", "number", "null"]
+        },
+        "ephemeral-storage": {
+          "type": ["string", "number", "null"]
+        },
+        "ephemeralStorage": {
+          "type": ["string", "number", "null"]
+        }
+      }
+    },
+    "env": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "valueFrom": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "secretKeyRef": {
+                "$ref": "#/definitions/keyRef"
+              },
+              "configMapKeyRef": {
+                "$ref": "#/definitions/keyRef"
+              }
+            }
+          }
+        }
+      }
+    },
+    "keyRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "key"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        }
+      }
+    },
+    "securityContext": {
+      "description": "May be null / empty at any level: the chart then falls back to its hardening defaults (issue #99) instead of rendering an unhardened workload.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "pod": {
+          "description": "Merged onto the chart's pod hardening defaults and rendered as the pod's securityContext; kept open because the chart does not interpret the individual fields.",
+          "type": ["object", "null"]
+        },
+        "container": {
+          "description": "Merged onto the chart's container hardening defaults and rendered as the container's securityContext; kept open because the chart does not interpret the individual fields.",
+          "type": ["object", "null"]
+        }
+      }
+    },
+    "probe": {
+      "description": "Merged onto the chart's probe defaults and rendered as a container probe; kept open because the chart does not interpret the individual fields. May be null / empty, which means the defaults apply (issue #99) rather than the probe disappearing.",
+      "type": ["object", "null"]
+    }
+  }
+}

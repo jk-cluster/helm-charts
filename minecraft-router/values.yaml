@@ -44,11 +44,18 @@ server:
       cpu: 100m
       memory: 50Mi
       ephemeral-storage: 50Mi
-  # The probes query the mc-router API. GET /routes answers with the live
-  # routing table, but only with the "Accept: application/json" header - the
-  # API router matches on it and answers 404 without it. The API server is
-  # started after the routes config has been read and the Minecraft listener is
-  # up, so a 200 here means the router is actually serving clients.
+  # The probes query the mc-router API. Even in 1.46.4 there is still no
+  # /health or /healthz endpoint - the API server serves GET/POST /routes,
+  # POST /defaultRoute, DELETE /routes/{addr}, /vars and /metrics and nothing
+  # else - so GET /routes stays the health signal. It answers with the live
+  # routing table, and the API server is only started after the routes config
+  # has been read and the Minecraft listener is up, so a 200 here means the
+  # router is actually serving clients.
+  # The "Accept: application/json" header was mandatory in 1.25.1 (the API
+  # router matched on it and answered 404 without it); mc-router 1.32.2 dropped
+  # that matcher, so from there on the header is optional. It is kept because
+  # it is the correct request for a JSON endpoint and the response is identical
+  # with and without it - removing it would be churn without any gain.
   livenessProbe:
     httpGet:
       path: /routes
@@ -85,9 +92,12 @@ server:
   securityContext:
     pod:
       runAsNonRoot: true
-      # The itzg/mc-router image is built FROM scratch and declares no user, so
-      # it would run as root by default. The statically linked binary needs no
-      # particular uid/gid, so the chart pins an unprivileged one.
+      # Up to 1.45.x the itzg/mc-router image was built FROM scratch and
+      # declared no user, so it would have run as root. Since 1.46.0 it is
+      # based on cgr.dev/chainguard/static and declares USER 65532. The chart
+      # keeps pinning its own unprivileged uid/gid regardless, so the runtime
+      # identity does not silently change with the base image; the statically
+      # linked binary needs no particular uid/gid.
       runAsUser: 10000
       runAsGroup: 10000
       # Keeps the mounted routing-config ConfigMap readable for that gid.
@@ -95,8 +105,9 @@ server:
       fsGroupChangePolicy: Always
     container:
       allowPrivilegeEscalation: false
-      # No deviation needed: the scratch image writes nothing, and the only
-      # mount is the read-only routing config.
+      # No deviation needed: the image ships nothing but the static binary and
+      # a CA bundle, mc-router writes nothing, and the only mount is the
+      # read-only routing config.
       readOnlyRootFilesystem: true
       runAsNonRoot: true
       capabilities:
@@ -104,8 +115,14 @@ server:
           - ALL
         add: []
   # Extra environment variables for the router container, appended to the ones
-  # the chart always sets (ROUTES_CONFIG). Values are rendered through tpl and
-  # support the value, secretKeyRef and configMapKeyRef forms:
+  # the chart always sets (ROUTES_CONFIG). This is also how every mc-router
+  # option that the chart does not model explicitly is set: mc-router parses
+  # its flags with go-flagsfiller, so every "--some-flag" is equally settable
+  # as "SOME_FLAG" (that is exactly how ROUTES_CONFIG maps to --routes-config).
+  # Useful examples in 1.46.4: LOG_LEVEL (debug/info/warn/error),
+  # BACKEND_DIAL_TIMEOUT, CONNECTION_RATE_LIMIT.
+  # Values are rendered through tpl and support the value, secretKeyRef and
+  # configMapKeyRef forms:
   #   - name: SOME_ENV
   #     value: "{{ .Release.Name }}"
   #   - name: FROM_SECRET

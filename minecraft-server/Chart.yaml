@@ -8,8 +8,8 @@ type: application
 # The Java line of this chart version is chosen through appVersion, which is
 # the image tag: the chart is published once per line (java8 / java17 / java21)
 # and minecraft.version in values.yaml must match the line published here.
-version: 1.0.0+upjava17
-appVersion: "java17"
+version: 1.0.0+upjava21
+appVersion: "java21"
 
 maintainers:
   - name: jklein

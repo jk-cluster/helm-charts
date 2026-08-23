@@ -63,8 +63,13 @@ xxx:
       protocol: TCP
       name: http
   env:
+    # Reference for guideline 1: ingress.domain is read HERE, outside the
+    # Ingress template, so it needs its own required(). Without it, switching
+    # the Ingress off via ingress.enabled would render an empty value and the
+    # workload would start with a broken address - silently. Copy this shape
+    # whenever a chart uses the domain for anything but the Ingress host.
     - name: NORMAL_ENV
-      value: "{{ .Values.ingress.domain }}"
+      value: '{{ required "A Domain/Host must be provided (ingress.domain)" .Values.ingress.domain }}'
     - name: ENV_FROM_SECRET
       valueFrom:
         secretKeyRef:
@@ -81,6 +86,10 @@ storage:
   storageClass: null
 
 ingress:
+  # Gates the whole Ingress template. Note that ingress.domain is ALSO read by
+  # the env block above, so it stays required even with the Ingress switched
+  # off; only clusterIssuer becomes unnecessary. Check this per chart instead
+  # of assuming either way (guideline 1).
   enabled: true
   clusterIssuer: null
   domain: null

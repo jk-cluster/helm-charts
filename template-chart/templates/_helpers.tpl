@@ -114,3 +114,171 @@ template-chart is the reference implementation.
 1
 {{- end -}}
 {{- end -}}
+
+{{/*
+Merge a user-supplied values sub-tree onto a dict of chart defaults so that a
+null / empty override falls back to the defaults instead of erasing them.
+
+Input: dict "defaults" <dict> "given" <dict|nil> "path" <string, optional
+values path used in error messages>. Output: YAML of the merged dict (consume
+it with fromYaml).
+
+Why this exists (issues #61 and #99): Helm merges values maps recursively, but
+an override key written without children — e.g. a leftover
+
+  securityContext:
+
+after deleting its last remaining sub-key — is YAML null. Where the chart
+defines a default, Helm treats that null as a deletion of the default; the
+template then renders "securityContext: null": no readOnlyRootFilesystem, no
+dropped capabilities, no allowPrivilegeEscalation: false. The workload starts
+and reports healthy while being unhardened, so nothing points at the mistake.
+The same shape erases a probe (it disappears) or the resources block (no
+requests, no computed limits). This helper defines the opposite semantics: an
+empty block means "chart defaults apply".
+
+Rules:
+  - a nil "given" is treated as an empty dict (all defaults apply).
+  - a key whose override value is null keeps the default (nulls never delete).
+  - a key present in both as a map is merged recursively, so a partially
+    filled block only overrides the keys it actually sets.
+  - a scalar override for a key the defaults define as a map is rejected with
+    a message naming the values path, instead of failing later with a template
+    field error.
+  - any other set value wins as given, including an explicit false or 0 —
+    Helm's "default" and sprig's "mergeOverwrite" would both swallow those
+    zero values, hence the explicit kindIs "invalid" nil check.
+  - keys only present in the override are passed through unchanged.
+
+NOTE: like the helpers above, this is duplicated into every chart's
+templates/_helpers.tpl with the chart's name as define prefix, because charts
+in this repo deliberately have no dependencies. This file is the reference
+implementation.
+*/}}
+{{- define "xxx.defaultedDict" -}}
+{{- $defaults := .defaults | default dict -}}
+{{- $given := .given -}}
+{{- $path := .path | default "value" -}}
+{{- if kindIs "invalid" $given -}}
+{{- $given = dict -}}
+{{- end -}}
+{{- if not (kindIs "map" $given) -}}
+{{- fail (printf "%s must be a mapping or null, got %s (%v)" $path (kindOf $given) $given) -}}
+{{- end -}}
+{{- $out := deepCopy $defaults -}}
+{{- range $key, $value := $given -}}
+{{- if not (kindIs "invalid" $value) -}}
+{{- $default := index $defaults $key -}}
+{{- if and (kindIs "map" $value) (kindIs "map" $default) -}}
+{{- $_ := set $out $key (fromYaml (include "xxx.defaultedDict" (dict "defaults" $default "given" $value "path" (printf "%s.%s" $path $key)))) -}}
+{{- else if kindIs "map" $default -}}
+{{- fail (printf "%s.%s must be a mapping or null, got %s (%v)" $path $key (kindOf $value) $value) -}}
+{{- else -}}
+{{- $_ := set $out $key $value -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- toYaml $out -}}
+{{- end -}}
+
+{{/*
+Pick one sub-block out of a values block that may itself be null.
+
+Input: dict "block" <dict|nil> "key" <string> "path" <string>.
+Returns YAML of dict "value" <the sub-block, may be nil>, after rejecting a
+non-mapping block with a message that names the values path. Needed because
+".Values.<app>.securityContext" can itself be erased, and indexing into nil
+inside a template is not an error but silently yields nothing.
+*/}}
+{{- define "xxx.subBlock" -}}
+{{- $block := .block -}}
+{{- if kindIs "invalid" $block -}}
+{{- $block = dict -}}
+{{- end -}}
+{{- if not (kindIs "map" $block) -}}
+{{- fail (printf "%s must be a mapping or null, got %s (%v)" .path (kindOf $block) $block) -}}
+{{- end -}}
+{{- toYaml (dict "value" (index $block .key)) -}}
+{{- end -}}
+
+{{/*
+The effective security contexts, probes and resources (issue #99).
+
+The defaults below MUST stay in sync with the corresponding blocks in
+values.yaml, which stays the documented, user-facing place for them; this copy
+is only the fallback for the case where an override has erased the block.
+
+Two rules that these fallbacks exist to demonstrate (README, "Chart style
+guidelines"):
+
+  - Reproduce THIS chart's defaults, not the repo standard. Where a chart
+    deviates on purpose (a root-starting image, a non-default limitFactor, a
+    pinned uid), the fallback must reproduce the deviation. Restoring the
+    "clean" standard here is not tidying, it is an outage - in one chart it
+    would move the runtime uid from 1000 to 911 and make existing volume data
+    inaccessible.
+  - Carry the probe's CONTEXT, not just its timings. A probe default without
+    its port name, Host header or exec command is worse than useless: in one
+    chart the probe vanished entirely, in another it answered 403 and the pod
+    never became Ready.
+*/}}
+{{- define "xxx.podSecurityContext" -}}
+{{- $given := (fromYaml (include "xxx.subBlock" (dict "block" . "key" "pod" "path" "xxx.securityContext"))).value -}}
+{{- $defaults := dict
+      "runAsNonRoot" true
+      "runAsUser" 20000
+      "runAsGroup" 1000
+      "fsGroup" 1000
+      "fsGroupChangePolicy" "Always" -}}
+{{- include "xxx.defaultedDict" (dict "defaults" $defaults "given" $given "path" "xxx.securityContext.pod") -}}
+{{- end -}}
+
+{{- define "xxx.containerSecurityContext" -}}
+{{- $given := (fromYaml (include "xxx.subBlock" (dict "block" . "key" "container" "path" "xxx.securityContext"))).value -}}
+{{- $defaults := dict
+      "allowPrivilegeEscalation" false
+      "readOnlyRootFilesystem" true
+      "runAsNonRoot" true
+      "capabilities" (dict "drop" (list "ALL") "add" (list)) -}}
+{{- include "xxx.defaultedDict" (dict "defaults" $defaults "given" $given "path" "xxx.securityContext.container") -}}
+{{- end -}}
+
+{{- define "xxx.livenessProbe" -}}
+{{- $defaults := dict
+      "httpGet" (dict "path" "/" "port" "http")
+      "periodSeconds" 10
+      "timeoutSeconds" 5
+      "failureThreshold" 3 -}}
+{{- include "xxx.defaultedDict" (dict "defaults" $defaults "given" . "path" "xxx.livenessProbe") -}}
+{{- end -}}
+
+{{- define "xxx.readinessProbe" -}}
+{{- $defaults := dict
+      "httpGet" (dict "path" "/" "port" "http")
+      "periodSeconds" 10
+      "timeoutSeconds" 5
+      "failureThreshold" 3 -}}
+{{- include "xxx.defaultedDict" (dict "defaults" $defaults "given" . "path" "xxx.readinessProbe") -}}
+{{- end -}}
+
+{{- define "xxx.startupProbe" -}}
+{{- $defaults := dict
+      "httpGet" (dict "path" "/" "port" "http")
+      "periodSeconds" 5
+      "timeoutSeconds" 5
+      "failureThreshold" 30 -}}
+{{- include "xxx.defaultedDict" (dict "defaults" $defaults "given" . "path" "xxx.startupProbe") -}}
+{{- end -}}
+
+{{/*
+The effective resources block, fed into the resources helper above so that an
+erased "resources:" still yields the chart's requests and computed limits
+instead of a container without any resource accounting.
+*/}}
+{{- define "xxx.effectiveResources" -}}
+{{- $defaults := dict
+      "limitFactor" 3
+      "requests" (dict "cpu" 0.1 "memory" "512Mi" "ephemeral-storage" "10Mi") -}}
+{{- $merged := fromYaml (include "xxx.defaultedDict" (dict "defaults" $defaults "given" . "path" "xxx.resources")) -}}
+{{- include "xxx.resources" $merged -}}
+{{- end -}}

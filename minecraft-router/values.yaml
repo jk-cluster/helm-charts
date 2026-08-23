@@ -15,6 +15,11 @@ scaleDown: false
 #     - domain: creative.example.com
 #       internalUrl: creative-service.minecraft.svc.cluster.local
 #       port: 25566
+# Since chart 2.0.0 a change here rolls the router pod: the deployment carries
+# a checksum/config annotation over the rendered ConfigMap. That restart is
+# required for the change to take effect at all - the config is mounted with
+# subPath and mc-router only reads it at startup - and costs a few seconds of
+# proxy downtime, during which clients cannot connect.
 mappings: null
 
 server:

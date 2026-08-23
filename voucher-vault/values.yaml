@@ -86,8 +86,12 @@ voucherVault:
       protocol: TCP
       name: http
   env:
+    # ingress.domain is not a pure Ingress value: Django's ALLOWED_HOSTS only
+    # accepts 127.0.0.1 and this DOMAIN, so an empty value makes the app answer
+    # 400 to every real request. It therefore stays required even when the
+    # Ingress is switched off via ingress.enabled.
     - name: DOMAIN
-      value: "{{ .Values.ingress.domain }}"
+      value: '{{ required "A Domain/Host must be provided (ingress.domain)" .Values.ingress.domain }}'
     - name: SECURE_COOKIES
       value: "True"
     - name: SESSION_COOKIE_AGE
@@ -196,6 +200,9 @@ storage:
   storageClass: null
 
 ingress:
+  # Set to false to omit the Ingress entirely. Note that ingress.domain stays
+  # required even then: it is also Django's ALLOWED_HOSTS entry (the DOMAIN env
+  # above), not just the Ingress host. Only clusterIssuer becomes unnecessary.
   enabled: true
   clusterIssuer: null
   domain: null

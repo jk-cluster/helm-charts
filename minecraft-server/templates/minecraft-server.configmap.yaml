@@ -1,9 +1,10 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ .Release.Name }}-init-config
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-configmap
 data:
   init.sh: |
+    set -e
     echo "downloading serverpack"
     wget -O /modpacks/serverpack.zip {{ .Values.curseforgeServerpack.downloadUrl }}
     SERVERPACK_DIR="{{ .Values.curseforgeServerpack.workingDirectory }}"
@@ -32,8 +33,14 @@ data:
       cp $BACKUP_DIR/ops.json $SERVERPACK_DIR/ops.json
       cp $BACKUP_DIR/whitelist.json $SERVERPACK_DIR/whitelist.json
 
+      # The init container runs as the same uid as the server (see
+      # securityContext.pod) and cp creates the copies owned by that uid, so
+      # this is a no-op in the normal case. It is kept for volumes whose files
+      # still carry a foreign owner from an older chart version, and it must
+      # not be fatal: an unprivileged process cannot chown foreign files, and
+      # with "set -e" a failure here would keep the whole pod from starting.
       echo "change owner of files"
-      chown -R 1000:1000 $SERVERPACK_DIR
+      chown -R 1000:1000 $SERVERPACK_DIR || echo "chown skipped (not permitted); continuing"
 
       echo "successfully migrated server"
 

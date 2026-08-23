@@ -5,23 +5,163 @@
 scaleDown: false
 
 secrets:
+  # op:// item path for the 1Password operator. Only needs to carry a
+  # "curseforge-api-key" key when curseforge.enabled is true and an
+  # "rcon-password" key when server.rcon.enabled is true.
   minecraftServerRef: null
+
 server:
   # Replica count for this workload; 0 is allowed and scales it down.
   # The chart-global scaleDown flag takes precedence.
   replicas: 1
-  outwardPort: 30565
+
+  # Port the Minecraft server listens on inside the container. It is passed to
+  # the image as SERVER_PORT, used as the containerPort and as the Service's
+  # target, and the probes go through the image's mc-health script, which reads
+  # SERVER_PORT too - so an override stays consistent everywhere.
+  port: 25565
+
+  service:
+    # ClusterIP is the default because routing to these servers is done by the
+    # static mappings of the minecraft-router chart, which reaches the server
+    # over its in-cluster DNS name. Set NodePort to expose the server directly
+    # on a node port instead (then outwardPort applies).
+    # NOTE: before chart 1.0.0 this was implied by "mcRouterIntegration.enabled",
+    # which also added a misleading mc-router auto-discovery annotation. The
+    # annotation is gone; only the service type remains, now named for what it
+    # actually does.
+    type: ClusterIP
+    # Port the Service exposes in the cluster.
+    port: 25565
+    # Node port used only when type is NodePort. Must be inside the cluster's
+    # node-port range (30000-32767 by default).
+    outwardPort: 30565
+
+  # The \u00A7 sequences are Java-properties escapes for the Minecraft colour
+  # code character and must stay literal backslash sequences - server.properties
+  # is a Java properties file and unescapes them itself.
   motd: 'Running \u00A72\u00A7o%MODPACK_NAME% \u00A70version \u00A7r%env:MODPACK_VERSION%'
+
+  rcon:
+    # RCON is off by default. Only when this is true does the chart set
+    # ENABLE_RCON, expose the RCON container port and wire RCON_PASSWORD from
+    # the secret - before chart 1.0.0 the password was pulled from the secret
+    # unconditionally although RCON was hardcoded off, which made the secret
+    # key mandatory for a switched-off feature.
+    enabled: false
+    port: 25575
+
+  # Init container that downloads and unpacks a CurseForge server pack; only
+  # used when curseforgeServerpack.enabled is true. Pinned per repo convention
+  # (auxiliary images are never unpinned): before chart 1.0.0 this was a bare
+  # "alpine", i.e. an implicit :latest from Docker Hub.
+  initImage: alpine:3.22
+
+  resources:
+    # Limits are optional: memory and ephemeral-storage limits default to
+    # limitFactor x the request, an explicitly set limit always wins, and a
+    # CPU limit is only set when configured explicitly under "limits"
+    # (CPU is compressible - throttling is preferable to an OOM kill).
+    limitFactor: 3
+    requests:
+      cpu: "2"
+      ephemeral-storage: "100Mi"
+      # Deliberately unset: when no memory request is given, the chart derives
+      # it from minecraft.resources.memory (the JVM heap) so that the heap and
+      # the container's memory request/limit can never drift apart. With the
+      # default heap of 4G this yields a 4Gi request and, via limitFactor 3, a
+      # 12Gi limit - exactly the values that were hardcoded before chart 1.0.0.
+      # Set it explicitly to decouple the two.
+      memory: null
+
+# Extra environment variables for the server container, appended to the ones
+# the chart always sets. Values are rendered through tpl and support the value,
+# secretKeyRef and configMapKeyRef forms:
+#   - name: SOME_ENV
+#     value: "{{ .Release.Name }}"
+#   - name: FROM_SECRET
+#     valueFrom:
+#       secretKeyRef:
+#         name: "some-secret"
+#         key: "someKey"
+#   - name: FROM_CONFIGMAP
+#     valueFrom:
+#       configMapKeyRef:
+#         name: "some-configmap"
+#         key: "someKey"
+env: []
+
+# All three probes run the image's own mc-health script, which performs a real
+# Minecraft server-list ping against SERVER_PORT via mc-monitor - so "Ready"
+# means the server answers players, not merely that the container process is
+# alive. (Before chart 1.0.0 this chart had no probes at all, which is why a
+# pod counted as Ready the moment the container started.)
+livenessProbe:
+  exec:
+    command: ["mc-health"]
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 3
+readinessProbe:
+  exec:
+    command: ["mc-health"]
+  periodSeconds: 15
+  timeoutSeconds: 10
+  failureThreshold: 3
+# The startup probe gates liveness and readiness, so its budget has to cover
+# the slowest legitimate start: on a fresh volume the image downloads the
+# server jar and, for FTB/CurseForge modpacks, the whole modpack before the
+# world even begins to load. Budget 15s * 80 = 20 minutes; the liveness probe
+# only starts counting afterwards, so a slow start can no longer be killed.
+startupProbe:
+  exec:
+    command: ["mc-health"]
+  periodSeconds: 15
+  timeoutSeconds: 10
+  failureThreshold: 80
+
+securityContext:
+  pod:
+    runAsNonRoot: true
+    # uid/gid 1000 is the image's "minecraft" user. The image's entrypoint
+    # normally starts as root and drops to this user via gosu; starting as the
+    # user directly makes it take the non-root branch, which additionally skips
+    # the entrypoint's recursive chown of /data and its write to
+    # /etc/nsswitch.conf - the latter would fail on a read-only root filesystem.
+    runAsUser: 1000
+    runAsGroup: 1000
+    # fsGroup keeps the world volume writable for the minecraft user.
+    # OnRootMismatch (instead of Always) avoids a recursive chown of the whole
+    # world on every single pod start - on a 32Gi world that is minutes of
+    # startup time. It still runs once if the volume root does not already
+    # carry the group.
+    fsGroup: 1000
+    fsGroupChangePolicy: OnRootMismatch
+  container:
+    allowPrivilegeEscalation: false
+    # Works because the chart mounts an emptyDir at /tmp - the image writes the
+    # server-icon scratch file and mc-server-runner's console named pipe there.
+    # Everything else the server writes goes to the PVC at /data.
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    capabilities:
+      drop:
+        - ALL
+      add: []
+
 minecraft:
   # Valid values are: peaceful, easy, normal, and hard
   difficulty: "easy"
   whitelist:
-    enabled: "true"
+    # Boolean. Before chart 1.0.0 this was the string "true" and was evaluated
+    # with a plain truthiness test, so even "false" enabled the block.
+    enabled: true
     overridePolicy: "MERGE"
     # Comma-separated List of Players
     players: null
   management:
-    # Comma-separated List of Players
+    # Comma-separated List of Players. The image resolves every name against
+    # the external Playerdb API and aborts startup if one does not resolve.
     opPlayers: null
     maxPlayers: 10
     forceGameMode: true
@@ -31,8 +171,25 @@ minecraft:
     serverName: mc-server
   resources:
     storage: "32Gi"
+    # Storage class of the world PVC. Was hardcoded to "longhorn" before chart
+    # 1.0.0. Changing it on an existing release has no effect on the already
+    # bound volume - storageClassName is immutable once the PVC exists.
+    storageClassName: longhorn
+    # JVM heap in gigabytes (passed to the image as MEMORY). Also drives the
+    # container's memory request/limit unless server.resources.requests.memory
+    # is set explicitly.
     memory: "4"
-  version: "LATEST"
+  # Minecraft version to run. Pinned rather than "LATEST", which would silently
+  # drift to a new release on every restart.
+  # This value must match the Java line of the chart version: the image tag
+  # comes from .Chart.AppVersion, so the JVM is fixed per published chart
+  # version. Java 8 runs Minecraft up to 1.16.5, 1.18-1.20.4 need Java 17 and
+  # 1.20.5+ need Java 21. This chart publishes appVersion "java8".
+  version: "1.12.2"
+
+# curseforge, ftb and curseforgeServerpack are mutually exclusive - enabling
+# more than one is rejected by the chart (before 1.0.0 it silently rendered a
+# duplicate TYPE env entry and the last one won).
 curseforge:
   enabled: false
   forceReload: false
@@ -50,6 +207,3 @@ curseforgeServerpack:
   enabled: false
   downloadUrl: null
   workingDirectory: '/data/serverpack'
-mcRouterIntegration:
-  enabled: false
-  domain: null

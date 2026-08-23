@@ -13,7 +13,7 @@ Collection of some self-made helm-charts. Each top-level directory is a standalo
 | `homeassistant` | Home Assistant | StatefulSet, has `NOTES.txt` and Helm tests |
 | `matrix-synapse` | Matrix Synapse | StatefulSet plus an nginx delegation Deployment/Service |
 | `minecraft-router` | itzg/mc-router | Deployment + routing ConfigMap + NodePort Service (TCP only, no ingress); `mappings` is a required value |
-| `minecraft-server` | itzg/minecraft-server | StatefulSet + PVC + NodePort Service + init-script ConfigMap (no ingress); pre-existing chart, still on its legacy conventions. Published once per Java line (`appVersion: java8` / `java17` / `java21`) — the image tag comes from `.Chart.AppVersion`, so the Java line is chosen by picking the chart version |
+| `minecraft-server` | itzg/minecraft-server | StatefulSet + PVC + Service + init-script ConfigMap (no ingress); service type is a value (`ClusterIP` by default, routed via `minecraft-router`). Published once per Java line (`appVersion: java8` / `java17` / `java21`) — the image tag comes from `.Chart.AppVersion`, so the Java line is chosen by picking the chart version, and `minecraft.version` ships a default matching that line. First chart with a strict `values.schema.json` (pilot, #68) |
 | `outline` | Outline | StatefulSet, separate DB/Redis secrets |
 | `paperless-ngx` | Paperless-ngx | Largest chart: consume CronJob, SMB-connector PV/PVC, pre/post-consumption scripts ConfigMap |
 | `patchmon` | PatchMon | Two Deployments (frontend + backend), OIDC secret |

@@ -125,18 +125,35 @@ These guidelines are **binding for every current and future chart** in this repo
 
 - Secrets are **1Password `OnePasswordItem` CRs**: values expose `secrets.<name>SecretRef` holding an `op://` item path; the 1Password operator materializes the Kubernetes Secret in-cluster.
 
-### 9. Environment variables
+### 9. Config changes must restart the workload (#82)
+
+- **Every workload that consumes a ConfigMap carries a `checksum/config` annotation on its pod template** — one line per ConfigMap it consumes:
+
+  ```yaml
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/<chart>.configmap.yaml") . | sha256sum }}
+  ```
+
+  Reference implementation: `template-chart/templates/xxx.deployment.yaml` and `xxx.sfs.yaml`. Where a workload consumes several ConfigMaps, use one annotation per file with a distinguishing suffix (`checksum/config-<name>`).
+- **Why it is mandatory, not optional**: without it a changed ConfigMap does not change the pod template, so nothing restarts and the running container keeps the old config — silently. `subPath` mounts (the usual form here) are never refreshed by the kubelet at all, and most apps read their config only at start. In #82 this produced a real outage: the router kept routing to Services that no longer existed while every bundle was green and the pod was Ready.
+- **The annotation is content-based, not time-based**: the hash is taken over the rendered ConfigMap, so an unchanged config renders an identical hash and `helm upgrade` is a no-op. It never degenerates into a restart-on-every-upgrade.
+- Adding the annotation to an existing chart is a **major** bump (§2): runtime behavior changes — a config change now costs a restart. Name that cost in the PR (some workloads take minutes to come back).
+- **Secrets from `OnePasswordItem` cannot use this mechanism.** Helm never sees their content — the 1Password operator fills the Secret in-cluster after rendering, so there is nothing to hash. A chart that mounts such a Secret as a file documents the limitation in its `values.yaml` where it cannot close the gap.
+
+### 10. Environment variables
 
 - Every workload container offers an additive `env` value block, appended to the env entries the chart always sets.
 - Entries are rendered through `tpl` (so values may contain Helm templating) and support the `value`, `secretKeyRef` and `configMapKeyRef` forms (pattern: `template-chart/templates/xxx.deployment.yaml`).
 
-### 10. Scaling
+### 11. Scaling
 
 - Every Deployment/StatefulSet has a `replicas` value (default `1`, the values path per workload matches its section) that also accepts an explicit `0` for per-workload fine control.
 - Every chart has a global `scaleDown` flag (default `false`): `scaleDown: true` takes precedence over all `replicas` values, renders every Deployment/StatefulSet with `replicas: 0` and suspends CronJobs. It **stops** the app but does not uninstall it — PVCs, Secrets, Services and Ingress stay in place; setting it back to `false` brings the workloads back up.
 - Implemented via a per-chart `<chart>.replicas` helper in `_helpers.tpl` (reference in `template-chart`); the helper uses an explicit nil check (`kindIs "invalid"`) because Helm's `default` would swallow an explicit `0`.
 
-### 11. Everything else
+### 12. Everything else
 
 - `icon:` is mandatory in every `Chart.yaml`.
 - `helm lint --strict` must pass without findings.

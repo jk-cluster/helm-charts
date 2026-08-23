@@ -5,6 +5,19 @@
 scaleDown: false
 
 secrets:
+  # users.conf is mounted into the samba container from the Secret the 1Password
+  # operator materializes from this item.
+  #
+  # Known limitation (#82): changing the item in the vault does NOT restart
+  # samba, so added, removed or re-passworded users stay invisible to the
+  # running smbd. Helm cannot hash the content (it never sees it - the operator
+  # fills the Secret in-cluster after rendering), so the checksum/config
+  # mechanism used for smb.conf does not apply here. The operator's own
+  # "operator.1password.io/auto-restart" annotation is no help either: it only
+  # ever restarts Deployments, and this workload is a StatefulSet (verified
+  # against onepassword-operator 1.12.0). After changing the users item,
+  # restart samba by hand:
+  #   kubectl rollout restart statefulset <release>-samba-sfs
   sambaUsersSecretRef: null
 
 samba:

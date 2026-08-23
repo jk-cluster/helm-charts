@@ -15,6 +15,16 @@ spec:
       name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
       labels:
         app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+      annotations:
+        # Hash of the rendered ConfigMap: a changed smb.conf (i.e. a changed
+        # samba.shares list) changes the pod template and thus restarts the
+        # pod. Without it a new or renamed share never reaches the running
+        # smbd - smb.conf is mounted with subPath (never refreshed by the
+        # kubelet) and is read once at start.
+        # users.conf is NOT covered: it comes from a 1Password-backed Secret
+        # whose content Helm never sees. See secrets.sambaUsersSecretRef in
+        # values.yaml.
+        checksum/config: {{ include (print $.Template.BasePath "/samba-config.configmap.yaml") . | sha256sum }}
     spec:
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs

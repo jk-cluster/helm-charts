@@ -101,6 +101,11 @@ rallly:
     failureThreshold: 30
 
 ingress:
+  # Set to false to omit the Ingress entirely. Note that ingress.domain stays
+  # required even then: it is also the app's public base URL
+  # (NEXT_PUBLIC_BASE_URL), not just the Ingress host. Only clusterIssuer
+  # becomes unnecessary.
+  enabled: true
   clusterIssuer: null
   domain: null
   className: nginx

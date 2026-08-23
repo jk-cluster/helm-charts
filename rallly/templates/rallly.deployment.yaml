@@ -17,14 +17,18 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
-        {{- toYaml .Values.rallly.securityContext.pod | nindent 8 }}
+        {{- include "rallly.podSecurityContext" .Values.rallly.securityContext | nindent 8 }}
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
           image: "lukevella/rallly:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
           env:
+            # ingress.domain is not a pure Ingress value: it is also the app's
+            # public base URL, so it stays required even when the Ingress is
+            # switched off (an empty value would render "https://" and break
+            # every generated link silently).
             - name: NEXT_PUBLIC_BASE_URL
-              value: "https://{{ .Values.ingress.domain }}"
+              value: "https://{{ required "A Domain/Host must be provided (ingress.domain)" .Values.ingress.domain }}"
             - name: SECRET_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -141,15 +145,15 @@ spec:
               protocol: TCP
               name: http
           livenessProbe:
-            {{ toYaml .Values.rallly.livenessProbe | nindent 12}}
+            {{- include "rallly.livenessProbe" .Values.rallly.livenessProbe | nindent 12 }}
           readinessProbe:
-            {{ toYaml .Values.rallly.readinessProbe | nindent 12}}
+            {{- include "rallly.readinessProbe" .Values.rallly.readinessProbe | nindent 12 }}
           startupProbe:
-            {{ toYaml .Values.rallly.startupProbe | nindent 12}}
+            {{- include "rallly.startupProbe" .Values.rallly.startupProbe | nindent 12 }}
           resources:
-            {{- include "rallly.resources" .Values.rallly.resources | nindent 12 }}
+            {{- include "rallly.effectiveResources" .Values.rallly.resources | nindent 12 }}
           securityContext:
-            {{- toYaml .Values.rallly.securityContext.container | nindent 12 }}
+            {{- include "rallly.containerSecurityContext" .Values.rallly.securityContext | nindent 12 }}
           volumeMounts:
             # Next.js writes prerendered pages and optimized images into its
             # cache directory; with a read-only root filesystem this must be a

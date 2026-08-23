@@ -1,0 +1,37 @@
+{{- $replicas := include "cyberchef.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.cyberchef.replicas) -}}
+CyberChef {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+ACCESS
+  https://{{ .Values.ingress.domain }}
+
+  The certificate is requested by cert-manager through the "{{ .Values.ingress.clusterIssuer }}"
+  cluster issuer. Until it has been issued the browser shows a warning; follow it with
+
+    kubectl -n {{ .Release.Namespace }} get certificate tls-{{ .Release.Name }}-{{ .Chart.Name }}-ingress
+
+  This chart has no secrets and no volumes — the two ingress values above are
+  everything an installation needs.
+{{ if eq $replicas "0" }}
+SCALED TO ZERO
+  {{ if .Values.scaleDown }}scaleDown: true{{ else }}cyberchef.replicas: 0{{ end }} — the deployment runs with replicas: 0, so the URL
+  above answers 503 until you set it back and upgrade again. Service and
+  Ingress stay in place, so the certificate is not re-issued.
+{{ end }}
+ANYONE WHO REACHES THE URL CAN USE IT
+  CyberChef has no login, and this chart adds none. If it must not be open to
+  everyone, put authentication in front of it via ingress.annotations — the
+  chart merges them into the Ingress, e.g. ingress-nginx external auth or
+  basic auth annotations.
+
+NOTHING TO BACK UP, NOTHING TO MIGRATE
+  CyberChef is a static web app: recipes and inputs are processed in the
+  visitor's browser and never reach the server. The pod only serves files and
+  holds no state, so app-version upgrades and rollbacks carry no data risk and
+  need no migration step.
+{{- if .Values.cyberchef.env }}
+
+cyberchef.env HAS NO EFFECT ON THE APP
+  cyberchef.env is set. The entries reach the nginx process that serves the
+  files, but the served CyberChef bundle is static and reads none of them —
+  configuration has to happen in the browser.
+{{- end }}

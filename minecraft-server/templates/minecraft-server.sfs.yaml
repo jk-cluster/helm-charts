@@ -1,0 +1,202 @@
+{{- include "minecraft-server.validateModpackSources" . }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+  labels:
+    app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+spec:
+  replicas: {{ include "minecraft-server.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.server.replicas) }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+  serviceName: {{ .Release.Name }}-{{ .Chart.Name }}-service
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.securityContext.pod | nindent 8 }}
+      {{- if .Values.curseforgeServerpack.enabled }}
+      initContainers:
+        - name: download-serverpack
+          image: {{ .Values.server.initImage }}
+          command: [ 'sh', '/init/init.sh' ]
+          securityContext:
+            {{- toYaml .Values.securityContext.container | nindent 12 }}
+          volumeMounts:
+            - name: "mc-volume"
+              mountPath: /modpacks
+              subPath: mc-modpacks/
+            - name: "mc-volume"
+              mountPath: /data
+              subPath: mc-data/
+            - name: init-script
+              mountPath: /init/init.sh
+              subPath: init.sh
+            - name: tmp
+              mountPath: /tmp
+      {{- end }}
+      containers:
+        - name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+          image: "itzg/minecraft-server:{{ .Chart.AppVersion }}"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            {{- toYaml .Values.securityContext.container | nindent 12 }}
+          ports:
+            - name: mc-port
+              containerPort: {{ .Values.server.port }}
+              protocol: TCP
+            {{- if .Values.server.rcon.enabled }}
+            - name: minecraft-rcon
+              containerPort: {{ .Values.server.rcon.port }}
+              protocol: TCP
+            {{- end }}
+            - name: metrics
+              containerPort: 19565
+              protocol: TCP
+          env:
+            - name: EULA
+              value: "true"
+            - name: DUMP_SERVER_PROPERTIES
+              value: "true"
+            - name: MOTD
+              value: "{{ .Values.server.motd }}"
+            - name: DIFFICULTY
+              value: {{ .Values.minecraft.difficulty }}
+            - name: SERVER_PORT
+              value: "{{ .Values.server.port }}"
+            {{- if .Values.minecraft.whitelist.enabled }}
+            - name: EXISTING_WHITELIST_FILE
+              value: {{ .Values.minecraft.whitelist.overridePolicy }}
+            {{- with .Values.minecraft.whitelist.players }}
+            - name: WHITELIST
+              value: "{{ . }}"
+            {{- end }}
+            {{- end }}
+            {{- with .Values.minecraft.management.opPlayers }}
+            - name: OPS
+              value: "{{ . }}"
+            {{- end }}
+            - name: EXISTING_OPS_FILE
+              value: "SYNCHRONIZE"
+            - name: MAX_PLAYERS
+              value: "{{ .Values.minecraft.management.maxPlayers }}"
+            - name: FORCE_GAMEMODE
+              value: "{{ .Values.minecraft.management.forceGameMode }}"
+            - name: SNOOPER_ENABLED
+              value: "false"
+            - name: MODE
+              value: "{{ .Values.minecraft.management.gameMode }}"
+            - name: LEVEL
+              value: "{{ .Values.minecraft.management.worldSaveName }}"
+            - name: SERVER_NAME
+              value: "{{ .Values.minecraft.management.serverName }}"
+            - name: VERSION
+              value: "{{ .Values.minecraft.version }}"
+            - name: ENABLE_RCON
+              value: "{{ .Values.server.rcon.enabled }}"
+            {{- if .Values.server.rcon.enabled }}
+            - name: RCON_PORT
+              value: "{{ .Values.server.rcon.port }}"
+            - name: RCON_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: rcon-password
+                  name: {{ .Release.Name }}-{{ .Chart.Name }}-secret
+            {{- end }}
+            - name: ENABLE_AUTOPAUSE
+              value: "false"
+            - name: MEMORY
+              value: "{{ .Values.minecraft.resources.memory }}G"
+            {{- if .Values.curseforge.enabled }}
+            - name: TYPE
+              value: "AUTO_CURSEFORGE"
+            - name: CF_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: curseforge-api-key
+                  name: {{ .Release.Name }}-{{ .Chart.Name }}-secret
+            - name: CF_SLUG
+              value: "{{ .Values.curseforge.modpack.slug }}"
+            - name: CF_FILE_ID
+              value: "{{ .Values.curseforge.modpack.versionId }}"
+            - name: CF_EXCLUDE_MODS
+              value: "{{ .Values.curseforge.modpack.exclude }}"
+            - name: CF_OVERRIDES_EXCLUSIONS
+              value: "{{ .Values.curseforge.modpack.excludeOverride }}"
+            - name: CF_FORCE_INCLUDE_MODS
+              value: "{{ .Values.curseforge.modpack.include }}"
+            - name: CF_FORCE_SYNCHRONIZE
+              value: "{{ .Values.curseforge.forceReload }}"
+            {{- end }}
+            {{- if .Values.curseforgeServerpack.enabled }}
+            - name: TYPE
+              value: "CURSEFORGE"
+            - name: CF_SERVER_MOD
+              value: "/modpacks/serverpack.zip"
+            - name: CF_BASE_DIR
+              value: "{{ .Values.curseforgeServerpack.workingDirectory }}"
+            {{- end }}
+            {{- if .Values.ftb.enabled }}
+            - name: TYPE
+              value: FTBA
+            - name: FTB_MODPACK_ID
+              value: "{{ .Values.ftb.modpackId }}"
+            - name: FTB_MODPACK_VERSION_ID
+              value: "{{ .Values.ftb.versionId }}"
+            {{- end }}
+            {{- range $value := .Values.env }}
+            {{- if $value.value }}
+            - name: {{ $value.name }}
+              value: {{ tpl $value.value $ }}
+            {{- else if $value.valueFrom }}
+            {{- if $value.valueFrom.secretKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ tpl $value.valueFrom.secretKeyRef.name $ }}
+                  key: {{ tpl $value.valueFrom.secretKeyRef.key $ }}
+            {{- else if $value.valueFrom.configMapKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ tpl $value.valueFrom.configMapKeyRef.name $ }}
+                  key: {{ tpl $value.valueFrom.configMapKeyRef.key $ }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.startupProbe | nindent 12 }}
+          resources:
+            {{- include "minecraft-server.serverResources" . | nindent 12 }}
+          volumeMounts:
+            - name: "mc-volume"
+              mountPath: /data
+              subPath: mc-data/
+            - name: "mc-volume"
+              mountPath: /modpacks
+              subPath: mc-modpacks/
+            # Writable path required by readOnlyRootFilesystem: the image writes
+            # its server-icon scratch file and mc-server-runner's console named
+            # pipe to /tmp. Everything else goes to the PVC at /data.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: "mc-volume"
+          persistentVolumeClaim:
+            # Deliberate exception from the naming scheme: renaming the PVC
+            # would make Kubernetes provision a new, empty volume and orphan
+            # the existing world (see README, naming exceptions).
+            claimName: {{ .Release.Name }}-mc-volume-claim
+        - name: init-script
+          configMap:
+            name: {{ .Release.Name }}-{{ .Chart.Name }}-configmap
+        - name: tmp
+          emptyDir: {}

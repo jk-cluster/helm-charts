@@ -62,8 +62,10 @@ spec:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: ci-mc-secret
+  name: ci-minecraft-server-secret
 stringData:
+  # Only consumed when server.rcon.enabled is true (RCON is off by default, and
+  # since chart 1.0.0 the chart no longer references the key while it is off).
   rcon-password: ci-dummy-rcon-password
   # Only consumed when curseforge.enabled is true; provided so the CI install
   # keeps working if the test values ever enable a CurseForge modpack.

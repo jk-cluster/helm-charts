@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-service
+  labels:
+    app: {{ .Release.Name }}-{{ .Chart.Name }}-service
+spec:
+  type: {{ .Values.server.service.type }}
+  selector:
+    app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+  ports:
+    - name: mc-port
+      protocol: TCP
+      port: {{ .Values.server.service.port }}
+      # Named target, so a server.port override cannot break the routing.
+      # Before chart 1.0.0 this was the number 25565 while the container
+      # declared port 35565 - the mismatch went unnoticed precisely because
+      # the target was numeric.
+      targetPort: mc-port
+      {{- if eq .Values.server.service.type "NodePort" }}
+      nodePort: {{ .Values.server.service.outwardPort }}
+      {{- end }}

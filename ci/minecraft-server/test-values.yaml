@@ -1,33 +1,21 @@
 # Values for the minecraft-server install-test. Kept as close to the real
 # deployments as possible; only what a CI runner cannot provide is overridden.
 #
-# 1. minecraft.version: the image tag comes from .Chart.AppVersion, so the JVM
-#    in the image is fixed per published chart version and the Minecraft
-#    version has to match that Java line - Java 8 runs Minecraft only up to
-#    1.16.5, 1.18-1.20.4 need Java 17, and 1.20.5+ need Java 21. No single
-#    Minecraft version boots on all three lines, so this value is bumped
-#    together with appVersion in every Java-line PR.
-#    This chart version publishes appVersion "java21", hence 1.21.1 - which is
-#    also what ftb-skies-2, the one server actually running on this line, sets
-#    in its real values file, so CI exercises the production version rather
-#    than an arbitrary Java-21-capable one.
-#    The production default is "LATEST", which would drift on every restart.
-# 2. minecraft.resources.storage: the production 32Gi world volume is backed by
-#    a static hostPath PV in CI (see fixtures.yaml); 2Gi is plenty for a server
-#    that only has to boot.
-# 3. minecraft.resources.memory: sets the JVM heap (-Xmx); 1G instead of 4G
-#    keeps the runner comfortable. The container resource *requests* are
-#    hardcoded in the template (cpu 2 / memory 4Gi) and cannot be overridden -
-#    they fit a 4-vCPU/16GB GitHub runner, and making them configurable is part
-#    of the stage-2 convention alignment.
-# 4. server.outwardPort stays at the chart default 30565: unlike minecraft-router
-#    that default is already inside the Kubernetes node-port range
-#    (30000-32767), so the k3d API server accepts it unchanged.
+# minecraft.version is deliberately NOT set here any more. Since chart 1.0.0 the
+# chart ships a pinned default that belongs to the Java line it publishes (the
+# image tag comes from .Chart.AppVersion, and Java 8 runs Minecraft only up to
+# 1.16.5, 1.18-1.20.4 need Java 17, 1.20.5+ need Java 21). Leaving it unset
+# means the install-test exercises exactly the default a user would get, so a
+# Java line published with a mismatched default version fails CI instead of
+# passing on a CI-only override.
+#
+# server.service.type is not set either: the default is ClusterIP, which is what
+# all three real deployments run (routing is done by the static mappings of the
+# minecraft-router chart). That also keeps CI free of node-port allocation.
 secrets:
   minecraftServerRef: vaults/CI/items/minecraft-server
 
 minecraft:
-  version: "1.21.1"
   management:
     # opPlayers deliberately stays at the default (null): the image resolves
     # every name in OPS against the external Playerdb API and aborts the whole
@@ -36,5 +24,19 @@ minecraft:
     # lookup.
     maxPlayers: 2
   resources:
+    # The production 32Gi world volume is backed by a static hostPath PV in CI
+    # (see fixtures.yaml); 2Gi is plenty for a server that only has to boot.
     storage: 2Gi
+    # JVM heap. 1G instead of 4G keeps the runner comfortable - and since chart
+    # 1.0.0 this also drives the container's memory request (1Gi) and, via
+    # limitFactor 3, its limit (3Gi), so the runner is not asked for the
+    # production-sized 4Gi/12Gi any more.
     memory: "1"
+
+server:
+  resources:
+    requests:
+      # The production default is 2 CPUs, which would not leave much room on a
+      # 4-vCPU GitHub runner alongside the k3d control plane. Since chart 1.0.0
+      # this is configurable instead of hardcoded in the template.
+      cpu: "500m"

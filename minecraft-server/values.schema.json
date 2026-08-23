@@ -1,0 +1,318 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "minecraft-server values",
+  "description": "Strict values schema (issue #68 pilot). additionalProperties is false on every chart-owned object level, so a key that the chart does not read is rejected at render time instead of being silently ignored. The only objects that stay open are the ones passed verbatim into the Kubernetes pod spec (probes, security contexts, global) - the chart does not interpret their contents, so it cannot judge which keys are meaningful.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "global": {
+      "description": "Helm's conventional cross-chart values. Unused by this chart, kept open so an umbrella install cannot break on it.",
+      "type": "object"
+    },
+    "scaleDown": {
+      "type": "boolean"
+    },
+    "secrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "minecraftServerRef": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "service": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["ClusterIP", "NodePort"]
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "outwardPort": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
+          }
+        },
+        "motd": {
+          "type": "string"
+        },
+        "rcon": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
+          }
+        },
+        "initImage": {
+          "type": "string"
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "limitFactor": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "requests": {
+              "$ref": "#/definitions/resourceList"
+            },
+            "limits": {
+              "$ref": "#/definitions/resourceList"
+            }
+          }
+        }
+      }
+    },
+    "env": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "valueFrom": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "secretKeyRef": {
+                "$ref": "#/definitions/keyRef"
+              },
+              "configMapKeyRef": {
+                "$ref": "#/definitions/keyRef"
+              }
+            }
+          }
+        }
+      }
+    },
+    "livenessProbe": {
+      "$ref": "#/definitions/probe"
+    },
+    "readinessProbe": {
+      "$ref": "#/definitions/probe"
+    },
+    "startupProbe": {
+      "$ref": "#/definitions/probe"
+    },
+    "securityContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pod": {
+          "description": "Rendered verbatim as the pod's securityContext; kept open because the chart does not interpret it.",
+          "type": "object"
+        },
+        "container": {
+          "description": "Rendered verbatim as the container's securityContext; kept open because the chart does not interpret it.",
+          "type": "object"
+        }
+      }
+    },
+    "minecraft": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "difficulty": {
+          "type": "string",
+          "enum": ["peaceful", "easy", "normal", "hard"]
+        },
+        "whitelist": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "overridePolicy": {
+              "type": "string",
+              "enum": ["SKIP", "MERGE", "SYNCHRONIZE"]
+            },
+            "players": {
+              "type": ["string", "null"]
+            }
+          }
+        },
+        "management": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "opPlayers": {
+              "type": ["string", "null"]
+            },
+            "maxPlayers": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "forceGameMode": {
+              "type": "boolean"
+            },
+            "gameMode": {
+              "type": "string",
+              "enum": ["creative", "survival", "adventure", "spectator"]
+            },
+            "worldSaveName": {
+              "type": "string"
+            },
+            "serverName": {
+              "type": "string"
+            }
+          }
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "storage": {
+              "type": "string"
+            },
+            "storageClassName": {
+              "type": ["string", "null"]
+            },
+            "memory": {
+              "description": "JVM heap in gigabytes, passed to the image as MEMORY with a G suffix appended.",
+              "type": ["string", "number"]
+            }
+          }
+        },
+        "version": {
+          "type": ["string", "number"]
+        }
+      }
+    },
+    "curseforge": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "forceReload": {
+          "type": "boolean"
+        },
+        "modpack": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "slug": {
+              "type": ["string", "null"]
+            },
+            "versionId": {
+              "type": ["string", "integer", "null"]
+            },
+            "exclude": {
+              "type": ["string", "integer", "null"]
+            },
+            "excludeOverride": {
+              "type": ["string", "integer", "null"]
+            },
+            "include": {
+              "type": ["string", "integer", "null"]
+            }
+          }
+        }
+      }
+    },
+    "ftb": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "modpackId": {
+          "type": ["string", "integer", "null"]
+        },
+        "versionId": {
+          "type": ["string", "integer", "null"]
+        }
+      }
+    },
+    "curseforgeServerpack": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "downloadUrl": {
+          "type": ["string", "null"]
+        },
+        "workingDirectory": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "resourceList": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cpu": {
+          "type": ["string", "number", "null"]
+        },
+        "memory": {
+          "type": ["string", "number", "null"]
+        },
+        "ephemeral-storage": {
+          "type": ["string", "number", "null"]
+        },
+        "ephemeralStorage": {
+          "type": ["string", "number", "null"]
+        }
+      }
+    },
+    "keyRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "key"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        }
+      }
+    },
+    "probe": {
+      "description": "Rendered verbatim as a container probe; kept open because the chart does not interpret it.",
+      "type": "object"
+    }
+  }
+}

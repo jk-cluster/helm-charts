@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  # Deliberate exception from the release-chart-kind naming scheme: this chart
+  # is already deployed with 32Gi worlds on these claims, and renaming a PVC
+  # makes Kubernetes provision a new, empty volume and orphan the existing
+  # data (see README, naming exceptions).
+  name: {{ .Release.Name }}-mc-volume-claim
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.minecraft.resources.storage }}
+  storageClassName: {{ .Values.minecraft.resources.storageClassName }}

@@ -1,0 +1,100 @@
+{{- $replicas := include "patchmon.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.patchmon.server.replicas) -}}
+{{- /* The effective (null-safe) probe helper, so the budget below matches the
+       container even when the startupProbe block has been erased (#99). */ -}}
+{{- $startup := fromYaml (include "patchmon.server.startupProbe" (dict "given" .Values.patchmon.server.startupProbe "root" $)) -}}
+{{- $budget := mul (int $startup.periodSeconds) (int $startup.failureThreshold) -}}
+{{- $name := printf "%s-%s" .Release.Name .Chart.Name -}}
+PatchMon {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+ACCESS
+{{- if .Values.ingress.enabled }}
+  https://{{ .Values.ingress.domain }}
+
+  While cert-manager is still issuing the certificate the browser warns:
+
+    kubectl -n {{ .Release.Namespace }} get certificate tls-{{ $name }}-ingress
+{{- else }}
+  ingress.enabled is false, so there is no Ingress. Reach it directly with
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $name }}-service 3000:80
+
+  ingress.domain stays required even without an Ingress — the server's
+  CORS_ORIGIN is built from it — and it is still {{ .Values.ingress.domain }} here. The server
+  answers 403 to any Host header it does not know, so address it under that
+  name rather than as plain localhost:
+
+    curl -H "Host: {{ .Values.ingress.domain }}" http://localhost:3000/health
+{{- end }}
+
+THE FOUR 1PASSWORD ITEMS AND THE FIELDS THEY MUST CONTAIN
+  The OnePasswordItem CRs only carry the item paths; which *fields* each item
+  needs is decided in the deployment, which is a tedious place to look it up.
+  A missing field does not fail the install — the container starts with the
+  variable empty and misbehaves later.
+
+  secrets.postgresSecretRef -> {{ .Values.secrets.postgresSecretRef | default "(not set)" }}
+    database-url
+
+  secrets.redisSecretRef -> {{ .Values.secrets.redisSecretRef | default "(not set)" }}
+    host, port, username, password, db
+
+  secrets.patchmonSecretRef -> {{ .Values.secrets.patchmonSecretRef | default "(not set)" }}
+    jwt-secret, encryption-key, session-secret
+
+  secrets.oidcSecretRef -> {{ .Values.secrets.oidcSecretRef | default "(not set)" }}
+    issuer-url, client-id, client-secret, redirect-uri, requested-scopes,
+    button-text, user-group-name, admin-group-name
+
+  Watch them materialize:
+
+    kubectl -n {{ .Release.Namespace }} get onepassworditem
+
+SIGN-IN IS OIDC-ONLY — THERE IS NO LOCAL ACCOUNT TO FALL BACK ON
+  The chart sets OIDC_DISABLE_LOCAL_AUTH=true, so the login form is gone and
+  there is no built-in admin. If the OIDC item is wrong, nobody gets in —
+  including you. Users are created on first login with the "readonly" role;
+  admin rights follow the group named in the item's admin-group-name field.
+  The item's redirect-uri has to point back at this installation{{ if .Values.ingress.enabled }} under
+  https://{{ .Values.ingress.domain }}{{ end }}, and it must match what is registered at the
+  identity provider exactly.
+{{- if .Values.ingress.enabled }}
+
+A WRONG ingress.domain KEEPS THE POD OUT OF READY FOREVER
+  The 2.x server answers 403 to any request whose Host header is neither
+  loopback nor a CORS_ORIGIN host, and CORS_ORIGIN is built from
+  ingress.domain. The probes therefore send "Host: {{ .Values.ingress.domain }}" explicitly.
+  If that value is not the hostname the server is actually reached under, the
+  probes get 403, the pod never turns Ready and nothing in the log looks like
+  a configuration error — just repeated 403s.
+{{- end }}
+
+GIVE THE FIRST START TIME
+  The server waits for the database and runs its migrations at boot, and the
+  first 2.x start rebuilds the database indexes, which takes minutes on slow
+  storage. The startup probe budget is {{ $budget }}s ({{ div $budget 60 }} minutes) before Kubernetes
+  starts killing the container — a slow first boot is expected, not a hang:
+
+    kubectl -n {{ .Release.Namespace }} logs deploy/{{ $name }}-deployment -f
+
+ONE REPLICA ONLY
+  The server registers itself in the Redis presence registry under its pod
+  hostname, which the chart pins to {{ $name }}-server. A second
+  replica would register the same identity, so this chart supports exactly
+  one — raising patchmon.server.replicas does not scale it out.
+{{- if .Values.patchmon.guacd.enabled }}
+
+GUACD SIDECAR IS ON
+  patchmon.guacd.enabled is true, so {{ .Values.patchmon.guacd.image }} runs beside the
+  server and it is reached at 127.0.0.1:4822 — in-browser RDP for Windows
+  hosts, which upstream still labels beta. The sidecar is pinned separately
+  from the chart's appVersion and needs its own review at upgrade time. It
+  listens on the pod only; nothing exposes 4822 outside.
+{{- end }}
+{{- if eq $replicas "0" }}
+
+SCALED TO ZERO
+  {{ if .Values.scaleDown }}scaleDown: true{{ else }}patchmon.server.replicas: 0{{ end }} — the deployment runs with replicas: 0. Secrets,
+  Service{{ if .Values.ingress.enabled }} and Ingress{{ end }} stay in place, and the agents on your hosts keep
+  retrying, so nothing is lost; they simply report nothing until you set it
+  back and upgrade again.
+{{- end }}

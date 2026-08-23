@@ -7,9 +7,11 @@
 #    1.16.5, 1.18-1.20.4 need Java 17, and 1.20.5+ need Java 21. No single
 #    Minecraft version boots on all three lines, so this value is bumped
 #    together with appVersion in every Java-line PR.
-#    This chart version publishes appVersion "java17", hence 1.20.1.
-#    The production default is "LATEST", which would pull a 1.21.x server that
-#    needs Java 21 and would not start on this line.
+#    This chart version publishes appVersion "java21", hence 1.21.1 - which is
+#    also what ftb-skies-2, the one server actually running on this line, sets
+#    in its real values file, so CI exercises the production version rather
+#    than an arbitrary Java-21-capable one.
+#    The production default is "LATEST", which would drift on every restart.
 # 2. minecraft.resources.storage: the production 32Gi world volume is backed by
 #    a static hostPath PV in CI (see fixtures.yaml); 2Gi is plenty for a server
 #    that only has to boot.
@@ -25,7 +27,7 @@ secrets:
   minecraftServerRef: vaults/CI/items/minecraft-server
 
 minecraft:
-  version: "1.20.1"
+  version: "1.21.1"
   management:
     # opPlayers deliberately stays at the default (null): the image resolves
     # every name in OPS against the external Playerdb API and aborts the whole

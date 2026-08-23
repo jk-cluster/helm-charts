@@ -114,3 +114,168 @@ template-chart is the reference implementation.
 1
 {{- end -}}
 {{- end -}}
+
+{{/*
+Merge a user-supplied values sub-tree onto a dict of chart defaults so that a
+null / empty override falls back to the defaults instead of erasing them.
+
+Input: dict "defaults" <dict> "given" <dict|nil> "path" <string, optional
+values path used in error messages>. Output: YAML of the merged dict (consume
+it with fromYaml).
+
+Why this exists (issue #99): Helm merges values maps recursively, but an
+override key written without children — e.g. a leftover
+
+  securityContext:
+
+after deleting its last remaining sub-key — is YAML null. Where the chart
+defines a default, Helm treats that null as a deletion of the default; the
+template then renders "securityContext: null". The workload starts and reports
+healthy while being unhardened, so nothing points at the mistake. The same
+shape erases a probe (it disappears) or the resources block (no requests, no
+computed limits). This helper defines the opposite semantics: an empty block
+means "chart defaults apply".
+
+Rules:
+  - a nil "given" is treated as an empty dict (all defaults apply).
+  - a key whose override value is null keeps the default (nulls never delete).
+  - a key present in both as a map is merged recursively, so a partially
+    filled block only overrides the keys it actually sets.
+  - a scalar override for a key the defaults define as a map is rejected with
+    a message naming the values path, instead of failing later with a template
+    field error.
+  - any other set value wins as given, including an explicit false or 0 —
+    Helm's "default" and sprig's "mergeOverwrite" would both swallow those
+    zero values, hence the explicit kindIs "invalid" nil check.
+  - keys only present in the override are passed through unchanged.
+
+NOTE: like the helpers above, this is duplicated into every chart's
+templates/_helpers.tpl with the chart's name as define prefix, because charts
+in this repo deliberately have no dependencies.
+*/}}
+{{- define "samba.defaultedDict" -}}
+{{- $defaults := .defaults | default dict -}}
+{{- $given := .given -}}
+{{- $path := .path | default "value" -}}
+{{- if kindIs "invalid" $given -}}
+{{- $given = dict -}}
+{{- end -}}
+{{- if not (kindIs "map" $given) -}}
+{{- fail (printf "%s must be a mapping or null, got %s (%v)" $path (kindOf $given) $given) -}}
+{{- end -}}
+{{- $out := deepCopy $defaults -}}
+{{- range $key, $value := $given -}}
+{{- if not (kindIs "invalid" $value) -}}
+{{- $default := index $defaults $key -}}
+{{- if and (kindIs "map" $value) (kindIs "map" $default) -}}
+{{- $_ := set $out $key (fromYaml (include "samba.defaultedDict" (dict "defaults" $default "given" $value "path" (printf "%s.%s" $path $key)))) -}}
+{{- else if kindIs "map" $default -}}
+{{- fail (printf "%s.%s must be a mapping or null, got %s (%v)" $path $key (kindOf $value) $value) -}}
+{{- else -}}
+{{- $_ := set $out $key $value -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- toYaml $out -}}
+{{- end -}}
+
+{{/*
+Pick one sub-block out of a values block that may itself be null.
+
+Input: dict "block" <dict|nil> "key" <string> "path" <string>.
+Returns YAML of dict "value" <the sub-block, may be nil>, after rejecting a
+non-mapping block with a message that names the values path. Needed because
+".Values.samba.securityContext" can itself be erased.
+*/}}
+{{- define "samba.subBlock" -}}
+{{- $block := .block -}}
+{{- if kindIs "invalid" $block -}}
+{{- $block = dict -}}
+{{- end -}}
+{{- if not (kindIs "map" $block) -}}
+{{- fail (printf "%s must be a mapping or null, got %s (%v)" .path (kindOf $block) $block) -}}
+{{- end -}}
+{{- toYaml (dict "value" (index $block .key)) -}}
+{{- end -}}
+
+{{/*
+The effective security contexts, probes and resources (issue #99).
+
+The defaults below MUST stay in sync with the corresponding blocks in
+values.yaml, which stays the documented, user-facing place for them; this copy
+is only the fallback for the case where an override has erased the block.
+
+IMPORTANT - this chart's hardening is a DOCUMENTED DEVIATION forced by the
+ghcr.io/dockur/samba image, and these fallbacks reproduce it exactly rather
+than restoring the repo standard, which would break the file server:
+
+  - No runAsNonRoot: the entrypoint creates the Unix users from users.conf
+    (groupadd/adduser/usermod) and smbd impersonates the authenticated share
+    user per session; both require starting as root.
+  - readOnlyRootFilesystem stays false: the entrypoint writes /etc/passwd and
+    /etc/group, the /etc/samba.conf healthcheck symlink, mkdir /shared and the
+    Samba TDB databases under /var/lib/samba.
+  - capabilities.add is NOT empty: NET_BIND_SERVICE (ports 445/139),
+    SETUID/SETGID (per-session impersonation) and CHOWN/FOWNER/DAC_OVERRIDE
+    (managing share files on behalf of the users).
+  - The pod context sets only fsGroup, no runAs* values.
+
+SMB is not an HTTP protocol, so the probes target the SMB TCP port directly.
+*/}}
+{{- define "samba.podSecurityContext" -}}
+{{- $given := (fromYaml (include "samba.subBlock" (dict "block" . "key" "pod" "path" "samba.securityContext"))).value -}}
+{{- $defaults := dict
+      "fsGroup" 1000 -}}
+{{- include "samba.defaultedDict" (dict "defaults" $defaults "given" $given "path" "samba.securityContext.pod") -}}
+{{- end -}}
+
+{{- define "samba.containerSecurityContext" -}}
+{{- $given := (fromYaml (include "samba.subBlock" (dict "block" . "key" "container" "path" "samba.securityContext"))).value -}}
+{{- $defaults := dict
+      "allowPrivilegeEscalation" false
+      "readOnlyRootFilesystem" false
+      "capabilities" (dict
+        "drop" (list "ALL")
+        "add" (list "CHOWN" "DAC_OVERRIDE" "FOWNER" "NET_BIND_SERVICE" "SETGID" "SETUID")) -}}
+{{- include "samba.defaultedDict" (dict "defaults" $defaults "given" $given "path" "samba.securityContext.container") -}}
+{{- end -}}
+
+{{- define "samba.livenessProbe" -}}
+{{- $defaults := dict
+      "tcpSocket" (dict "port" 445)
+      "periodSeconds" 10
+      "timeoutSeconds" 5
+      "failureThreshold" 3 -}}
+{{- include "samba.defaultedDict" (dict "defaults" $defaults "given" . "path" "samba.livenessProbe") -}}
+{{- end -}}
+
+{{- define "samba.readinessProbe" -}}
+{{- $defaults := dict
+      "tcpSocket" (dict "port" 445)
+      "periodSeconds" 10
+      "timeoutSeconds" 5
+      "failureThreshold" 3 -}}
+{{- include "samba.defaultedDict" (dict "defaults" $defaults "given" . "path" "samba.readinessProbe") -}}
+{{- end -}}
+
+{{- define "samba.startupProbe" -}}
+{{- $defaults := dict
+      "tcpSocket" (dict "port" 445)
+      "periodSeconds" 5
+      "timeoutSeconds" 5
+      "failureThreshold" 30 -}}
+{{- include "samba.defaultedDict" (dict "defaults" $defaults "given" . "path" "samba.startupProbe") -}}
+{{- end -}}
+
+{{/*
+The effective resources block, fed into the resources helper above so that an
+erased "resources:" still yields the chart's requests and computed limits
+instead of a container without any resource accounting.
+*/}}
+{{- define "samba.effectiveResources" -}}
+{{- $defaults := dict
+      "limitFactor" 3
+      "requests" (dict "memory" "50Mi" "cpu" 0.1 "ephemeralStorage" "50Mi") -}}
+{{- $merged := fromYaml (include "samba.defaultedDict" (dict "defaults" $defaults "given" . "path" "samba.resources")) -}}
+{{- include "samba.resources" $merged -}}
+{{- end -}}

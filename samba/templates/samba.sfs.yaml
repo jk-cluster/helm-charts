@@ -73,19 +73,19 @@ spec:
               mountPath: "/shares/{{ $value.name }}"
             {{- end }}
           livenessProbe:
-            {{- toYaml .Values.samba.livenessProbe | nindent 12 }}
+            {{- include "samba.livenessProbe" .Values.samba.livenessProbe | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.samba.readinessProbe | nindent 12 }}
+            {{- include "samba.readinessProbe" .Values.samba.readinessProbe | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.samba.startupProbe | nindent 12 }}
+            {{- include "samba.startupProbe" .Values.samba.startupProbe | nindent 12 }}
           resources:
-            {{- include "samba.resources" .Values.samba.resources | nindent 12 }}
+            {{- include "samba.effectiveResources" .Values.samba.resources | nindent 12 }}
           securityContext:
-            {{- toYaml .Values.samba.securityContext.container | nindent 12 }}
+            {{- include "samba.containerSecurityContext" .Values.samba.securityContext | nindent 12 }}
       restartPolicy: Always
       automountServiceAccountToken: false
       securityContext:
-        {{- toYaml .Values.samba.securityContext.pod | nindent 8 }}
+        {{- include "samba.podSecurityContext" .Values.samba.securityContext | nindent 8 }}
       volumes:
         - name: smb-config
           configMap:

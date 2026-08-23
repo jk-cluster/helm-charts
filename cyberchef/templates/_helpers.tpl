@@ -214,7 +214,8 @@ default probe needs no further context.
 {{- $defaults := dict
       "runAsNonRoot" true
       "runAsUser" 101
-      "runAsGroup" 101 -}}
+      "runAsGroup" 101
+      "seccompProfile" (dict "type" "RuntimeDefault") -}}
 {{- include "cyberchef.defaultedDict" (dict "defaults" $defaults "given" $given "path" "cyberchef.securityContext.pod") -}}
 {{- end -}}
 

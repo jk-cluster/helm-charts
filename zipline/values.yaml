@@ -75,6 +75,11 @@ zipline:
   env: []
 
 ingress:
+  # Set to false to omit the Ingress entirely. Note that ingress.domain stays
+  # required even then: it is also the app's default domain for generated
+  # share links (CORE_DEFAULT_DOMAIN), not just the Ingress host. Only
+  # clusterIssuer becomes unnecessary.
+  enabled: true
   clusterIssuer: null
   domain: null
   className: nginx

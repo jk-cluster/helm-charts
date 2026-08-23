@@ -14,20 +14,24 @@ spec:
         app: "{{ .Release.Name }}-{{ .Chart.Name }}-sfs"
     spec:
       securityContext:
-        {{- toYaml .Values.zipline.securityContext.pod | nindent 8 }}
+        {{- include "zipline.podSecurityContext" .Values.zipline.securityContext | nindent 8 }}
       containers:
         - name: "{{ .Release.Name }}-{{ .Chart.Name }}-sfs"
           image: "ghcr.io/diced/zipline:{{ .Chart.AppVersion }}"
           securityContext:
-            {{- toYaml .Values.zipline.securityContext.container | nindent 12 }}
+            {{- include "zipline.containerSecurityContext" .Values.zipline.securityContext | nindent 12 }}
           env:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: {{ .Release.Name }}-{{ .Chart.Name }}-db-secret
                   key: connection-url
+            # ingress.domain is not a pure Ingress value: it is also the app's
+            # default domain for generated share links, so it stays required
+            # even when the Ingress is switched off (an empty value would hand
+            # out unusable links silently).
             - name: CORE_DEFAULT_DOMAIN
-              value: "{{ .Values.ingress.domain }}"
+              value: "{{ required "A Domain/Host must be provided (ingress.domain)" .Values.ingress.domain }}"
             - name: CORE_SECRET
               valueFrom:
                 secretKeyRef:
@@ -56,17 +60,17 @@ spec:
             {{- end }}
             {{- end }}
           resources:
-            {{- include "zipline.resources" .Values.zipline.resources | nindent 12 }}
+            {{- include "zipline.effectiveResources" .Values.zipline.resources | nindent 12 }}
           ports:
             - name: "zipline-server"
               containerPort: 3000
               protocol: TCP
           livenessProbe:
-            {{- toYaml .Values.zipline.livenessProbe | nindent 12 }}
+            {{- include "zipline.livenessProbe" .Values.zipline.livenessProbe | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.zipline.readinessProbe | nindent 12 }}
+            {{- include "zipline.readinessProbe" .Values.zipline.readinessProbe | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.zipline.startupProbe | nindent 12 }}
+            {{- include "zipline.startupProbe" .Values.zipline.startupProbe | nindent 12 }}
           volumeMounts:
             - name: zipline-volume
               mountPath: /zipline/uploads

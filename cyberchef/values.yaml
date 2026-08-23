@@ -59,6 +59,9 @@ cyberchef:
       ephemeralStorage: 10Mi
 
 ingress:
+  # Set to false to omit the Ingress entirely (the required domain and
+  # clusterIssuer values are then not needed either, because they are only
+  # read inside the Ingress template).
   enabled: true
   clusterIssuer: null
   domain: null

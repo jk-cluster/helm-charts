@@ -95,5 +95,4 @@ samba:
           - SETGID
           - SETUID
 
-  globalConfig: null
   storageClass: longhorn

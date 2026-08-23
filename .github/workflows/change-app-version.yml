@@ -32,6 +32,7 @@ on:
           - patchmon
           - rallly
           - voucher-vault
+          - minecraft-router
   workflow_call:
     inputs:
       app-version:

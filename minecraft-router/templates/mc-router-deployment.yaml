@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-deployment
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-deployment
+  template:
+    metadata:
+      name: {{ .Release.Name }}-deployment
+      labels:
+        app: {{ .Release.Name }}-deployment
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - image: "itzg/mc-router:{{ .Chart.AppVersion }}"
+          name: mc-router
+          args: ["--api-binding", ":8080"]
+          ports:
+            - name: proxy-port
+              containerPort: 25565
+            - name: api-port
+              containerPort: 8080
+          env:
+            - name: ROUTES_CONFIG
+              value: /data/custom-routing-config.json
+          resources:
+            requests:
+              memory: 50Mi
+              cpu: "100m"
+              ephemeral-storage: "50Mi"
+            limits:
+              memory: 100Mi
+              cpu: "250m"
+              ephemeral-storage: "500Mi"
+          volumeMounts:
+            - name: config-mount
+              mountPath: /data/custom-routing-config.json
+              subPath: custom-routing-config.json
+
+      volumes:
+        - name: config-mount
+          configMap:
+            name: {{ .Release.Name }}-config

@@ -1,0 +1,15 @@
+name: Publish Minecraft-Router Helm Chart
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - minecraft-router/**
+jobs:
+  publish-minecraft-router:
+    name: Publish Minecraft-Router Helm Chart
+    uses: ./.github/workflows/publish-helm-chart.yml
+    with:
+      chart-name: 'minecraft-router'
+    secrets: inherit

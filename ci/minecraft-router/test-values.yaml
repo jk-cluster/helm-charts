@@ -1,0 +1,17 @@
+# minecraft-router needs no secrets, no ingress and no persistence for a CI
+# install - only two adjustments to the defaults:
+#
+# 1. server.outwardPort: the production default 25565 is outside the Kubernetes
+#    default node-port range (30000-32767). The real cluster runs an extended
+#    --service-node-port-range, the k3d CI cluster does not, so the API server
+#    would reject the Service. This is a CI-only override; the chart default
+#    stays 25565 (see minecraft-router/values.yaml).
+# 2. mappings: the chart default renders "<nil>": "<nil>:25565"; the install
+#    works either way, but the CI install uses a realistic routing table.
+server:
+  outwardPort: 30565
+mappings:
+  - domain: mc.example.com
+    internalUrl: survival-service.default.svc.cluster.local
+  - domain: creative.example.com
+    internalUrl: creative-service.default.svc.cluster.local

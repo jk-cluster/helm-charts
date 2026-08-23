@@ -18,6 +18,7 @@ Collection of some self-made helm-charts. Each top-level directory is a standalo
 | `paperless-ngx` | Paperless-ngx | Largest chart: consume CronJob, SMB-connector PV/PVC, pre/post-consumption scripts ConfigMap |
 | `patchmon` | PatchMon | Two Deployments (frontend + backend), OIDC secret |
 | `rallly` | Rallly | Deployment, DB/OIDC/SMTP secrets |
+| `rss-bridge` | RSS-Bridge | Deployment + whitelist ConfigMap; `ingress.hosts` is a required list of host + optional `tlsSecretName`, so several hosts can keep their own existing certificates (documented deviation from the one-TLS-secret rule, see its `values.yaml`) |
 | `samba` | Samba | StatefulSet, users secret + config ConfigMap |
 | `satisfactory` | Satisfactory game server | StatefulSet, no ingress |
 | `teamspeak-server` | TeamSpeak server | StatefulSet, no ingress |

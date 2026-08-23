@@ -1,0 +1,130 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+  labels:
+    app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+spec:
+  replicas: {{ include "rss-bridge.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.rssBridge.replicas) }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+  template:
+    metadata:
+      name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+      labels:
+        app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+      annotations:
+        # Hash of the rendered ConfigMap: a changed whitelist changes the pod
+        # template and thus rolls the pods. Without it a config change stays
+        # invisible to the running container - whitelist.txt is a subPath
+        # mount, which the kubelet never updates, and RSS-Bridge reads the file
+        # once at request bootstrap from the path it was started with.
+        checksum/config: {{ include (print $.Template.BasePath "/rss-bridge.configmap.yaml") . | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "rss-bridge.podSecurityContext" .Values.rssBridge.securityContext | nindent 8 }}
+      containers:
+        - name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+          image: "rssbridge/rss-bridge:{{ .Chart.AppVersion }}"
+          imagePullPolicy: IfNotPresent
+          env:
+            {{- range $value := .Values.rssBridge.env }}
+            {{- if $value.value }}
+            - name: {{ $value.name }}
+              value: {{ tpl $value.value $ }}
+            {{- else if $value.valueFrom }}
+            {{- if $value.valueFrom.secretKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ tpl $value.valueFrom.secretKeyRef.name $ }}
+                  key: {{ tpl $value.valueFrom.secretKeyRef.key $ }}
+            {{- else if $value.valueFrom.configMapKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ tpl $value.valueFrom.configMapKeyRef.name $ }}
+                  key: {{ tpl $value.valueFrom.configMapKeyRef.key $ }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+          ports:
+            # The port NAME is load-bearing and must not be renamed: the
+            # Service selects it by name (targetPort: rss-bridge-port), and so
+            # do the probes.
+            - containerPort: 80
+              protocol: TCP
+              name: rss-bridge-port
+          # Probes, resources and both security contexts go through the
+          # null-safe helpers (#99): an erased block means "chart defaults
+          # apply" instead of a vanished probe or an unhardened container.
+          # Never wrap these in an "if" - a guard hides the erased case
+          # completely instead of rendering a visible null.
+          livenessProbe:
+            {{- include "rss-bridge.livenessProbe" .Values.rssBridge.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- include "rss-bridge.readinessProbe" .Values.rssBridge.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- include "rss-bridge.startupProbe" .Values.rssBridge.startupProbe | nindent 12 }}
+          resources:
+            {{- include "rss-bridge.effectiveResources" .Values.rssBridge.resources | nindent 12 }}
+          securityContext:
+            {{- include "rss-bridge.containerSecurityContext" .Values.rssBridge.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: whitelist
+              mountPath: /app/whitelist.txt
+              subPath: whitelist.txt
+              readOnly: true
+            # The four writable paths below are what keeps
+            # readOnlyRootFilesystem: true possible. They are image facts
+            # rather than user configuration, so they are not values.
+            #
+            # They were found empirically, not guessed: the image was run with
+            # a writable root filesystem, exercised across every whitelisted
+            # bridge, and its diff layer read afterwards. Three of the four
+            # showed up that way. /tmp did NOT - PHP's opcache creates its lock
+            # file there and unlinks it immediately, so it never appears in a
+            # filesystem diff and only surfaced when the hardened container
+            # died at startup with "Unable to create lock file: Read-only file
+            # system". Stopping at the first writable path found would have
+            # shipped a chart that cannot start.
+            - name: cache
+              # RSS-Bridge's file cache. Not optional: the app checks the
+              # directory with is_writable() and throws on every feed request
+              # if it is not - while /?action=health still answers 200, so the
+              # probes would report a healthy pod that serves no feeds.
+              mountPath: /app/cache
+            - name: tmp
+              # PHP opcache lock file (created and immediately unlinked) and
+              # PHP's default upload temp dir.
+              mountPath: /tmp
+            - name: run
+              # nginx.pid
+              mountPath: /run
+            - name: run-php
+              # php-fpm's pid file and its fastcgi socket. Nested inside /run
+              # on purpose: the emptyDir above does not contain the php
+              # subdirectory the pool config expects, and php-fpm does not
+              # create it.
+              mountPath: /run/php
+            - name: nginx-lib
+              # nginx creates its body/fastcgi/proxy/scgi/uwsgi temp
+              # directories here at startup.
+              mountPath: /var/lib/nginx
+      volumes:
+        - name: whitelist
+          configMap:
+            name: "{{ .Release.Name }}-{{ .Chart.Name }}-configmap"
+        - name: cache
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
+        - name: run-php
+          emptyDir: {}
+        - name: nginx-lib
+          emptyDir: {}
+      restartPolicy: Always

@@ -1,0 +1,24 @@
+# rss-bridge: stateless, no secrets and no infrastructure to stand up, so only
+# the required ingress values are set. The Ingress just has to apply - there is
+# no ingress-nginx/cert-manager in the CI cluster.
+#
+# Two hosts share a TLS secret name and a third has its own, so the install
+# test renders the secret-grouping helper as well. That helper is what keeps
+# the three existing certificates of the takeover installation alive, and it is
+# not exercised by the chart defaults - an install test that never rendered it
+# would not notice if it broke.
+ingress:
+  clusterIssuer: ci
+  hosts:
+    - host: rss-bridge.ci.local
+      tlsSecretName: tls-ci-shared-ingress
+    - host: rssbridge.ci.local
+      tlsSecretName: tls-ci-shared-ingress
+    - host: rss-bridge.ci.example
+      tlsSecretName: tls-ci-second-ingress
+
+# A concrete list rather than the default "*", so the ConfigMap render and the
+# subPath mount are covered by something the app has to parse.
+whitelist:
+  - Youtube
+  - Heise

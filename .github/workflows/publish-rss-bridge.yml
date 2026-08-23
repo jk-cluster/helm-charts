@@ -1,0 +1,15 @@
+name: Publish RSS-Bridge Helm Chart
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - rss-bridge/**
+jobs:
+  publish-rss-bridge:
+    name: Publish RSS-Bridge Helm Chart
+    uses: ./.github/workflows/publish-helm-chart.yml
+    with:
+      chart-name: 'rss-bridge'
+    secrets: inherit

@@ -1,0 +1,42 @@
+{{- if .Values.ingress.enabled }}
+{{- $hosts := required "At least one ingress host must be provided (ingress.hosts)" .Values.ingress.hosts }}
+{{- /* helm lint reports a failed required() but keeps rendering with an empty
+       string, which is not iterable. Anything but a list is coerced away here
+       so lint reports the missing value instead of a template stack trace; a
+       real render never reaches this, because required() aborts on nil and the
+       schema rejects every non-array. */ -}}
+{{- if not (kindIs "slice" $hosts) }}{{- $hosts = list }}{{- end }}
+{{- $tls := fromYaml (include "rss-bridge.tlsGroups" (dict "hosts" $hosts "root" $)) }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-ingress
+  annotations:
+    cert-manager.io/cluster-issuer: {{ required "A Cluster-Issuer must be provided" .Values.ingress.clusterIssuer }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    {{- range $entry := $hosts }}
+    - host: {{ $entry.host }}
+      http:
+        paths:
+          - backend:
+              service:
+                name: {{ $.Release.Name }}-{{ $.Chart.Name }}-service
+                port:
+                  number: 80
+            path: /
+            pathType: Prefix
+    {{- end }}
+  tls:
+    {{- range $secret := $tls.order }}
+    - hosts:
+        {{- range $host := index $tls.groups $secret }}
+        - {{ $host }}
+        {{- end }}
+      secretName: {{ $secret }}
+    {{- end }}
+{{- end }}

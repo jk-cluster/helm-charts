@@ -15,6 +15,19 @@ tika:
       runAsNonRoot: true
       runAsUser: 35002
       runAsGroup: 35002
+      # RuntimeDefault applies the container runtime's default seccomp filter,
+      # which blocks the syscalls a normal workload never makes. It sits in the
+      # pod context on purpose: from here it covers every container in the pod
+      # including init containers, while a container-level seccompProfile would
+      # have to be repeated for each one (and silently missed on the next one
+      # added). A container that genuinely needs a different filter can still
+      # override it under securityContext.container, which wins over this value.
+      #
+      # Verified against a real extraction, not just a reachable port: the
+      # -full image loads its parsers dynamically, so a filter that blocked
+      # one would show up as HTTP 200 with empty text rather than as an error.
+      seccompProfile:
+        type: RuntimeDefault
     container:
       allowPrivilegeEscalation: false
       readOnlyRootFilesystem: true

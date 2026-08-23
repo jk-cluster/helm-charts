@@ -214,7 +214,8 @@ default probe needs no further context.
 {{- $defaults := dict
       "runAsNonRoot" true
       "runAsUser" 35002
-      "runAsGroup" 35002 -}}
+      "runAsGroup" 35002
+      "seccompProfile" (dict "type" "RuntimeDefault") -}}
 {{- include "apache-tika.defaultedDict" (dict "defaults" $defaults "given" $given "path" "tika.securityContext.pod") -}}
 {{- end -}}
 

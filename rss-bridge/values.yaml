@@ -140,9 +140,11 @@ rssBridge:
     limitFactor: 3
     requests:
       cpu: 0.1
-      # Measured with the shipped image: about 59 MiB resident while idle and
-      # roughly 89 MiB after serving feeds, so the previous 20Mi request was
-      # a third of what the workload actually occupies around the clock.
+      # Measured with the shipped image: about 21 MiB resident at startup and
+      # roughly 64 MiB after serving feeds, so the 20Mi the original manifest
+      # requested was a third of what the workload occupies around the clock.
+      # (Re-measured on the 2025-08-05 image; the 2025-06-03 image came out
+      # marginally higher at 24 MiB / 71 MiB under the identical procedure.)
       memory: 128Mi
       # The previous manifest requested 2Gi of ephemeral storage - identical to
       # its limit - and thereby reserved two gigabytes of node scheduling
@@ -164,11 +166,12 @@ rssBridge:
       # Set explicitly rather than left to limitFactor x request.
       #
       # memory: the manifest this chart replaces capped the container at
-      # 100Mi, but five concurrent feed fetches were measured peaking at
-      # 119 MiB - the old limit was already below the real peak, and php-fpm
-      # is configured for up to five workers with a 128M PHP memory_limit
-      # each. 512Mi covers the measured peak with room to spare and still
-      # bounds a runaway bridge.
+      # 100Mi, but a warm container serving five concurrent feed fetches was
+      # measured peaking at 119 MiB - the old limit was already below the real
+      # peak. php-fpm is configured for up to five workers with a 128M PHP
+      # memory_limit each, so the theoretical ceiling is far higher still.
+      # 512Mi covers the measured peak with room to spare and still bounds a
+      # runaway bridge.
       memory: 512Mi
       # Unchanged from the previous manifest on purpose: a large cap costs
       # nothing (it reserves no capacity) and guarantees this change cannot

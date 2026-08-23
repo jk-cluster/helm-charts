@@ -1,0 +1,9 @@
+server:
+  # nodePort of the router Service. 25565 is the Minecraft default port and is
+  # deliberately outside the Kubernetes default node-port range (30000-32767) -
+  # the cluster runs an extended --service-node-port-range. Do NOT "fix" this
+  # into the default range: the Minecraft clients connect to this exact port.
+  outwardPort: 25565
+mappings:
+  - domain: null
+    internalUrl: null

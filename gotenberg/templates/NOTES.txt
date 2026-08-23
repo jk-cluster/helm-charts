@@ -38,28 +38,45 @@ NO AUTHENTICATION, AND THIS CHART CANNOT ADD ANY
   and the URL routes make the server fetch whatever URL they are handed. Keep
   it cluster-internal; do not put an Ingress in front of it without auth.
 
-MEMORY IS THE LIMIT YOU HIT FIRST
-  Chromium and LibreOffice hold the whole document in memory. With this
-  release's limit of {{ index $limits "memory" | default "(none set)" }}, a 20-page HTML converts in well under a second,
-  while a 25 MB HTML is enough to get the container OOM-killed.
-  How you notice: the caller gets no HTTP error — the connection is dropped
-  mid-request — and the pod's RESTARTS counter goes up. Confirm with
+BIG CONVERSIONS RUN OUT OF TIME BEFORE THEY RUN OUT OF MEMORY
+  Chromium and LibreOffice hold the whole document in memory, so a conversion
+  is a short, memory-hungry burst. This release limits the container to
 
-    kubectl -n {{ .Release.Namespace }} get pod -l app={{ .Release.Name }}-{{ .Chart.Name }}-deployment -o jsonpath='{.items[*].status.containerStatuses[*].lastState.terminated.reason}'
+    memory:            {{ index $limits "memory" | default "(none set)" }}
+    ephemeral-storage: {{ index $limits "ephemeral-storage" | default "(none set)" }}
 
-  which then prints OOMKilled. Raise gotenberg.resources.requests.memory (the
-  limit follows at limitFactor x request) or set an explicit limit.
+  against deliberately smaller requests: the pod reserves little while it
+  idles and grows into the limits only while converting.
 
-TEMP SPACE IS TIGHT, AND RUNNING OUT LOOKS DIFFERENT
-  /tmp and /home/gotenberg are emptyDirs, so they count against the container's
-  ephemeral-storage limit of {{ index $limits "ephemeral-storage" | default "(none set)" }}. Chromium's profile alone takes about 4 MB,
-  and the uploaded file plus the rendered PDF come on top.
-  How you notice: the pod does not restart, it disappears — a fresh one takes
-  its place and the old one is left in status Evicted, with the message naming
-  ephemeral-storage. Raise gotenberg.resources.requests.ephemeralStorage.
+  Those limits are set so the 30-second request timeout below is what a
+  too-large document hits first. An 18 MB HTML converts in about 22 seconds
+  and stays well inside them; a document heavy enough to exhaust the memory
+  limit would have run past the 30 seconds anyway, so raising memory further
+  does not turn a failing conversion into a successful one — splitting the
+  document does.
+
+  If you do need to change them, set gotenberg.resources.limits.memory and
+  .limits.ephemeralStorage. Both are set explicitly now, so raising the
+  matching request no longer drags the limit along at limitFactor x request.
+
+  Should a conversion still hit a limit, the two failures look different and
+  neither of them reports an HTTP error to the caller:
+
+  - Out of memory: the connection is dropped mid-request and the pod's
+    RESTARTS counter goes up. Confirm with
+
+      kubectl -n {{ .Release.Namespace }} get pod -l app={{ .Release.Name }}-{{ .Chart.Name }}-deployment -o jsonpath='{.items[*].status.containerStatuses[*].lastState.terminated.reason}'
+
+    which then prints OOMKilled.
+
+  - Out of ephemeral storage: /tmp and /home/gotenberg are emptyDirs and count
+    against the ephemeral-storage limit — Chromium's profile alone takes about
+    4 MB, and the uploaded file plus the rendered PDF come on top. The pod does
+    not restart, it disappears: a fresh one takes its place and the old one is
+    left in status Evicted, with the message naming ephemeral-storage.
 
 REQUESTS TIME OUT AFTER 30 SECONDS
   That is Gotenberg's own default, and since the chart passes no flags it
-  cannot be changed here. Large conversions get close: the 25 MB document
-  above still needed 19 seconds once it had memory enough to finish. Callers
-  that need longer must split the document instead.
+  cannot be changed here. This is the ceiling large conversions actually meet:
+  an 18 MB HTML needs about 22 seconds, and a 25 MB one does not finish inside
+  the 30. Callers that need longer must split the document instead.

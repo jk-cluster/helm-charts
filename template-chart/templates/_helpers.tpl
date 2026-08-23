@@ -229,7 +229,8 @@ guidelines"):
       "runAsUser" 20000
       "runAsGroup" 1000
       "fsGroup" 1000
-      "fsGroupChangePolicy" "Always" -}}
+      "fsGroupChangePolicy" "Always"
+      "seccompProfile" (dict "type" "RuntimeDefault") -}}
 {{- include "xxx.defaultedDict" (dict "defaults" $defaults "given" $given "path" "xxx.securityContext.pod") -}}
 {{- end -}}
 

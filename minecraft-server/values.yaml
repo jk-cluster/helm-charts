@@ -8,6 +8,26 @@ secrets:
   # op:// item path for the 1Password operator. Only needs to carry a
   # "curseforge-api-key" key when curseforge.enabled is true and an
   # "rcon-password" key when server.rcon.enabled is true.
+  #
+  # Documented limit (chart 3.0.0): changing this path rolls the pod (the
+  # StatefulSet hashes the rendered OnePasswordItem into checksum/secret-ref),
+  # but changing the item's CONTENT in the vault does not. The operator updates
+  # the Kubernetes Secret, while the running pod keeps the values it read at
+  # startup - the keys are consumed as environment variables, which Kubernetes
+  # never refreshes in a running container.
+  #
+  # The operator's own "operator.1password.io/auto-restart: true" annotation
+  # does NOT close this gap here, and is therefore deliberately not set: it only
+  # restarts Deployments. Verified in the operator source (main, 9c3b1b9,
+  # 2026-08-11): restartWorkloadsWithUpdatedSecrets lists nothing but
+  # appsv1.DeploymentList, and getPodTemplate has a single case for
+  # *appsv1.Deployment and returns "unsupported type" for everything else. This
+  # chart is a StatefulSet, so the annotation would do nothing while suggesting
+  # the opposite.
+  #
+  # So after rotating rcon-password or curseforge-api-key in the vault, restart
+  # the workload by hand (kubectl rollout restart statefulset/...) - and expect
+  # the full startup cost of ~124 s measured for ftb-skies on Longhorn.
   minecraftServerRef: null
 
 server:
@@ -206,8 +226,8 @@ minecraft:
   # This value must match the Java line of the chart version: the image tag
   # comes from .Chart.AppVersion, so the JVM is fixed per published chart
   # version. Java 8 runs Minecraft up to 1.16.5, 1.18-1.20.4 need Java 17 and
-  # 1.20.5+ need Java 21. This chart publishes appVersion "2026.8.2-java21".
-  version: "1.21.1"
+  # 1.20.5+ need Java 21. This chart publishes appVersion "2026.8.2-java8".
+  version: "1.12.2"
 
 # curseforge, ftb and curseforgeServerpack are mutually exclusive - enabling
 # more than one is rejected by the chart (before 1.0.0 it silently rendered a
@@ -227,5 +247,10 @@ ftb:
   versionId: null
 curseforgeServerpack:
   enabled: false
+  # Both values below are rendered into the init.sh ConfigMap. Since chart 3.0.0
+  # a change here rolls the pod (checksum/config on the StatefulSet), which is
+  # what makes it take effect at all - init.sh is mounted with subPath and only
+  # read at pod start. The restart is not free: ~124 s measured for ftb-skies on
+  # Longhorn.
   downloadUrl: null
   workingDirectory: '/data/serverpack'

@@ -18,7 +18,7 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
-        {{- toYaml .Values.cwa.securityContext.pod | nindent 8 }}
+        {{- include "calibre-web-automated.podSecurityContext" .Values.cwa.securityContext | nindent 8 }}
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-container
           image: "ghcr.io/crocodilestick/calibre-web-automated:{{ .Chart.AppVersion }}"
@@ -79,15 +79,15 @@ spec:
             - mountPath: "/cwa-book-ingest"
               name: cwa-consume
           livenessProbe:
-            {{- toYaml .Values.cwa.livenessProbe | nindent 12 }}
+            {{- include "calibre-web-automated.livenessProbe" .Values.cwa.livenessProbe | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.cwa.readinessProbe | nindent 12 }}
+            {{- include "calibre-web-automated.readinessProbe" .Values.cwa.readinessProbe | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.cwa.startupProbe | nindent 12 }}
+            {{- include "calibre-web-automated.startupProbe" .Values.cwa.startupProbe | nindent 12 }}
           resources:
-            {{- include "calibre-web-automated.resources" .Values.cwa.resources | nindent 12 }}
+            {{- include "calibre-web-automated.effectiveResources" .Values.cwa.resources | nindent 12 }}
           securityContext:
-            {{- toYaml .Values.cwa.securityContext.container | nindent 12 }}
+            {{- include "calibre-web-automated.containerSecurityContext" .Values.cwa.securityContext | nindent 12 }}
       restartPolicy: Always
       volumes:
         # Deliberate naming exception (see README): both PVCs keep their

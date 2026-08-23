@@ -5,7 +5,7 @@ name: calibre-web-automated
 description: A Helm chart to deploy calibere-web-automated
 icon: https://raw.githubusercontent.com/crocodilestick/Calibre-Web-Automated/main/README_images/cwa-logo-round-dark.png
 
-version: 4.0.0+upv4.0.6
+version: 5.0.0+upv4.0.6
 appVersion: v4.0.6
 
 maintainers:

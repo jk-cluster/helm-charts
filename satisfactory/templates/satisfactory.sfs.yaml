@@ -17,7 +17,7 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
-        {{- toYaml .Values.securityContext.pod | nindent 8 }}
+        {{- include "satisfactory.podSecurityContext" .Values.securityContext | nindent 8 }}
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
           image: "ghcr.io/wolveix/satisfactory-server:{{ .Chart.AppVersion }}"
@@ -73,13 +73,13 @@ spec:
               containerPort: {{ .Values.server.messagingPort }}
               protocol: TCP
           livenessProbe:
-            {{- toYaml .Values.livenessProbe | nindent 12 }}
+            {{- include "satisfactory.livenessProbe" .Values.livenessProbe | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.readinessProbe | nindent 12 }}
+            {{- include "satisfactory.readinessProbe" .Values.readinessProbe | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.startupProbe | nindent 12 }}
+            {{- include "satisfactory.startupProbe" .Values.startupProbe | nindent 12 }}
           resources:
-            {{- include "satisfactory.resources" .Values.server.resources | nindent 12 }}
+            {{- include "satisfactory.effectiveResources" .Values.server.resources | nindent 12 }}
           volumeMounts:
             - name: satisfactory-volume
               mountPath: /config
@@ -104,7 +104,7 @@ spec:
             - name: tmp
               mountPath: /tmp
           securityContext:
-            {{- toYaml .Values.securityContext.container | nindent 12 }}
+            {{- include "satisfactory.containerSecurityContext" .Values.securityContext | nindent 12 }}
       volumes:
         - name: satisfactory-volume
           persistentVolumeClaim:

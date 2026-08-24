@@ -9,7 +9,7 @@ Collection of some self-made helm-charts. Each top-level directory is a standalo
 | `apache-tika` | Apache Tika | Deployment + Service only (no ingress) |
 | `calibre-web-automated` | Calibre-Web Automated | StatefulSet, extra consume-PVC |
 | `cyberchef` | CyberChef | Stateless Deployment |
-| `freesailarr` | gluetun VPN media stack (qbittorrent, prowlarr, flaresolverr, radarr, recyclarr, sonarr, seerr, bazarr) | Single-pod StatefulSet: all apps share gluetun's network namespace; config volumes via volumeClaimTemplates, media PVCs as existingClaims |
+| `freesailarr` | gluetun VPN media stack (qbittorrent, prowlarr, flaresolverr, radarr, recyclarr, sonarr, seerr, bazarr) | Single-pod StatefulSet: all apps share gluetun's network namespace; config volumes via volumeClaimTemplates, media PVCs as existingClaims (optional per-category `subPath`, so one claim can serve all three categories). One ClusterIP Service and one Ingress **per app** — no global `ingress.domain`, each app has its own required host (documented ingress exception below) |
 | `gotenberg` | Gotenberg | Deployment + Service only (no ingress) |
 | `homeassistant` | Home Assistant | StatefulSet, has `NOTES.txt` and Helm tests |
 | `matrix-synapse` | Matrix Synapse | StatefulSet plus an nginx delegation Deployment/Service |
@@ -152,6 +152,7 @@ These guidelines are **binding for every current and future chart** in this repo
 - `ingress.annotations` takes optional extra annotations that are merged with the cert-manager `cluster-issuer` annotation the chart always sets.
 - The TLS secret is named `tls-<release>-<chart>-ingress`.
 - **Documented exception — homeassistant**: keeps its upstream-style flexible ingress values (host/tls lists, no required values); only its `ingress.className` default follows the standard (`nginx`, clearable to omit the field).
+- **Documented exception — freesailarr**: the chart bundles several independently exposed apps in one pod, so it has **no** `ingress.domain`. Each app carries its own `<app>.ingress.enabled` plus a required `<app>.ingress.host` (required only while that app's ingress is enabled) and renders its own Ingress object `<release>-<chart>-<app>-ingress` with its own TLS secret `tls-<release>-<chart>-<app>-ingress`. `clusterIssuer`, `className` and `annotations` stay global defaults under `ingress.` and are overridable per app.
 
 ### 5. Security hardening
 

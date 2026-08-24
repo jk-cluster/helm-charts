@@ -148,17 +148,24 @@ Usage:
 {{- end -}}
 
 {{/*
-The enabled apps that expose a web UI, as a JSON array of {name, port} dicts
-(container port name == app name == ingress subdomain). Consumed by the
-service, the ingress and the firewall-ports helper below:
+The enabled app containers that listen on a port, as a JSON array of
+{name, port} dicts (container port name == app name == service name suffix).
+Consumed by the per-app services, the per-app ingresses and the firewall-ports
+helper below:
 
-  {{- $apps := include "freesailarr.uiApps" . | fromJsonArray }}
+  {{- $apps := include "freesailarr.portApps" . | fromJsonArray }}
+
+recyclarr is deliberately absent: in daemon mode it serves no port, so it gets
+no container port, no service and no ingress. flaresolverr is present - it
+listens on 8191 and therefore gets a service - but it has no ingress block in
+values and is never exposed from outside the cluster.
 */}}
-{{- define "freesailarr.uiApps" -}}
+{{- define "freesailarr.portApps" -}}
 {{- $apps := list -}}
 {{- range $app := list
   (dict "name" "qbittorrent" "port" 8080)
   (dict "name" "prowlarr" "port" 9696)
+  (dict "name" "flaresolverr" "port" 8191)
   (dict "name" "radarr" "port" 7878)
   (dict "name" "sonarr" "port" 8989)
   (dict "name" "seerr" "port" 5055)
@@ -171,18 +178,32 @@ service, the ingress and the firewall-ports helper below:
 {{- end -}}
 
 {{/*
-Comma-separated FIREWALL_INPUT_PORTS for gluetun: the UI ports of the enabled
-apps (ingress traffic arrives on the pod IP), flaresolverr's 8191 when enabled
-(the kubelet probes connect to the pod IP too) and 9999 for gluetun's own
-health server. Without these the gluetun firewall drops the traffic.
+The apps that render an Ingress: the enabled port apps whose values carry an
+ingress block with enabled: true. Used by the ingress template.
+
+  {{- $apps := include "freesailarr.ingressApps" . | fromJsonArray }}
+*/}}
+{{- define "freesailarr.ingressApps" -}}
+{{- $apps := list -}}
+{{- range $app := include "freesailarr.portApps" . | fromJsonArray -}}
+{{- $config := index $.Values $app.name -}}
+{{- if and $config.ingress $config.ingress.enabled -}}
+{{- $apps = append $apps $app -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $apps -}}
+{{- end -}}
+
+{{/*
+Comma-separated FIREWALL_INPUT_PORTS for gluetun: the ports of the enabled app
+containers (ingress traffic and the kubelet probes both arrive on the pod IP)
+plus 9999 for gluetun's own health server. Without these the gluetun firewall
+drops the traffic.
 */}}
 {{- define "freesailarr.firewallInputPorts" -}}
 {{- $ports := list -}}
-{{- range $app := include "freesailarr.uiApps" . | fromJsonArray -}}
+{{- range $app := include "freesailarr.portApps" . | fromJsonArray -}}
 {{- $ports = append $ports (int $app.port) -}}
-{{- end -}}
-{{- if .Values.flaresolverr.enabled -}}
-{{- $ports = append $ports 8191 -}}
 {{- end -}}
 {{- $ports = append $ports 9999 -}}
 {{- join "," $ports -}}

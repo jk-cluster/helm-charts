@@ -1,18 +1,25 @@
-{{- $apps := include "freesailarr.uiApps" . | fromJsonArray }}
-{{- if gt (len $apps) 0 }}
+{{/*
+One ClusterIP service per enabled app container that listens on a port
+(recyclarr has none in daemon mode, so it gets no service).
+
+All containers share gluetun's network namespace, so every one of these
+services resolves to the same pod IP and they differ only in their port. Their
+purpose is a stable, per-app cluster-internal DNS name - each ingress points at
+its own app's service - not network separation between the apps.
+*/}}
+{{- range $app := include "freesailarr.portApps" $ | fromJsonArray }}
+---
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Release.Name }}-{{ .Chart.Name }}-service
+  name: {{ $.Release.Name }}-{{ $.Chart.Name }}-{{ $app.name }}-service
 spec:
   selector:
-    app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+    app: {{ $.Release.Name }}-{{ $.Chart.Name }}-sfs
   ports:
-    {{- range $apps }}
     - protocol: TCP
-      port: {{ int .port }}
-      targetPort: {{ .name }}
-      name: {{ .name }}
-    {{- end }}
+      port: {{ int $app.port }}
+      targetPort: {{ $app.name }}
+      name: {{ $app.name }}
   type: ClusterIP
 {{- end }}

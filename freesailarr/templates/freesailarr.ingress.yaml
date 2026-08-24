@@ -1,38 +1,51 @@
-{{- $apps := list }}
-{{- range $app := include "freesailarr.uiApps" . | fromJsonArray }}
-{{- if (index $.Values $app.name).ingress.enabled }}
-{{- $apps = append $apps $app }}
-{{- end }}
-{{- end }}
-{{- if and .Values.ingress.enabled (gt (len $apps) 0) }}
+{{/*
+One Ingress object per app whose ingress is enabled, each with its own host and
+its own TLS secret. The hosts are independent values - they do not have to
+share a domain - and each ingress points at its own app's service.
+
+<app>.ingress.host is required, but only for an app whose ingress is actually
+enabled: the required call sits inside the loop over the enabled apps, so
+turning an app's ingress off must never make the chart demand a host for it.
+*/}}
+{{- if .Values.ingress.enabled }}
+{{- range $app := include "freesailarr.ingressApps" $ | fromJsonArray }}
+{{- $config := (index $.Values $app.name).ingress }}
+{{- /* clusterIssuer, className and annotations default to the global ingress
+       block and are overridable per app; an explicitly set per-app value wins
+       even when it is empty, hence the nil check instead of "default". */}}
+{{- $clusterIssuer := $.Values.ingress.clusterIssuer }}
+{{- if not (kindIs "invalid" $config.clusterIssuer) }}{{- $clusterIssuer = $config.clusterIssuer }}{{- end }}
+{{- $className := $.Values.ingress.className }}
+{{- if not (kindIs "invalid" $config.className) }}{{- $className = $config.className }}{{- end }}
+{{- $annotations := $.Values.ingress.annotations }}
+{{- if not (kindIs "invalid" $config.annotations) }}{{- $annotations = $config.annotations }}{{- end }}
+{{- $host := required (printf "%s.ingress.host must be provided while %s.ingress.enabled is true" $app.name $app.name) $config.host }}
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ .Release.Name }}-{{ .Chart.Name }}-ingress
+  name: {{ $.Release.Name }}-{{ $.Chart.Name }}-{{ $app.name }}-ingress
   annotations:
-    cert-manager.io/cluster-issuer: {{ required "A Cluster-Issuer must be provided" .Values.ingress.clusterIssuer }}
-    {{- with .Values.ingress.annotations }}
+    cert-manager.io/cluster-issuer: {{ required "A Cluster-Issuer must be provided" $clusterIssuer }}
+    {{- with $annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
-  ingressClassName: {{ .Values.ingress.className }}
+  ingressClassName: {{ $className }}
   rules:
-    {{- range $apps }}
-    - host: {{ .name }}.{{ required "A Domain/Host must be provided" $.Values.ingress.domain }}
+    - host: {{ $host | quote }}
       http:
         paths:
           - backend:
               service:
-                name: {{ $.Release.Name }}-{{ $.Chart.Name }}-service
+                name: {{ $.Release.Name }}-{{ $.Chart.Name }}-{{ $app.name }}-service
                 port:
-                  name: {{ .name }}
+                  name: {{ $app.name }}
             path: /
             pathType: Prefix
-    {{- end }}
   tls:
     - hosts:
-        {{- range $apps }}
-        - {{ .name }}.{{ $.Values.ingress.domain }}
-        {{- end }}
-      secretName: tls-{{ .Release.Name }}-{{ .Chart.Name }}-ingress
+        - {{ $host | quote }}
+      secretName: tls-{{ $.Release.Name }}-{{ $.Chart.Name }}-{{ $app.name }}-ingress
+{{- end }}
 {{- end }}

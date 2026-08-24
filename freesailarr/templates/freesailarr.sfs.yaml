@@ -6,7 +6,11 @@ metadata:
     app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
 spec:
   replicas: {{ include "freesailarr.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.replicas) }}
-  serviceName: {{ .Release.Name }}-{{ .Chart.Name }}-service
+  # Governing service name. Each app has its own service (see
+  # freesailarr.service.yaml); nothing consumes the per-pod DNS name a
+  # governing service would provide, so the chart deliberately creates no
+  # object under this name - the field only has to be set.
+  serviceName: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
   selector:
     matchLabels:
       app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
@@ -200,6 +204,9 @@ spec:
               name: qbittorrent-config
             - mountPath: /downloads
               name: media-downloads
+              {{- with .Values.media.downloads.subPath }}
+              subPath: {{ . | quote }}
+              {{- end }}
         {{- end }}
         {{- if .Values.prowlarr.enabled }}
         - name: prowlarr
@@ -293,8 +300,14 @@ spec:
               name: radarr-config
             - mountPath: /movies
               name: media-movies
+              {{- with .Values.media.movies.subPath }}
+              subPath: {{ . | quote }}
+              {{- end }}
             - mountPath: /downloads
               name: media-downloads
+              {{- with .Values.media.downloads.subPath }}
+              subPath: {{ . | quote }}
+              {{- end }}
         {{- end }}
         {{- if .Values.recyclarr.enabled }}
         - name: recyclarr
@@ -357,8 +370,14 @@ spec:
               name: sonarr-config
             - mountPath: /tv
               name: media-tv
+              {{- with .Values.media.tv.subPath }}
+              subPath: {{ . | quote }}
+              {{- end }}
             - mountPath: /downloads
               name: media-downloads
+              {{- with .Values.media.downloads.subPath }}
+              subPath: {{ . | quote }}
+              {{- end }}
         {{- end }}
         {{- if .Values.seerr.enabled }}
         - name: seerr
@@ -421,8 +440,14 @@ spec:
               name: bazarr-config
             - mountPath: /movies
               name: media-movies
+              {{- with .Values.media.movies.subPath }}
+              subPath: {{ . | quote }}
+              {{- end }}
             - mountPath: /tv
               name: media-tv
+              {{- with .Values.media.tv.subPath }}
+              subPath: {{ . | quote }}
+              {{- end }}
         {{- end }}
       restartPolicy: Always
       volumes:

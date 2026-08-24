@@ -57,20 +57,40 @@ storage:
 #   downloads: qbittorrent, radarr, sonarr
 #   movies:    radarr, bazarr
 #   tv:        sonarr, bazarr
+#
+# subPath mounts a sub-directory of the claim instead of its root (null = the
+# claim root, i.e. one claim per category). The same existingClaim may be used
+# for all three categories with different subPaths - that is more than a
+# convenience: Radarr and Sonarr import finished downloads into the library by
+# *moving* them, and a move within one filesystem can be a hardlink or rename
+# instead of a copy. On one volume that costs no second copy of the data and no
+# copy time; across volume boundaries a hardlink is impossible, so every import
+# duplicates the file and the download and the library each hold a full copy
+# until the torrent is removed. Example: one claim, subPaths downloads /
+# movies / tv-shows.
 media:
   downloads:
     existingClaim: null
+    subPath: null
   movies:
     existingClaim: null
+    subPath: null
   tv:
     existingClaim: null
+    subPath: null
 
+# Ingress defaults. There is deliberately no global domain: every app carries
+# its own <app>.ingress.host, so the hosts are independent of each other and
+# may live in completely different domains. clusterIssuer, className and
+# annotations are the defaults for all apps and can be overridden per app in
+# the <app>.ingress block (an explicitly set per-app value always wins).
 ingress:
+  # Master switch: false suppresses every app ingress regardless of the
+  # per-app toggles.
   enabled: true
   clusterIssuer: null
-  domain: null
   className: nginx
-  # Extra annotations for the Ingress; merged with the cert-manager
+  # Extra annotations for the Ingress objects; merged with the cert-manager
   # cluster-issuer annotation the chart always sets.
   annotations: {}
 
@@ -157,8 +177,19 @@ qbittorrent:
   image:
     repository: linuxserver/qbittorrent
     tag: 5.2.1
+  # Every app gets its own Ingress object (named <release>-<chart>-<app>-ingress)
+  # with its own TLS secret tls-<release>-<chart>-<app>-ingress, so the apps can
+  # be exposed independently and under unrelated hosts.
+  # host is required while enabled is true and has no default - an app whose
+  # ingress is switched off never demands one. clusterIssuer, className and
+  # annotations may be set here to override the global ingress block.
+  # (Same block for prowlarr, radarr, sonarr, seerr and bazarr below.)
   ingress:
     enabled: true
+    host: null
+    # clusterIssuer: null
+    # className: null
+    # annotations: {}
   storage:
     size: 1Gi
   # Network interface qBittorrent binds its BitTorrent session to - gluetun's
@@ -258,8 +289,13 @@ prowlarr:
   image:
     repository: linuxserver/prowlarr
     tag: 2.3.5
+  # See the qbittorrent ingress comment.
   ingress:
     enabled: true
+    host: null
+    # clusterIssuer: null
+    # className: null
+    # annotations: {}
   storage:
     size: 1Gi
   env: []
@@ -366,8 +402,13 @@ radarr:
   image:
     repository: linuxserver/radarr
     tag: 6.1.1
+  # See the qbittorrent ingress comment.
   ingress:
     enabled: true
+    host: null
+    # clusterIssuer: null
+    # className: null
+    # annotations: {}
   storage:
     size: 1Gi
   env: []
@@ -471,8 +512,13 @@ sonarr:
   image:
     repository: linuxserver/sonarr
     tag: 4.0.17
+  # See the qbittorrent ingress comment.
   ingress:
     enabled: true
+    host: null
+    # clusterIssuer: null
+    # className: null
+    # annotations: {}
   storage:
     size: 1Gi
   env: []
@@ -523,8 +569,13 @@ seerr:
   image:
     repository: ghcr.io/seerr-team/seerr
     tag: v3.3.0
+  # See the qbittorrent ingress comment.
   ingress:
     enabled: true
+    host: null
+    # clusterIssuer: null
+    # className: null
+    # annotations: {}
   storage:
     size: 1Gi
   env: []
@@ -574,8 +625,13 @@ bazarr:
   image:
     repository: linuxserver/bazarr
     tag: 1.5.6
+  # See the qbittorrent ingress comment.
   ingress:
     enabled: true
+    host: null
+    # clusterIssuer: null
+    # className: null
+    # annotations: {}
   storage:
     size: 1Gi
   env: []

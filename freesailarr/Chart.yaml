@@ -5,15 +5,17 @@ icon: https://raw.githubusercontent.com/qdm12/gluetun/master/doc/logo_256.png
 
 type: application
 
-version: 1.0.0+upv3.41.1
-# Hand-maintained marker for the gluetun line this chart is built around - it
-# is NOT the source of any image tag. All nine images, gluetun included, are
-# pinned in values.yaml so Renovate's helm-values manager can propose them
-# there; consequently this chart has no app-version block in renovate.json5 and
-# nothing rewrites this field automatically. Update it by hand together with
-# gluetun.image.tag, otherwise the +up suffix of version: stops describing what
-# the chart deploys.
-appVersion: "v3.41.1"
+version: 1.0.0+up1.0.0
+# The chart's own version marker, freely chosen and tied to no upstream. The
+# stack bundles nine independently versioned projects, so there is no single
+# "app version" to track here.
+#
+# It is NOT the source of any image tag: all nine images are pinned in
+# values.yaml, where Renovate's helm-values manager proposes them. Nothing
+# rewrites this field automatically - the chart has no app-version block in
+# renovate.json5 and is not in the change-app-version.yml choice list. Raise it
+# by hand when you want to mark a new edition of the chart as a whole.
+appVersion: "1.0.0"
 
 maintainers:
   - name: jklein

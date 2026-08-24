@@ -15,10 +15,10 @@
 # along with it. A chart whose main image came from appVersion would instead
 # need a hard-coded block in renovate.json5 - freesailarr deliberately has none.
 #
-# Chart.yaml's appVersion is therefore a hand-maintained marker for the gluetun
-# line this chart is built around, not the source of any tag. Keep it in step
-# with gluetun.image.tag below when you accept a gluetun update, otherwise the
-# +up suffix of the chart version drifts away from what is actually deployed.
+# Chart.yaml's appVersion is therefore the chart's own version marker, freely
+# chosen and tied to no upstream - not the source of any tag here. Nothing
+# rewrites it automatically; raise it by hand when you want to mark a new
+# edition of the chart as a whole.
 
 # Scale the whole chart down without uninstalling it: scaleDown: true renders
 # every Deployment/StatefulSet with replicas: 0 (and suspends CronJobs) and
@@ -242,8 +242,8 @@ qbittorrent:
   # persisted qBittorrent config before the app starts. Runs as puid/pgid so
   # the config file keeps the ownership the app expects.
   configInit:
-    # Auxiliary busybox image. Pinned independently of appVersion (which
-    # tracks gluetun); reviewed alongside every app-version update round.
+    # Auxiliary busybox image for the init container, pinned here like every
+    # other image in this chart and proposed by Renovate the same way.
     image:
       repository: busybox
       tag: "1.38.0"

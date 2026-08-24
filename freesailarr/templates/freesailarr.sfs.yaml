@@ -133,9 +133,12 @@ spec:
             - name: FIREWALL_OUTBOUND_SUBNETS
               value: {{ . | quote }}
             {{- end }}
-            # Open the firewall for the UI/probe ports of the enabled apps and
-            # the health server - kubelet probes and ingress traffic arrive on
-            # the pod IP and would be dropped otherwise.
+            # Declare the UI/probe ports of the enabled apps and the health
+            # server as reachable. Note that inside a pod network gluetun's own
+            # pod-subnet rule already accepts this traffic and these per-port
+            # rules never match (measured - see the helper's comment); they are
+            # the explicit statement of intent and the fallback if that subnet
+            # detection ever stops covering the pod IP.
             - name: FIREWALL_INPUT_PORTS
               value: {{ include "freesailarr.firewallInputPorts" . | quote }}
             # Bind the health server to all interfaces so the kubelet HTTP
@@ -169,6 +172,14 @@ spec:
             # and every write fails with "clearing public IP data: open
             # /tmp/gluetun/ip: permission denied". An emptyDir provides the
             # path with usable permissions.
+            # Remaining, cosmetic: gluetun also chowns the file, which needs
+            # CAP_CHOWN. With all capabilities but NET_ADMIN dropped that call
+            # is denied and logs "clearing public IP data: chown
+            # /tmp/gluetun/ip: operation not permitted" on every VPN restart.
+            # The file itself is written and the public IP is persisted
+            # (verified at runtime), so this is a log line, not a failure -
+            # granting CHOWN just to silence it would widen the container's
+            # capabilities for nothing.
             - mountPath: /tmp/gluetun
               name: gluetun-tmp
         {{- if .Values.qbittorrent.enabled }}

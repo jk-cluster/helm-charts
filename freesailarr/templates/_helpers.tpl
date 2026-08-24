@@ -197,8 +197,18 @@ ingress block with enabled: true. Used by the ingress template.
 {{/*
 Comma-separated FIREWALL_INPUT_PORTS for gluetun: the ports of the enabled app
 containers (ingress traffic and the kubelet probes both arrive on the pod IP)
-plus 9999 for gluetun's own health server. Without these the gluetun firewall
-drops the traffic.
+plus 9999 for gluetun's own health server.
+
+Measured caveat: inside a pod network these rules never actually match. gluetun
+detects the pod's own subnet and inserts
+"-A INPUT -d <pod-subnet> -i eth0 -j ACCEPT" ahead of the per-port rules, and
+every packet arriving at the pod IP matches it by destination - the packet
+counters on the --dport rules stayed at 0 while the subnet rule absorbed the
+traffic. The declaration is kept as an explicit statement of which ports are
+meant to be reachable, and because that subnet detection is gluetun's, not a
+guarantee of the chart's: a CNI that hands out a /32 or a future gluetun that
+drops the rule would make these the only thing keeping probes and ingress
+alive. It is not what opens the ports today.
 */}}
 {{- define "freesailarr.firewallInputPorts" -}}
 {{- $ports := list -}}

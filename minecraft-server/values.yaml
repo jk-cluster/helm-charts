@@ -75,7 +75,7 @@ server:
   # used when curseforgeServerpack.enabled is true. Pinned per repo convention
   # (auxiliary images are never unpinned): before chart 1.0.0 this was a bare
   # "alpine", i.e. an implicit :latest from Docker Hub.
-  initImage: alpine:3.22
+  initImage: alpine:3.24
 
   resources:
     # Limits are optional: memory and ephemeral-storage limits default to

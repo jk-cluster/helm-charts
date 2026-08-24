@@ -223,7 +223,7 @@ spec:
             - mountPath: /config
               name: qbittorrent-config
             - mountPath: /downloads
-              name: media-downloads
+              name: {{ include "freesailarr.mediaVolumeName" (dict "root" $ "category" "downloads") }}
               {{- with .Values.media.downloads.subPath }}
               subPath: {{ . | quote }}
               {{- end }}
@@ -319,12 +319,12 @@ spec:
             - mountPath: /config
               name: radarr-config
             - mountPath: /movies
-              name: media-movies
+              name: {{ include "freesailarr.mediaVolumeName" (dict "root" $ "category" "movies") }}
               {{- with .Values.media.movies.subPath }}
               subPath: {{ . | quote }}
               {{- end }}
             - mountPath: /downloads
-              name: media-downloads
+              name: {{ include "freesailarr.mediaVolumeName" (dict "root" $ "category" "downloads") }}
               {{- with .Values.media.downloads.subPath }}
               subPath: {{ . | quote }}
               {{- end }}
@@ -387,12 +387,12 @@ spec:
             - mountPath: /config
               name: sonarr-config
             - mountPath: /tv
-              name: media-tv
+              name: {{ include "freesailarr.mediaVolumeName" (dict "root" $ "category" "tv") }}
               {{- with .Values.media.tv.subPath }}
               subPath: {{ . | quote }}
               {{- end }}
             - mountPath: /downloads
-              name: media-downloads
+              name: {{ include "freesailarr.mediaVolumeName" (dict "root" $ "category" "downloads") }}
               {{- with .Values.media.downloads.subPath }}
               subPath: {{ . | quote }}
               {{- end }}
@@ -455,12 +455,12 @@ spec:
             - mountPath: /config
               name: bazarr-config
             - mountPath: /movies
-              name: media-movies
+              name: {{ include "freesailarr.mediaVolumeName" (dict "root" $ "category" "movies") }}
               {{- with .Values.media.movies.subPath }}
               subPath: {{ . | quote }}
               {{- end }}
             - mountPath: /tv
-              name: media-tv
+              name: {{ include "freesailarr.mediaVolumeName" (dict "root" $ "category" "tv") }}
               {{- with .Values.media.tv.subPath }}
               subPath: {{ . | quote }}
               {{- end }}
@@ -475,20 +475,37 @@ spec:
         # Writable /tmp/gluetun for gluetun's public-IP cache (see the mount).
         - name: gluetun-tmp
           emptyDir: {}
+        {{- /*
+        One volume entry per distinct media claim, not per category: several
+        categories may point at the same existingClaim, and a pod that
+        references one claim twice never starts (#164). The entry belongs to the
+        first enabled category that carries the claim; the others mount the same
+        entry with their own subPath - see the mediaVolumeName helper for the
+        ordering rule. Deliberately a template comment and not a "#" one like
+        its neighbours: it must not appear in the rendered manifest, so that a
+        setup with three separate claims still renders byte-identically to
+        2.0.1 and the diff itself proves the change is inert there.
+        */}}
         {{- if or .Values.qbittorrent.enabled .Values.radarr.enabled .Values.sonarr.enabled }}
+        {{- if include "freesailarr.mediaVolumeOwned" (dict "root" $ "category" "downloads") }}
         - name: media-downloads
           persistentVolumeClaim:
             claimName: {{ required "media.downloads.existingClaim is required when qbittorrent, radarr or sonarr is enabled" .Values.media.downloads.existingClaim }}
         {{- end }}
+        {{- end }}
         {{- if or .Values.radarr.enabled .Values.bazarr.enabled }}
+        {{- if include "freesailarr.mediaVolumeOwned" (dict "root" $ "category" "movies") }}
         - name: media-movies
           persistentVolumeClaim:
             claimName: {{ required "media.movies.existingClaim is required when radarr or bazarr is enabled" .Values.media.movies.existingClaim }}
         {{- end }}
+        {{- end }}
         {{- if or .Values.sonarr.enabled .Values.bazarr.enabled }}
+        {{- if include "freesailarr.mediaVolumeOwned" (dict "root" $ "category" "tv") }}
         - name: media-tv
           persistentVolumeClaim:
             claimName: {{ required "media.tv.existingClaim is required when sonarr or bazarr is enabled" .Values.media.tv.existingClaim }}
+        {{- end }}
         {{- end }}
         {{- if .Values.flaresolverr.enabled }}
         - name: flaresolverr-tmp

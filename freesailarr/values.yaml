@@ -54,6 +54,13 @@ securityContext:
   # group-writable for the non-root containers; fsGroupChangePolicy
   # OnRootMismatch avoids recursively re-chowning the (large, shared) media
   # claims on every pod start.
+  # How far that reaches is the CSI driver's decision, not this chart's, and the
+  # media claims are the case where it stops short: a driver whose fsGroupPolicy
+  # is ReadWriteOnceWithFSType - Longhorn's setting - applies fsGroup to RWO
+  # volumes only, so on an RWX media claim fsGroup is ignored outright and
+  # OnRootMismatch never even gets a say. The config claims are RWO and are
+  # covered normally. Consequence for the media claims: their root directory has
+  # to be writable for PUID/PGID by itself, see the media block below (#164).
   # seccompProfile RuntimeDefault applies the container runtime's default
   # syscall filter to every container in the pod, init containers included, and
   # is set at pod level so a container added later inherits it without the
@@ -82,9 +89,46 @@ storage:
 #   tv:        sonarr, bazarr
 #
 # subPath mounts a sub-directory of the claim instead of its root (null = the
-# claim root, i.e. one claim per category). The same existingClaim may back all
-# three categories with different subPaths - one library volume, one
-# sub-directory per category, e.g. downloads / movies / tv-shows.
+# claim root, i.e. one claim per category). The same existingClaim may back two
+# or all three categories, which is what makes the one-library-volume layout
+# possible - one claim, one sub-directory per category:
+#
+#   media:
+#     downloads: { existingClaim: media-library, subPath: downloads }
+#     movies:    { existingClaim: media-library, subPath: movies }
+#     tv:        { existingClaim: media-library, subPath: tv-shows }
+#
+# Categories sharing a claim get exactly ONE pod volume entry and differ only in
+# the subPath of their mounts (#164). That is not cosmetic: a pod that lists the
+# same claim twice never starts - it stays in Init:0/1 forever without a single
+# kubelet event (measured on RKE2/Longhorn, with RWO as well as RWX). The entry
+# is named after the first ENABLED category in the fixed order downloads,
+# movies, tv that carries the claim, so the name does not wander when an
+# unrelated app flag changes (see the mediaVolumeName helper).
+#
+# The subPath directories do NOT have to exist beforehand - the kubelet creates
+# a missing one. What it does not do is give it usable permissions: the created
+# directory belongs to root and inherits the mode of the CLAIM ROOT. So the one
+# thing that has to hold is:
+#
+#   the root directory of the claim must be writable for PUID/PGID.
+#
+# Do not count on fsGroup for that. Whether the kubelet applies fsGroup to a
+# volume at all is the CSI driver's decision (its fsGroupPolicy), not the pod's:
+# Longhorn ships ReadWriteOnceWithFSType, so fsGroup applies to its RWO volumes
+# and is silently ignored on an RWX claim - measured by the reporter of #164 on
+# the target cluster (kubectl get csidriver driver.longhorn.io -o
+# jsonpath='{.spec.fsGroupPolicy}').
+#
+# In practice this works out on Longhorn because Longhorn hands out its volume
+# root as mode 777, and a subPath directory created under it inherits those 777
+# - root-owned, but writable for everyone. That is a property of the driver, not
+# of Kubernetes. Measured in k3d against a claim whose root is 0755 and with no
+# fsGroup in effect: the kubelet creates /movies as root:root 0755 and the
+# container's `touch` fails with EPERM. On such a driver, prepare the claim root
+# once (chown 1000:1000 or chmod g+w with the right group) before the first
+# start - the chart deliberately does not chown anything: a multi-TB library
+# must not be walked on every pod start.
 #
 # What this buys and what it does NOT buy - measured in a k3d cluster against
 # this chart, because the usual argument for a shared volume is hardlinking:

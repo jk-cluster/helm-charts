@@ -220,6 +220,96 @@ alive. It is not what opens the ports today.
 {{- end -}}
 
 {{/*
+Whether a media category is mounted at all, i.e. whether at least one app that
+mounts it is enabled. "true" when it is, the empty string when it is not (an
+empty string is falsy in a template "if", so the result can be used directly).
+
+  downloads: qbittorrent, radarr, sonarr
+  movies:    radarr, bazarr
+  tv:        sonarr, bazarr
+
+Input: dict "root" $ "category" <"downloads"|"movies"|"tv">.
+*/}}
+{{- define "freesailarr.mediaCategoryEnabled" -}}
+{{- $v := .root.Values -}}
+{{- if eq .category "downloads" -}}
+{{- if or $v.qbittorrent.enabled $v.radarr.enabled $v.sonarr.enabled -}}true{{- end -}}
+{{- else if eq .category "movies" -}}
+{{- if or $v.radarr.enabled $v.bazarr.enabled -}}true{{- end -}}
+{{- else if eq .category "tv" -}}
+{{- if or $v.sonarr.enabled $v.bazarr.enabled -}}true{{- end -}}
+{{- else -}}
+{{- fail (printf "unknown media category %q" .category) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The pod volume name a media category mounts (issue #164).
+
+Several categories may point at the same existingClaim - one library volume with
+the categories as sub-directories is the intended layout. A pod may reference
+such a claim only ONCE: two volume entries with the same claimName leave the pod
+in Init:0/1 forever, without a single kubelet event (measured on RKE2/Longhorn,
+with RWO as well as RWX). The claim therefore gets exactly one volume entry and
+the categories differ only in the subPath of their mounts.
+
+This helper names the owner of that entry: the FIRST ENABLED category, in the
+fixed order
+
+  downloads, movies, tv
+
+that carries the same claim. Two properties of that rule are load-bearing:
+
+  - The order is fixed and defined here, not derived from the values. A rule
+    like "the alphabetically smallest" or "whichever comes first in the values"
+    would move the volume name when an unrelated flag changes, and a moved
+    volume name is a pod restart.
+  - Only ENABLED categories can own the entry, because the three entries are
+    rendered under different conditions (see mediaCategoryEnabled above). A
+    disabled owner renders no entry, so its name would be a dangling reference
+    and the pod would be rejected by the API server. Example: with qbittorrent,
+    radarr and sonarr off and bazarr on, "downloads" is not mounted at all -
+    "movies" owns a claim shared by all three categories.
+
+A category with no claim owns itself, so the required() message for the missing
+claim still fires at the category the user actually configured.
+
+Input: dict "root" $ "category" <"downloads"|"movies"|"tv">.
+Usage (mount) : name: {{ include "freesailarr.mediaVolumeName" (dict "root" $ "category" "movies") }}
+Usage (volume): render the entry only for a category that owns itself.
+*/}}
+{{- define "freesailarr.mediaVolumeName" -}}
+{{- $root := .root -}}
+{{- $claim := (index $root.Values.media .category).existingClaim | default "" -}}
+{{- $owner := "" -}}
+{{- if $claim -}}
+{{- range $candidate := list "downloads" "movies" "tv" -}}
+{{- if not $owner -}}
+{{- if include "freesailarr.mediaCategoryEnabled" (dict "root" $root "category" $candidate) -}}
+{{- if eq ((index $root.Values.media $candidate).existingClaim | default "") $claim -}}
+{{- $owner = $candidate -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if not $owner -}}
+{{- $owner = .category -}}
+{{- end -}}
+media-{{ $owner }}
+{{- end -}}
+
+{{/*
+Whether a media category owns its volume entry, i.e. whether the volumes block
+renders an entry for it. "true" or the empty string, see mediaVolumeName above.
+
+Input: dict "root" $ "category" <"downloads"|"movies"|"tv">.
+*/}}
+{{- define "freesailarr.mediaVolumeOwned" -}}
+{{- if eq (include "freesailarr.mediaVolumeName" .) (printf "media-%s" .category) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
 Recursive merge of an override onto defaults where null never deletes and set
 values always win, including false and 0 (issue #99).
 

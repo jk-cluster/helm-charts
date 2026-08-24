@@ -1,7 +1,10 @@
 apiVersion: v2
 name: freesailarr
-description: A Helm chart to deploy a Wireguard-tunneled media automation stack (gluetun, qbittorrent, the *arrs, seerr) on Kubernetes
-icon: https://raw.githubusercontent.com/qdm12/gluetun/master/doc/logo_256.png
+description: A Helm chart to deploy a Wireguard-tunneled media automation stack on Kubernetes - a VPN gateway with indexer, downloader, library managers, subtitle fetcher and request front end in one pod, all reaching the internet only through the tunnel
+# No icon on purpose: the stack has no single upstream, and every other chart's
+# icon is its one project's logo. Picking any of the nine here would suggest
+# the same false "main app" the versioning deliberately avoids. The field is
+# optional, so it is omitted rather than filled with an arbitrary choice.
 
 type: application
 

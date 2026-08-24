@@ -127,7 +127,7 @@ gluetun:
   # Pinned here like every other image in this chart, so Renovate's helm-values
   # manager proposes gluetun updates too. Docker Hub tags carry a v prefix.
   image:
-    repository: qmcgaw/gluetun
+    repository: docker.io/qmcgaw/gluetun
     tag: v3.41.1
   vpn:
     serviceProvider: mullvad
@@ -208,7 +208,7 @@ gluetun:
 qbittorrent:
   enabled: true
   image:
-    repository: linuxserver/qbittorrent
+    repository: docker.io/linuxserver/qbittorrent
     tag: 5.2.1
   # Every app gets its own Ingress object (named <release>-<chart>-<app>-ingress)
   # with its own TLS secret tls-<release>-<chart>-<app>-ingress, so the apps can
@@ -245,7 +245,7 @@ qbittorrent:
     # Auxiliary busybox image for the init container, pinned here like every
     # other image in this chart and proposed by Renovate the same way.
     image:
-      repository: busybox
+      repository: docker.io/library/busybox
       tag: "1.38.0"
     resources:
       limitFactor: 3
@@ -320,7 +320,7 @@ qbittorrent:
 prowlarr:
   enabled: true
   image:
-    repository: linuxserver/prowlarr
+    repository: docker.io/linuxserver/prowlarr
     tag: 2.3.5
   # See the qbittorrent ingress comment.
   ingress:
@@ -433,7 +433,7 @@ flaresolverr:
 radarr:
   enabled: true
   image:
-    repository: linuxserver/radarr
+    repository: docker.io/linuxserver/radarr
     tag: 6.1.1
   # See the qbittorrent ingress comment.
   ingress:
@@ -543,7 +543,7 @@ recyclarr:
 sonarr:
   enabled: true
   image:
-    repository: linuxserver/sonarr
+    repository: docker.io/linuxserver/sonarr
     tag: 4.0.17
   # See the qbittorrent ingress comment.
   ingress:
@@ -656,7 +656,7 @@ seerr:
 bazarr:
   enabled: true
   image:
-    repository: linuxserver/bazarr
+    repository: docker.io/linuxserver/bazarr
     tag: 1.5.6
   # See the qbittorrent ingress comment.
   ingress:

@@ -53,7 +53,7 @@ Fixtures live at the **repo root** under `ci/` (deliberately *not* inside the ch
 - `ci/<chart>/settings.env` — optional overrides (e.g. `INSTALL_TIMEOUT` for slow starters)
 - `ci/excluded-charts.txt` — charts that cannot run in CI, each with a justification. Currently: `satisfactory` (multi-GB image + 10GB+ Steam download), `template-chart` (scaffold with placeholder image)
 
-Fixture images avoid Docker Hub where possible (`public.ecr.aws`/`ghcr.io`) to dodge runner rate limits. The job currently runs with `continue-on-error: true` (stabilization phase); it will be promoted to a required check once it has proven stable across several chart PRs. When adding a new chart, add its `ci/<chart>/` fixtures (or an entry in `ci/excluded-charts.txt`) — the install-test fails if both are missing. The script also runs locally against any existing cluster: `k3d cluster create t && ci/run-install-test.sh <chart> && k3d cluster delete t`.
+Fixture images avoid Docker Hub where possible (`public.ecr.aws`/`ghcr.io`) to dodge runner rate limits. The job **blocks the PR** on failure — the stabilization phase of #22 ended when Renovate started automerging patch/minor updates, since a chart that no longer starts must not reach `main` and publish unattended. When adding a new chart, add its `ci/<chart>/` fixtures (or an entry in `ci/excluded-charts.txt`) — the install-test fails if both are missing. The script also runs locally against any existing cluster: `k3d cluster create t && ci/run-install-test.sh <chart> && k3d cluster delete t`.
 
 ## Dependency updates (Renovate)
 
@@ -90,9 +90,11 @@ Everything is derived from the base commit, so the script is idempotent across t
 >
 > Without that entry Renovate skips the task without an error and every chart PR stays red on the version check.
 
+If the dependency dashboard reports `Failed to look up github-releases package …: no-result` for third-party repos, that is the instance's GitHub credentials, not this config: a GitHub App installation token is not a good fit for looking up repos the app is not installed on. Give the instance a separate read-only PAT as `GITHUB_COM_TOKEN` for github.com datasource lookups.
+
 ### PR policy
 
-- **Automerge** for `patch` and `digest` updates, after a `minimumReleaseAge` of 3 days and only once the PR pipeline is green. Renovate merges itself rather than using GitHub auto-merge, which would merge immediately as long as `validate-charts` is not a required check. Everything else is merged by hand.
+- **Automerge** for `patch`, `minor` and `digest` updates, after a `minimumReleaseAge` of 3 days and only once the PR pipeline is green — install-test included, which is why that job no longer runs with `continue-on-error`. Minor is in scope because the sidecar images barely move in patch steps (`alpine 3.22` → `3.24`, `nginx 1.30.4` → `1.31.4` are both minor), so a patch-only rule would practically never fire. Renovate merges itself rather than using GitHub auto-merge, which would merge immediately as long as `main` has no required status checks. Majors are merged by hand.
 - **Majors** arrive one line at a time (`separateMultipleMajor`): a v1 → v3 jump produces a PR for the latest v2 first and then one for v3 — the stepwise procedure the versioning section requires.
 - `prConcurrentLimit: 10` / `prHourlyLimit: 4` keep the k3d install-tests from all starting at once.
 - The manually dispatched `change-app-version.yml` still exists for one-off bumps, but the normal path for app updates is now a Renovate PR.

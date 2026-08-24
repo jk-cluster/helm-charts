@@ -132,10 +132,10 @@ jobs:
     needs: [detect-changed-charts, build-chart]
     if: needs.detect-changed-charts.outputs.any-chart-changed == 'true'
     runs-on: ubuntu-latest
-    # Stabilization phase (issue #22): the job reports failures but does not
-    # block the PR. Promote to a required check (drop continue-on-error) once
-    # it has proven stable across several chart PRs.
-    continue-on-error: true
+    # Blocking since Renovate automerges patch/minor updates: a chart that no
+    # longer starts must stop the PR before it reaches main and publishes. This
+    # ends the stabilization phase of issue #22 - the job reported failures
+    # without blocking while it proved itself across several chart PRs.
     timeout-minutes: 30
     strategy:
       fail-fast: false

@@ -71,8 +71,13 @@
       enabled: false,
     },
     {
-      description: "Patch and digest updates merge themselves once the PR pipeline is green.",
-      matchUpdateTypes: ["patch", "digest"],
+      description: [
+        "Patch, minor and digest updates merge themselves once the PR pipeline is green.",
+        "Minor is included because the sidecar images barely move in patch steps —",
+        "alpine 3.22 -> 3.24 and nginx 1.30.4 -> 1.31.4 are both minor, so a patch-only",
+        "rule would practically never fire. Majors stay manual.",
+      ],
+      matchUpdateTypes: ["patch", "minor", "digest"],
       automerge: true,
       automergeType: "pr",
       // Renovate waits for the checks itself instead of handing the PR to

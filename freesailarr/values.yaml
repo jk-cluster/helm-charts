@@ -209,7 +209,7 @@ qbittorrent:
   enabled: true
   image:
     repository: docker.io/linuxserver/qbittorrent
-    tag: 5.2.1
+    tag: 14.3.9
   # Every app gets its own Ingress object (named <release>-<chart>-<app>-ingress)
   # with its own TLS secret tls-<release>-<chart>-<app>-ingress, so the apps can
   # be exposed independently and under unrelated hosts.

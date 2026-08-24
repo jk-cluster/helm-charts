@@ -140,7 +140,7 @@ gluetun:
   # manager proposes gluetun updates too. Docker Hub tags carry a v prefix.
   image:
     repository: docker.io/qmcgaw/gluetun
-    tag: v3.41.1
+    tag: v3.41.3
   vpn:
     serviceProvider: mullvad
     type: wireguard

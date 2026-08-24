@@ -40,6 +40,7 @@ Copy `template-chart/` and replace every `xxx` placeholder — in file names (`t
 1. Add `.github/workflows/publish-<chart-name>.yml` (copy an existing one, e.g. `publish-outline.yml`) — it triggers on pushes to `main` touching `<chart-name>/**` and calls the reusable `publish-helm-chart.yml`.
 2. Add the chart name to the `chart-name` choice list in `.github/workflows/change-app-version.yml`.
 3. Add install-test fixtures under `ci/<chart-name>/` (`test-values.yaml`, `fixtures.yaml`) or an entry with justification in `ci/excluded-charts.txt` — the PR install-test fails if both are missing.
+4. Add a `customManagers` block for the chart's main image in `renovate.json5` (one per chart, since the image repository lives in the template and the version in `Chart.yaml`) — without it Renovate never updates that chart's app version. See README section "Dependency updates (Renovate)".
 
 ## Versioning scheme
 

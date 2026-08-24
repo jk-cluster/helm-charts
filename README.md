@@ -55,11 +55,54 @@ Fixtures live at the **repo root** under `ci/` (deliberately *not* inside the ch
 
 Fixture images avoid Docker Hub where possible (`public.ecr.aws`/`ghcr.io`) to dodge runner rate limits. The job currently runs with `continue-on-error: true` (stabilization phase); it will be promoted to a required check once it has proven stable across several chart PRs. When adding a new chart, add its `ci/<chart>/` fixtures (or an entry in `ci/excluded-charts.txt`) — the install-test fails if both are missing. The script also runs locally against any existing cluster: `k3d cluster create t && ci/run-install-test.sh <chart> && k3d cluster delete t`.
 
+## Dependency updates (Renovate)
+
+Renovate runs as the self-hosted `jlab-renovate` GitHub App. Its config is **`renovate.json5`** in the repo root (JSON5 for the inline reasoning; requires Renovate >= 41 for `managerFilePatterns`/`customType`). There must be exactly one config file — do not add a second `renovate.json` or `.github/renovate.json`.
+
+What Renovate keeps current:
+
+| What | How |
+| --- | --- |
+| Chart app versions (`appVersion:` in `Chart.yaml`) | One `customManagers` entry per chart, hard-coding the image repository |
+| Sidecar/init images in `values.yaml` (nginx, guacd, busybox, alpine) | Built-in `helm-values` manager |
+| GitHub Actions | Built-in `github-actions` manager |
+| Tool versions pinned as workflow env vars (`TRIVY_VERSION`) | `# renovate: datasource=… depName=…` comment above the line |
+
+Each chart renders its main image as `<repo>:{{ .Chart.AppVersion }}` — repository in the template, version in `Chart.yaml`. Renovate cannot join two files, so the mapping lives in `renovate.json5`, one block per chart. It is deliberately *not* a `# renovate:` comment inside each `Chart.yaml`: that would touch all chart directories and force a version bump plus a publish per chart for a pure comment change. Charts whose tags carry a flavour or date suffix (`apache-tika`, `minecraft-server`, `rss-bridge`, `teamspeak-server`) override `versioning` in their block; the reasoning sits next to each one.
+
+Not managed: `ci/**` (install-test fixtures pin throwaway infrastructure to major lines on purpose) and `template-chart/**` (placeholder image). A consequence worth knowing: `ci/matrix-synapse/fixtures.yaml` pins a Synapse image that Renovate will not follow — bump it by hand when the chart moves a major.
+
+### The version-bump hook
+
+Renovate only rewrites `appVersion:` or an image tag; it knows nothing about `version: <chart-semver>+up<app-version>`. Left alone, every chart PR would fail the `build-chart` version check. `ci/renovate-bump-chart.sh <chart-dir>` closes that gap and is wired up as a `postUpgradeTasks` command:
+
+- **app major changed** → chart major (`6.0.0` → `7.0.0`), matching "runtime behavior changes" in the semver conventions
+- **anything else** (plain app update, sidecar image) → chart patch
+- the `+up` suffix is recomputed from the new `appVersion`, dashes normalized to dots
+
+Everything is derived from the base commit, so the script is idempotent across the multiple updates a single Renovate branch can carry.
+
+> **One-time setup outside this repo:** `postUpgradeTasks` only runs on self-hosted Renovate **and** only when the command is allow-listed in the *instance* config:
+>
+> ```yaml
+> allowedCommands: ["^ci/renovate-bump-chart\\.sh"]
+> ```
+>
+> Without that entry Renovate skips the task without an error and every chart PR stays red on the version check.
+
+### PR policy
+
+- **Automerge** for `patch` and `digest` updates, after a `minimumReleaseAge` of 3 days and only once the PR pipeline is green. Renovate merges itself rather than using GitHub auto-merge, which would merge immediately as long as `validate-charts` is not a required check. Everything else is merged by hand.
+- **Majors** arrive one line at a time (`separateMultipleMajor`): a v1 → v3 jump produces a PR for the latest v2 first and then one for v3 — the stepwise procedure the versioning section requires.
+- `prConcurrentLimit: 10` / `prHourlyLimit: 4` keep the k3d install-tests from all starting at once.
+- The manually dispatched `change-app-version.yml` still exists for one-off bumps, but the normal path for app updates is now a Renovate PR.
+
 ## Creating a new chart
 
 1. Copy `template-chart/` to `<chart-name>/` and replace every `xxx` placeholder: template file names (`xxx.deployment.yaml` → `<app>.deployment.yaml`), `Chart.yaml`, the `values.yaml` keys, the `.Values.xxx.*` references inside the templates, **and both the `xxx.` helper prefixes and the values paths in `values.schema.json`**. Then walk the five points in "Values that must not lie" below — the schema and the null-safe fallbacks are copied with the template, but their content is chart-specific and wrong until you adapt it.
 2. Add `.github/workflows/publish-<chart-name>.yml` (copy an existing one, e.g. `publish-outline.yml`).
 3. Add the chart name to the choice list in `.github/workflows/change-app-version.yml`.
+4. Add a `customManagers` block for the chart's main image in `renovate.json5` (copy a neighbouring one, swap `managerFilePatterns` and `depNameTemplate`) — without it the chart's app version is never updated. Check the image's tag list first: if it carries a flavour, date or prerelease suffix, add a `versioningTemplate` with a comment saying why.
 
 Validate locally with:
 

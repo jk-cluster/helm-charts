@@ -54,9 +54,21 @@ securityContext:
   # group-writable for the non-root containers; fsGroupChangePolicy
   # OnRootMismatch avoids recursively re-chowning the (large, shared) media
   # claims on every pod start.
+  # seccompProfile RuntimeDefault applies the container runtime's default
+  # syscall filter to every container in the pod, init containers included, and
+  # is set at pod level so a container added later inherits it without the
+  # value being repeated. It is worth naming what it has to survive here:
+  # gluetun runs as root with NET_ADMIN, creates a tun device and programs
+  # iptables, and the s6-overlay init of the five linuxserver.io images starts
+  # as root and drops to PUID/PGID via CHOWN/SETUID/SETGID. Both were verified
+  # against a real tunnel under this filter - see the chart's PR.
+  # A container that genuinely needs a different filter can still override it
+  # under <app>.securityContext, which wins over the pod value.
   pod:
     fsGroup: 1000
     fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
 
 storage:
   # StorageClass for all config volumeClaimTemplates (null = cluster default).

@@ -63,9 +63,9 @@ jobs:
           JK_CR_CHARTS_LOCATION: op://GitHub-Actions/jk-registry-access/charts-location
           JK_CR_HELM_REGISTRY: op://GitHub-Actions/jk-registry-access/helm-registry
       - name: "Login to JK-Registry"
-        run: echo ${{ env.JK_CR_TOKEN }} | helm registry login ${{ env.JK_CR_HELM_REGISTRY }} -u ${{ env.JK_CR_USERNAME }} --password-stdin
+        run: echo ${{ steps.load-jk-cr-creds.outputs.JK_CR_USERNAME }} | helm registry login ${{ steps.load-jk-cr-creds.outputs.JK_CR_HELM_REGISTRY }} -u ${{ env.JK_CR_USERNAME }} --password-stdin
       - name: "Push Helm Chart to JK-Container Registry"
-        run: helm push ${{ inputs.chart-name }}-*.tgz ${{ env.JK_CR_CHARTS_LOCATION }}
+        run: helm push ${{ inputs.chart-name }}-*.tgz ${{ steps.load-jk-cr-creds.outputs.JK_CR_CHARTS_LOCATION }}
         working-directory: ${{ inputs.chart-location }}
       - name: "Logout from JK-Registry"
-        run: helm registry logout ${{ env.JK_CR_HELM_REGISTRY }}
+        run: helm registry logout ${{ steps.load-jk-cr-creds.outputs.JK_CR_HELM_REGISTRY }}

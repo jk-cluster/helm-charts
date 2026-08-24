@@ -224,7 +224,8 @@ Probe specifics that a rebuilt default must not lose:
       "runAsUser" 1000
       "runAsGroup" 1000
       "fsGroup" 1000
-      "fsGroupChangePolicy" "OnRootMismatch" -}}
+      "fsGroupChangePolicy" "OnRootMismatch"
+      "seccompProfile" (dict "type" "RuntimeDefault") -}}
 {{- include "satisfactory.defaultedDict" (dict "defaults" $defaults "given" $given "path" "securityContext.pod") -}}
 {{- end -}}
 

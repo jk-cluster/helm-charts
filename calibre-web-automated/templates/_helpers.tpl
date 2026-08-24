@@ -230,7 +230,8 @@ default probe needs no further context.
 {{- $given := (fromYaml (include "calibre-web-automated.subBlock" (dict "block" . "key" "pod" "path" "cwa.securityContext"))).value -}}
 {{- $defaults := dict
       "fsGroup" 1000
-      "fsGroupChangePolicy" "Always" -}}
+      "fsGroupChangePolicy" "Always"
+      "seccompProfile" (dict "type" "RuntimeDefault") -}}
 {{- include "calibre-web-automated.defaultedDict" (dict "defaults" $defaults "given" $given "path" "cwa.securityContext.pod") -}}
 {{- end -}}
 

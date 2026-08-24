@@ -217,7 +217,8 @@ header, otherwise the pod never becomes ready.
       "runAsUser" 33
       "runAsGroup" 33
       "fsGroup" 33
-      "fsGroupChangePolicy" "Always" -}}
+      "fsGroupChangePolicy" "Always"
+      "seccompProfile" (dict "type" "RuntimeDefault") -}}
 {{- include "voucher-vault.defaultedDict" (dict "defaults" $defaults "given" $given "path" "voucherVault.securityContext.pod") -}}
 {{- end -}}
 

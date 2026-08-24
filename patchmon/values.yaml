@@ -22,6 +22,17 @@ patchmon:
         runAsNonRoot: true
         runAsUser: 65532
         runAsGroup: 65532
+        # RuntimeDefault applies the container runtime's default seccomp
+        # filter, which blocks the syscalls a normal workload never makes. It
+        # sits in the pod context on purpose: from here it covers every
+        # container in the pod - the server and the optional guacd sidecar
+        # alike - including init containers, while a container-level
+        # seccompProfile would have to be repeated for each one (and silently
+        # missed on the next one added). A container that genuinely needs a
+        # different filter can still override it under
+        # securityContext.container, which wins over this value.
+        seccompProfile:
+          type: RuntimeDefault
       container:
         allowPrivilegeEscalation: false
         readOnlyRootFilesystem: true
@@ -88,7 +99,7 @@ patchmon:
     enabled: false
     # guacd is an independent upstream application, so its image is not tied
     # to the chart's appVersion. Pinned to the version upstream ships with.
-    image: guacamole/guacd:1.6.0
+    image: docker.io/guacamole/guacd:1.6.0
     # The image runs as its own unprivileged user (uid 1000); it only needs a
     # writable /tmp, which the chart provides as an emptyDir.
     securityContext:

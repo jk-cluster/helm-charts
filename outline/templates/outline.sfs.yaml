@@ -21,7 +21,7 @@ spec:
         {{- include "outline.podSecurityContext" .Values.outline.securityContext | nindent 8 }}
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
-          image: "outlinewiki/outline:{{ .Chart.AppVersion }}"
+          image: "docker.io/outlinewiki/outline:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
           env:
             - name: PORT

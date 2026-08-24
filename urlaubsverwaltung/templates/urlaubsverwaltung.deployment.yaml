@@ -20,7 +20,7 @@ spec:
         {{- include "urlaubsverwaltung.podSecurityContext" .Values.urlaubsverwaltung.securityContext | nindent 8 }}
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
-          image: "urlaubsverwaltung/urlaubsverwaltung:{{ .Chart.AppVersion }}"
+          image: "docker.io/urlaubsverwaltung/urlaubsverwaltung:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
           securityContext:
             {{- include "urlaubsverwaltung.containerSecurityContext" .Values.urlaubsverwaltung.securityContext | nindent 12 }}

@@ -148,6 +148,15 @@
     // mapping here leaves the charts untouched.
     //
     // When adding a chart, add a block here — see README "Creating a new chart".
+    //
+    // Exception, deliberately no block: `freesailarr`. It bundles nine
+    // independently versioned upstreams, so none of them is "the" app version
+    // and no image tag comes from appVersion — all nine are pinned as
+    // image.repository/image.tag in its values.yaml, where the built-in
+    // helm-values manager already finds them and proposes one update per
+    // image. Adding a block here would either duplicate those updates or
+    // rewrite an appVersion that selects nothing. Its appVersion is a
+    // hand-maintained marker; see freesailarr/Chart.yaml.
 
     {
       description: "apache-tika: four-part version plus flavour suffix (3.3.1.0-full); the compatibility group keeps the chart on -full.",

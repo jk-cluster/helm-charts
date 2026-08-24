@@ -9,6 +9,7 @@ Collection of some self-made helm-charts. Each top-level directory is a standalo
 | `apache-tika` | Apache Tika | Deployment + Service only (no ingress) |
 | `calibre-web-automated` | Calibre-Web Automated | StatefulSet, extra consume-PVC |
 | `cyberchef` | CyberChef | Stateless Deployment |
+| `freesailarr` | gluetun VPN media stack (qbittorrent, prowlarr, flaresolverr, radarr, recyclarr, sonarr, seerr, bazarr) | Single-pod StatefulSet: all apps share gluetun's network namespace; config volumes via volumeClaimTemplates, media PVCs as existingClaims (optional per-category `subPath`, so one claim can serve all three categories). One ClusterIP Service and one Ingress **per app** — no global `ingress.domain`, each app has its own required host (documented ingress exception below) |
 | `gotenberg` | Gotenberg | Deployment + Service only (no ingress) |
 | `homeassistant` | Home Assistant | StatefulSet, has `NOTES.txt` and Helm tests |
 | `matrix-synapse` | Matrix Synapse | StatefulSet plus an nginx delegation Deployment/Service |
@@ -65,10 +66,13 @@ What Renovate keeps current:
 | --- | --- |
 | Chart app versions (`appVersion:` in `Chart.yaml`) | One `customManagers` entry per chart, hard-coding the image repository |
 | Sidecar/init images in `values.yaml` (nginx, guacd, busybox, alpine) | Built-in `helm-values` manager |
+| **All** images of `freesailarr`, including its main one | Built-in `helm-values` manager — the chart pins every tag in `values.yaml` and has no app-version block |
 | GitHub Actions | Built-in `github-actions` manager |
 | Tool versions pinned as workflow env vars (`TRIVY_VERSION`) | `# renovate: datasource=… depName=…` comment above the line |
 
-Each chart renders its main image as `<repo>:{{ .Chart.AppVersion }}` — repository in the template, version in `Chart.yaml`. Renovate cannot join two files, so the mapping lives in `renovate.json5`, one block per chart. It is deliberately *not* a `# renovate:` comment inside each `Chart.yaml`: that would touch all chart directories and force a version bump plus a publish per chart for a pure comment change. Charts whose tags carry a flavour or date suffix (`apache-tika`, `minecraft-server`, `rss-bridge`, `teamspeak-server`) override `versioning` in their block; the reasoning sits next to each one.
+Each chart renders its main image as `<repo>:{{ .Chart.AppVersion }}` — repository in the template, version in `Chart.yaml`. Renovate cannot join two files, so the mapping lives in `renovate.json5`, one block per chart. It is deliberately *not* a `# renovate:` comment inside each `Chart.yaml`: that would touch all chart directories and force a version bump plus a publish per chart for a pure comment change. Charts whose tags carry a flavour or date suffix (`apache-tika`, `minecraft-server`, `rss-bridge`, `teamspeak-server`) override `versioning` in their block; the reasoning sits next to each one. `freesailarr` has no block on purpose — see the images exception above; a block would either duplicate the `helm-values` updates or rewrite an `appVersion` that selects no image.
+
+A consequence of pinning every tag in `values.yaml`: `ci/renovate-bump-chart.sh` sees an unchanged `appVersion` and bumps the chart **patch**. That holds for all nine images alike — none of them is special — and it is the intended outcome, since `appVersion` here is the chart's own marker rather than a tracked upstream version.
 
 One dependency is constrained beyond its versioning: **nginx** (the Synapse delegation sidecar) is limited to **even minors** via `allowedVersions`. nginx numbers its release branches by minor — even is stable, odd is mainline — and the chart belongs on stable. Patch updates inside the stable branch still flow through normally. The constraint tolerates a variant suffix (`1.30.4-alpine`) on purpose: docker versioning only ever offers candidates carrying the current tag's suffix, so a suffix-blind constraint would silently freeze nginx the day the sidecar moves to a slimmer base image — a switch to `1.30.4-alpine` that #84 has commissioned a check on — with no error and no warning.
 
@@ -142,6 +146,7 @@ These guidelines are **binding for every current and future chart** in this repo
 ### 3. Images
 
 - The main app image tag comes from `{{ .Chart.AppVersion }}` — never hardcoded.
+- **Documented exception — freesailarr**: the chart bundles nine independently versioned upstreams, so none of them is "the" app version. **No** tag comes from `appVersion`; all nine images are pinned as `<app>.image.repository` / `<app>.image.tag` in `values.yaml`, which is also what puts every one of them under the built-in `helm-values` manager. Its `appVersion` is the chart's own version marker, freely chosen and tied to no upstream — raised by hand when a new edition of the chart is marked as a whole. Consequently the chart has **no** block in `renovate.json5` and is **not** in the `change-app-version.yml` choice list.
 - Auxiliary images (sidecars, init containers, secondary workloads — e.g. the delegation nginx in matrix-synapse, guacd in patchmon, busybox init/consume images in paperless-ngx) are pinned via values instead of being hardcoded in templates, and their pinned versions are reviewed alongside every app-version update round.
 
 ### 4. Ingress
@@ -151,6 +156,7 @@ These guidelines are **binding for every current and future chart** in this repo
 - `ingress.annotations` takes optional extra annotations that are merged with the cert-manager `cluster-issuer` annotation the chart always sets.
 - The TLS secret is named `tls-<release>-<chart>-ingress`.
 - **Documented exception — homeassistant**: keeps its upstream-style flexible ingress values (host/tls lists, no required values); only its `ingress.className` default follows the standard (`nginx`, clearable to omit the field).
+- **Documented exception — freesailarr**: the chart bundles several independently exposed apps in one pod, so it has **no** `ingress.domain`. Each app carries its own `<app>.ingress.enabled` plus a required `<app>.ingress.host` (required only while that app's ingress is enabled) and renders its own Ingress object `<release>-<chart>-<app>-ingress` with its own TLS secret `tls-<release>-<chart>-<app>-ingress`. `clusterIssuer`, `className` and `annotations` stay global defaults under `ingress.` and are overridable per app.
 
 ### 5. Security hardening
 

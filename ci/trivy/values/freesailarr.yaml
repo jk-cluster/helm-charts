@@ -1,0 +1,39 @@
+# Render values for the misconfiguration scan only (ci/run-trivy-config.sh).
+#
+# freesailarr has no ci/freesailarr/test-values.yaml because it is excluded from
+# the install-test (gluetun never becomes healthy without a real Wireguard key),
+# but it is still scanned - the chart runs nine containers with several
+# documented hardening deviations, which is exactly what the scan should see.
+#
+# Only the values the chart declares `required` - nothing that changes the
+# security posture (no securityContext, image, capability or resource overrides).
+# The ingress hosts are per app since the chart has no global ingress.domain.
+secrets:
+  gluetunSecretRef: op://Vault/scan/placeholder
+ingress:
+  clusterIssuer: letsencrypt
+media:
+  downloads:
+    existingClaim: scan-downloads
+  movies:
+    existingClaim: scan-movies
+  tv:
+    existingClaim: scan-tv
+qbittorrent:
+  ingress:
+    host: qbittorrent.scan.example.com
+prowlarr:
+  ingress:
+    host: prowlarr.scan.example.com
+radarr:
+  ingress:
+    host: radarr.scan.example.com
+sonarr:
+  ingress:
+    host: sonarr.scan.example.com
+seerr:
+  ingress:
+    host: seerr.scan.example.com
+bazarr:
+  ingress:
+    host: bazarr.scan.example.com

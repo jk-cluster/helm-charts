@@ -4,10 +4,21 @@
 # the Wireguard tunnel.
 #
 # Image pinning (documented deviation from the Chart.AppVersion standard):
-# appVersion pins the gluetun image only. All other app images are pinned via
-# values (<app>.image.repository / <app>.image.tag) because the stack combines
-# nine independently versioned upstream projects; the pinned tags are reviewed
-# alongside every app-version update round, like side images in other charts.
+# NO image tag comes from appVersion. All nine images, gluetun included, are
+# pinned here via <app>.image.repository / <app>.image.tag, because the stack
+# combines nine independently versioned upstream projects and none of them is
+# "the" one app version.
+#
+# That is also what puts every image under Renovate: the built-in helm-values
+# manager reads image.repository/image.tag pairs out of this file and proposes
+# one update per image, and ci/renovate-bump-chart.sh bumps the chart version
+# along with it. A chart whose main image came from appVersion would instead
+# need a hard-coded block in renovate.json5 - freesailarr deliberately has none.
+#
+# Chart.yaml's appVersion is therefore a hand-maintained marker for the gluetun
+# line this chart is built around, not the source of any tag. Keep it in step
+# with gluetun.image.tag below when you accept a gluetun update, otherwise the
+# +up suffix of the chart version drifts away from what is actually deployed.
 
 # Scale the whole chart down without uninstalling it: scaleDown: true renders
 # every Deployment/StatefulSet with replicas: 0 (and suspends CronJobs) and
@@ -113,7 +124,11 @@ ingress:
   annotations: {}
 
 gluetun:
-  # Image tag comes from Chart.AppVersion (gluetun is the chart's main app).
+  # Pinned here like every other image in this chart, so Renovate's helm-values
+  # manager proposes gluetun updates too. Docker Hub tags carry a v prefix.
+  image:
+    repository: qmcgaw/gluetun
+    tag: v3.41.1
   vpn:
     serviceProvider: mullvad
     type: wireguard

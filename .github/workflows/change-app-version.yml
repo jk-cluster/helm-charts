@@ -35,7 +35,11 @@ on:
           - minecraft-router
           - minecraft-server
           - rss-bridge
-          - freesailarr
+          # freesailarr is deliberately absent: none of its nine images takes
+          # its tag from appVersion (they are all pinned in its values.yaml),
+          # so this workflow would rewrite appVersion and republish the chart
+          # without changing a single deployed image. Update its images through
+          # a Renovate PR, and its appVersion by hand.
   workflow_call:
     inputs:
       app-version:

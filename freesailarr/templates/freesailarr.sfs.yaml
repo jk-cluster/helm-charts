@@ -86,7 +86,7 @@ spec:
         # internet only through the Wireguard tunnel (gluetun's firewall acts
         # as kill switch).
         - name: gluetun
-          image: "qmcgaw/gluetun:{{ .Chart.AppVersion }}"
+          image: "{{ .Values.gluetun.image.repository }}:{{ .Values.gluetun.image.tag }}"
           imagePullPolicy: IfNotPresent
           # An uncleanly exited gluetun (crash, OOM killer, node issue) leaves
           # its ip rule, routing table and tun device behind in the shared pod

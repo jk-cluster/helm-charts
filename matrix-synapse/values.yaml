@@ -95,7 +95,7 @@ matrix:
     # Synapse). Reviewed alongside every app-version update round.
     image:
       repository: nginx
-      tag: 1.30.4
+      tag: 1.31.4
     # The delegation nginx runs as the image's unprivileged nginx user
     # (uid 101) and listens on the unprivileged port 8080; pid file and temp
     # paths are redirected to the /tmp emptyDir by the mounted nginx.conf.

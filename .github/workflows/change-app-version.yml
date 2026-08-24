@@ -56,12 +56,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: "Configure OP-Connect"
-        uses: 1password/load-secrets-action/configure@v2
+        uses: 1password/load-secrets-action/configure@v5
         with:
           connect-host: https://op-connect.jk-dev.de
       - name: "Load GitHub Credentials"
         id: load-jk-cluster-bot-creds
-        uses: 1password/load-secrets-action@v2
+        uses: 1password/load-secrets-action@v5
         env:
           OP_CONNECT_TOKEN: ${{ secrets.OP_CONNECT_TOKEN }}
           JK_CLUSTER_BOT_TOKEN: op://GitHub-Actions/github-helm-charts-push-token/credential

@@ -62,10 +62,43 @@ jobs:
           JK_CR_USERNAME: op://GitHub-Actions/jk-registry-access/username
           JK_CR_CHARTS_LOCATION: op://GitHub-Actions/jk-registry-access/charts-location
           JK_CR_HELM_REGISTRY: op://GitHub-Actions/jk-registry-access/helm-registry
+      # The values are mapped into each step's own env block and read as quoted
+      # shell variables - never interpolated into the command line.
+      #
+      # Two separate failures made this necessary. First, load-secrets-action v5
+      # (bumped in #140) no longer exports the loaded values as environment
+      # variables for later steps the way v4 did; only the step outputs carry
+      # them. Every "${{ env.JK_CR_* }}" reference therefore resolved to an empty
+      # string from that bump on, with nothing reporting an error - the loading
+      # step logs "Populating variable" and stays green either way.
+      #
+      # Second, an empty value collapsed into a missing argument instead of an
+      # error: with an empty username, "-u" swallowed the following
+      # "--password-stdin", helm stopped reading the password from stdin,
+      # prompted interactively and died on the runner with "inappropriate ioctl
+      # for device" - a terminal error for what was really an unset variable.
+      #
+      # The ":?" guards fail loudly and name the value that is missing, quoting
+      # keeps an empty one from shifting arguments, and the token no longer
+      # appears in the process list.
       - name: "Login to JK-Registry"
-        run: echo ${{ steps.load-jk-cr-creds.outputs.JK_CR_USERNAME }} | helm registry login ${{ steps.load-jk-cr-creds.outputs.JK_CR_HELM_REGISTRY }} -u ${{ env.JK_CR_USERNAME }} --password-stdin
+        env:
+          JK_CR_TOKEN: ${{ steps.load-jk-cr-creds.outputs.JK_CR_TOKEN }}
+          JK_CR_USERNAME: ${{ steps.load-jk-cr-creds.outputs.JK_CR_USERNAME }}
+          JK_CR_HELM_REGISTRY: ${{ steps.load-jk-cr-creds.outputs.JK_CR_HELM_REGISTRY }}
+        run: |-
+          : "${JK_CR_HELM_REGISTRY:?empty - check op://GitHub-Actions/jk-registry-access/helm-registry}"
+          : "${JK_CR_USERNAME:?empty - check op://GitHub-Actions/jk-registry-access/username}"
+          : "${JK_CR_TOKEN:?empty - check op://GitHub-Actions/jk-registry-access/password}"
+          printf '%s' "$JK_CR_TOKEN" | helm registry login "$JK_CR_HELM_REGISTRY" -u "$JK_CR_USERNAME" --password-stdin
       - name: "Push Helm Chart to JK-Container Registry"
-        run: helm push ${{ inputs.chart-name }}-*.tgz ${{ steps.load-jk-cr-creds.outputs.JK_CR_CHARTS_LOCATION }}
+        env:
+          JK_CR_CHARTS_LOCATION: ${{ steps.load-jk-cr-creds.outputs.JK_CR_CHARTS_LOCATION }}
+        run: |-
+          : "${JK_CR_CHARTS_LOCATION:?empty - check op://GitHub-Actions/jk-registry-access/charts-location}"
+          helm push "${{ inputs.chart-name }}"-*.tgz "$JK_CR_CHARTS_LOCATION"
         working-directory: ${{ inputs.chart-location }}
       - name: "Logout from JK-Registry"
-        run: helm registry logout ${{ steps.load-jk-cr-creds.outputs.JK_CR_HELM_REGISTRY }}
+        env:
+          JK_CR_HELM_REGISTRY: ${{ steps.load-jk-cr-creds.outputs.JK_CR_HELM_REGISTRY }}
+        run: helm registry logout "$JK_CR_HELM_REGISTRY"

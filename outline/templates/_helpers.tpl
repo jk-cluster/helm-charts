@@ -217,7 +217,8 @@ there is no dependency-free alternative to fall back to.
       "runAsUser" 1001
       "runAsGroup" 1001
       "fsGroup" 1001
-      "fsGroupChangePolicy" "Always" -}}
+      "fsGroupChangePolicy" "Always"
+      "seccompProfile" (dict "type" "RuntimeDefault") -}}
 {{- include "outline.defaultedDict" (dict "defaults" $defaults "given" $given "path" "outline.securityContext.pod") -}}
 {{- end -}}
 

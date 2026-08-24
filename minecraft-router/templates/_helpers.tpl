@@ -224,7 +224,8 @@ the base image.
       "runAsUser" 10000
       "runAsGroup" 10000
       "fsGroup" 10000
-      "fsGroupChangePolicy" "Always" -}}
+      "fsGroupChangePolicy" "Always"
+      "seccompProfile" (dict "type" "RuntimeDefault") -}}
 {{- include "minecraft-router.defaultedDict" (dict "defaults" $defaults "given" $given "path" "server.securityContext.pod") -}}
 {{- end -}}
 

@@ -27,7 +27,7 @@ spec:
         {{- include "minecraft-router.podSecurityContext" .Values.server.securityContext | nindent 8 }}
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
-          image: "itzg/mc-router:{{ .Chart.AppVersion }}"
+          image: "docker.io/itzg/mc-router:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
           args:
             - "--port"

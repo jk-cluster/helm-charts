@@ -213,7 +213,8 @@ is only the fallback for the case where an override has erased the block.
 {{- $defaults := dict
       "runAsNonRoot" true
       "runAsUser" 1002
-      "runAsGroup" 1001 -}}
+      "runAsGroup" 1001
+      "seccompProfile" (dict "type" "RuntimeDefault") -}}
 {{- include "urlaubsverwaltung.defaultedDict" (dict "defaults" $defaults "given" $given "path" "urlaubsverwaltung.securityContext.pod") -}}
 {{- end -}}
 

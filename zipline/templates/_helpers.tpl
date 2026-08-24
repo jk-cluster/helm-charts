@@ -218,7 +218,8 @@ a database outage must not restart the pod.
       "runAsUser" 1000
       "runAsGroup" 1000
       "fsGroup" 1000
-      "fsGroupChangePolicy" "Always" -}}
+      "fsGroupChangePolicy" "Always"
+      "seccompProfile" (dict "type" "RuntimeDefault") -}}
 {{- include "zipline.defaultedDict" (dict "defaults" $defaults "given" $given "path" "zipline.securityContext.pod") -}}
 {{- end -}}
 

@@ -108,6 +108,15 @@ server:
       # Keeps the mounted routing-config ConfigMap readable for that gid.
       fsGroup: 10000
       fsGroupChangePolicy: Always
+      # RuntimeDefault applies the container runtime's default seccomp filter,
+      # which blocks the syscalls a normal workload never makes. It sits in the
+      # pod context on purpose: from here it covers every container in the pod
+      # including init containers, while a container-level seccompProfile would
+      # have to be repeated for each one (and silently missed on the next one
+      # added). A container that genuinely needs a different filter can still
+      # override it under securityContext.container, which wins over this value.
+      seccompProfile:
+        type: RuntimeDefault
     container:
       allowPrivilegeEscalation: false
       # No deviation needed: the image ships nothing but the static binary and

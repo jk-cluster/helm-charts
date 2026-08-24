@@ -27,7 +27,7 @@ spec:
         # entrypoint's collectstatic only adds what is missing, e.g. the
         # Django admin static files). See securityContext in values.yaml.
         - name: init-static
-          image: "l4rm4nd/vouchervault:{{ .Chart.AppVersion }}"
+          image: "docker.io/l4rm4nd/vouchervault:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
           # Copies the children (not ".") so cp never tries to set metadata
           # on the mountpoint itself, which the non-root uid may not own.
@@ -48,7 +48,7 @@ spec:
               ephemeral-storage: 10Mi
       containers:
         - name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
-          image: "l4rm4nd/vouchervault:{{ .Chart.AppVersion }}"
+          image: "docker.io/l4rm4nd/vouchervault:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
           env:
             {{- range $value := .Values.voucherVault.env }}

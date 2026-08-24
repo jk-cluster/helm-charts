@@ -217,7 +217,8 @@ helpers take dict "given" <block|nil> "root" $.
 {{- $defaults := dict
       "runAsNonRoot" true
       "runAsUser" 65532
-      "runAsGroup" 65532 -}}
+      "runAsGroup" 65532
+      "seccompProfile" (dict "type" "RuntimeDefault") -}}
 {{- include "patchmon.defaultedDict" (dict "defaults" $defaults "given" $given "path" "patchmon.server.securityContext.pod") -}}
 {{- end -}}
 

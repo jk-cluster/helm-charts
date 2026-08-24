@@ -87,10 +87,12 @@ THE MEDIA CLAIMS ARE YOURS, THE CONFIG VOLUMES ARE THE CHART'S
   Kubernetes makes every volumeMount its own bind mount and link() across two
   mount points fails with EXDEV regardless of subPath, so an import copies.
 
-  The containers write as {{ .Values.puid }}:{{ .Values.pgid }}. If the claims already hold data
-  owned by someone else, fix the ownership before the first start — the pod
-  will not do it for you (fsGroupChangePolicy is OnRootMismatch, deliberately,
-  so a large library is not recursively re-chowned on every start).
+  The containers write as {{ .Values.puid }}:{{ .Values.pgid }}. The claim's root directory has to be
+  writable for them, and a subPath directory the kubelet creates inherits that
+  root's mode — so fix the ownership before the first start. The pod will not
+  do it for you: fsGroupChangePolicy is OnRootMismatch so a large library is
+  not re-chowned on every start, and on an RWX claim a driver like Longhorn
+  (fsGroupPolicy ReadWriteOnceWithFSType) ignores fsGroup altogether.
 {{- if eq $replicas "0" }}
 
 SCALED TO ZERO

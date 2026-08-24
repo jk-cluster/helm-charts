@@ -97,6 +97,20 @@
       matchDepTypes: ["app-version"],
       addLabels: ["app-version"],
     },
+    {
+      description: [
+        "nginx numbers its release branches by minor: even is the stable branch, odd is",
+        "mainline. The Synapse delegation nginx belongs on stable, so only even minors are",
+        "allowed — that is what PR #139 (1.30.4 -> 1.31.4) would otherwise have done,",
+        "quietly moving the chart onto mainline. Patch updates inside the stable branch",
+        "(1.30.4 -> 1.30.5) still come through and still automerge.",
+      ],
+      matchDatasources: ["docker"],
+      matchPackageNames: ["nginx", "library/nginx", "docker.io/library/nginx"],
+      // Even minor: any minor whose last digit is even, so 1.30.x passes and
+      // 1.31.x does not.
+      allowedVersions: "/^\\d+\\.\\d*[02468]\\.\\d+$/",
+    },
   ],
 
   customManagers: [

@@ -245,7 +245,7 @@ qbittorrent:
     # Auxiliary busybox image for the init container, pinned here like every
     # other image in this chart and proposed by Renovate the same way.
     image:
-      repository: docker.io/library/busybox
+      repository: docker.io/busybox
       tag: "1.38.0"
     resources:
       limitFactor: 3

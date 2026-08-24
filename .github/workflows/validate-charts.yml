@@ -105,6 +105,7 @@ jobs:
       matrix:
         chart: ${{ fromJSON(needs.detect-changed-charts.outputs.scan-charts) }}
     env:
+      # renovate: datasource=github-releases depName=aquasecurity/trivy
       TRIVY_VERSION: v0.74.0
       # "report" always exits 0. Switch to "gate" to make a finding that no
       # documented exception covers fail the job - the intended step once the

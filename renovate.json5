@@ -1,0 +1,287 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+
+  // JSON5 on purpose: the per-chart managers below only make sense with the
+  // reasoning next to them. Renovate reads renovate.json5 natively — there must
+  // be no second config file (renovate.json, .github/renovate.json, ...) or
+  // Renovate aborts with "found multiple config files".
+  //
+  // Requires Renovate >= 41 (`managerFilePatterns`, `customType`). See
+  // README.md → "Dependency updates (Renovate)" for the whole picture,
+  // including the one-time `allowedCommands` change the self-hosted instance
+  // needs for the version bump to work.
+
+  extends: [
+    "config:recommended",
+    // Commit subjects in this repo are plain sentences, not conventional
+    // commits. Renovate's own merged PRs already look like that.
+    ":semanticCommitsDisabled",
+  ],
+
+  timezone: "Europe/Berlin",
+  labels: ["dependencies"],
+
+  // 20 charts plus the workflows: without a cap the first run after a quiet
+  // week opens a wall of PRs, and every chart PR spins up a k3d install-test.
+  prConcurrentLimit: 10,
+  prHourlyLimit: 4,
+
+  // template-chart is the scaffold. Its image is the literal placeholder
+  // ghcr.io/ORG/IMAGE and its appVersion is "xxx" — nothing to update, and the
+  // chart is never published.
+  ignorePaths: ["template-chart/**"],
+
+  // CLAUDE.md/README require app major jumps to be taken stepwise: first the
+  // last release of the old major line, then the new major. With this flag a
+  // v1 -> v3 jump arrives as two PRs (latest v2, then v3), which is exactly
+  // that sequence — merge the first, and the second rebases onto it.
+  separateMultipleMajor: true,
+
+  // Any change inside a chart directory must bump `version:` in its
+  // Chart.yaml, otherwise the `build-chart` job fails the PR and the publish
+  // on main would collide with an already published version. Renovate only
+  // rewrites `appVersion:` (or an image tag in values.yaml), so this hook
+  // recomputes `version:` afterwards.
+  //
+  // IMPORTANT: postUpgradeTasks only runs on self-hosted Renovate and only if
+  // the command is allow-listed in the *instance* config (not in this repo):
+  //
+  //   allowedCommands: ["^ci/renovate-bump-chart\\.sh"]
+  //
+  // Without that entry Renovate skips the task silently and every chart PR
+  // stays red on the version-bump check.
+  postUpgradeTasks: {
+    commands: ["ci/renovate-bump-chart.sh {{{packageFileDir}}}"],
+    fileFilters: ["**/Chart.yaml"],
+    // "update" runs the script once per dependency update with the package
+    // file's directory, which is what the script needs to find the chart. The
+    // script derives everything from the base commit, so repeated runs on the
+    // same branch are idempotent.
+    executionMode: "update",
+  },
+
+  packageRules: [
+    {
+      description: [
+        "Install-test fixtures deliberately pin throwaway infrastructure to major lines",
+        "(postgres:16-alpine, redis:7-alpine, busybox:1.36). They are test scaffolding, not",
+        "shipped artifacts, and churning them only risks breaking the install-test.",
+      ],
+      matchFileNames: ["ci/**"],
+      enabled: false,
+    },
+    {
+      description: "Patch and digest updates merge themselves once the PR pipeline is green.",
+      matchUpdateTypes: ["patch", "digest"],
+      automerge: true,
+      automergeType: "pr",
+      // Renovate waits for the checks itself instead of handing the PR to
+      // GitHub's auto-merge. GitHub would merge immediately when the branch has
+      // no required status checks configured — and validate-charts is not (yet)
+      // a required check.
+      platformAutomerge: false,
+      // A release that is hours old should not walk into main unattended; a
+      // chart publish follows the merge straight away.
+      minimumReleaseAge: "3 days",
+    },
+    {
+      description: [
+        "Chart app versions. Kept out of the automerge grouping decisions above only by label,",
+        "so it is visible at a glance which PRs republish a chart.",
+      ],
+      matchDepTypes: ["app-version"],
+      addLabels: ["app-version"],
+    },
+  ],
+
+  customManagers: [
+    {
+      description: [
+        "Tool versions pinned as workflow env vars (TRIVY_VERSION). Annotate the line with",
+        "`# renovate: datasource=<ds> depName=<dep>` and Renovate keeps it current.",
+      ],
+      customType: "regex",
+      managerFilePatterns: [".github/workflows/*.yml"],
+      matchStrings: [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s+\\w+: [\"']?(?<currentValue>[^\"'\\s]+)",
+      ],
+      versioningTemplate: "{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}",
+    },
+
+    // --- Chart app versions -------------------------------------------------
+    //
+    // Every chart renders its main image as `<repo>:{{ .Chart.AppVersion }}`,
+    // so the repository lives in the template and the version in Chart.yaml.
+    // Renovate cannot join the two across files, which is why each chart gets
+    // its own manager that hard-codes the repository and reads `appVersion:`.
+    //
+    // Deliberately *not* solved with a `# renovate:` comment inside each
+    // Chart.yaml: that would touch all 20 chart directories and force 20
+    // version bumps plus 20 publishes for a pure comment change. Keeping the
+    // mapping here leaves the charts untouched.
+    //
+    // When adding a chart, add a block here — see README "Creating a new chart".
+
+    {
+      description: "apache-tika: four-part version plus flavour suffix (3.3.1.0-full); the compatibility group keeps the chart on -full.",
+      customType: "regex",
+      managerFilePatterns: ["apache-tika/Chart.yaml"],
+      matchStrings: ["(?m)^appVersion:\\s*\"?(?<currentValue>[^\"\\s]+)\"?"],
+      depNameTemplate: "apache/tika",
+      datasourceTemplate: "docker",
+      depTypeTemplate: "app-version",
+      versioningTemplate: "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)\\.(?<build>\\d+)-(?<compatibility>full)$",
+    },
+    {
+      customType: "regex",
+      managerFilePatterns: ["calibre-web-automated/Chart.yaml"],
+      matchStrings: ["(?m)^appVersion:\\s*\"?(?<currentValue>[^\"\\s]+)\"?"],
+      depNameTemplate: "ghcr.io/crocodilestick/calibre-web-automated",
+      datasourceTemplate: "docker",
+      depTypeTemplate: "app-version",
+    },
+    {
+      customType: "regex",
+      managerFilePatterns: ["cyberchef/Chart.yaml"],
+      matchStrings: ["(?m)^appVersion:\\s*\"?(?<currentValue>[^\"\\s]+)\"?"],
+      depNameTemplate: "ghcr.io/gchq/cyberchef",
+      datasourceTemplate: "docker",
+      depTypeTemplate: "app-version",
+    },
+    {
+      customType: "regex",
+      managerFilePatterns: ["gotenberg/Chart.yaml"],
+      matchStrings: ["(?m)^appVersion:\\s*\"?(?<currentValue>[^\"\\s]+)\"?"],
+      depNameTemplate: "gotenberg/gotenberg",
+      datasourceTemplate: "docker",
+      depTypeTemplate: "app-version",
+    },
+    {
+      description: "homeassistant: CalVer tags (2026.8.3) sort correctly under docker versioning; the floating stable/beta/dev tags are skipped because they parse as no version at all.",
+      customType: "regex",
+      managerFilePatterns: ["homeassistant/Chart.yaml"],
+      matchStrings: ["(?m)^appVersion:\\s*\"?(?<currentValue>[^\"\\s]+)\"?"],
+      depNameTemplate: "ghcr.io/home-assistant/home-assistant",
+      datasourceTemplate: "docker",
+      depTypeTemplate: "app-version",
+    },
+    {
+      customType: "regex",
+      managerFilePatterns: ["matrix-synapse/Chart.yaml"],
+      matchStrings: ["(?m)^appVersion:\\s*\"?(?<currentValue>[^\"\\s]+)\"?"],
+      depNameTemplate: "ghcr.io/element-hq/synapse",
+      datasourceTemplate: "docker",
+      depTypeTemplate: "app-version",
+    },
+    {
+      customType: "regex",
+      managerFilePatterns: ["minecraft-router/Chart.yaml"],
+      matchStrings: ["(?m)^appVersion:\\s*\"?(?<currentValue>[^\"\\s]+)\"?"],
+      depNameTemplate: "itzg/mc-router",
+      datasourceTemplate: "docker",
+      depTypeTemplate: "app-version",
+    },
+    {
+      description: "minecraft-server: tags encode the JRE as a suffix (2026.8.2-java21); the compatibility group prevents a silent runtime switch.",
+      customType: "regex",
+      managerFilePatterns: ["minecraft-server/Chart.yaml"],
+      matchStrings: ["(?m)^appVersion:\\s*\"?(?<currentValue>[^\"\\s]+)\"?"],
+      depNameTemplate: "itzg/minecraft-server",
+      datasourceTemplate: "docker",
+      depTypeTemplate: "app-version",
+      versioningTemplate: "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-(?<compatibility>java\\d+)$",
+    },
+    {
+      customType: "regex",
+      managerFilePatterns: ["outline/Chart.yaml"],
+      matchStrings: ["(?m)^appVersion:\\s*\"?(?<currentValue>[^\"\\s]+)\"?"],
+      depNameTemplate: "outlinewiki/outline",
+      datasourceTemplate: "docker",
+      depTypeTemplate: "app-version",
+    },
+    {
+      customType: "regex",
+      managerFilePatterns: ["paperless-ngx/Chart.yaml"],
+      matchStrings: ["(?m)^appVersion:\\s*\"?(?<currentValue>[^\"\\s]+)\"?"],
+      depNameTemplate: "ghcr.io/paperless-ngx/paperless-ngx",
+      datasourceTemplate: "docker",
+      depTypeTemplate: "app-version",
+    },
+    {
+      customType: "regex",
+      managerFilePatterns: ["patchmon/Chart.yaml"],
+      matchStrings: ["(?m)^appVersion:\\s*\"?(?<currentValue>[^\"\\s]+)\"?"],
+      depNameTemplate: "ghcr.io/patchmon/patchmon-server",
+      datasourceTemplate: "docker",
+      depTypeTemplate: "app-version",
+    },
+    {
+      customType: "regex",
+      managerFilePatterns: ["rallly/Chart.yaml"],
+      matchStrings: ["(?m)^appVersion:\\s*\"?(?<currentValue>[^\"\\s]+)\"?"],
+      depNameTemplate: "lukevella/rallly",
+      datasourceTemplate: "docker",
+      depTypeTemplate: "app-version",
+    },
+    {
+      description: "rss-bridge: date-based tags (2025-06-03). The bump script normalizes the dashes to dots for the +up suffix, as the versioning scheme requires.",
+      customType: "regex",
+      managerFilePatterns: ["rss-bridge/Chart.yaml"],
+      matchStrings: ["(?m)^appVersion:\\s*\"?(?<currentValue>[^\"\\s]+)\"?"],
+      depNameTemplate: "docker.io/rssbridge/rss-bridge",
+      datasourceTemplate: "docker",
+      depTypeTemplate: "app-version",
+      versioningTemplate: "regex:^(?<major>\\d{4})-(?<minor>\\d{2})-(?<patch>\\d{2})$",
+    },
+    {
+      customType: "regex",
+      managerFilePatterns: ["samba/Chart.yaml"],
+      matchStrings: ["(?m)^appVersion:\\s*\"?(?<currentValue>[^\"\\s]+)\"?"],
+      depNameTemplate: "ghcr.io/dockur/samba",
+      datasourceTemplate: "docker",
+      depTypeTemplate: "app-version",
+    },
+    {
+      customType: "regex",
+      managerFilePatterns: ["satisfactory/Chart.yaml"],
+      matchStrings: ["(?m)^appVersion:\\s*\"?(?<currentValue>[^\"\\s]+)\"?"],
+      depNameTemplate: "ghcr.io/wolveix/satisfactory-server",
+      datasourceTemplate: "docker",
+      depTypeTemplate: "app-version",
+    },
+    {
+      description: "teamspeak-server: the 6.0.0 line only ships beta tags (6.0.0-beta12.1). Loose versioning compares the numeric parts left to right, so beta12.1 sorts above beta9; semver would rank every beta as an equal prerelease.",
+      customType: "regex",
+      managerFilePatterns: ["teamspeak-server/Chart.yaml"],
+      matchStrings: ["(?m)^appVersion:\\s*\"?(?<currentValue>[^\"\\s]+)\"?"],
+      depNameTemplate: "teamspeaksystems/teamspeak6-server",
+      datasourceTemplate: "docker",
+      depTypeTemplate: "app-version",
+      versioningTemplate: "loose",
+    },
+    {
+      customType: "regex",
+      managerFilePatterns: ["urlaubsverwaltung/Chart.yaml"],
+      matchStrings: ["(?m)^appVersion:\\s*\"?(?<currentValue>[^\"\\s]+)\"?"],
+      depNameTemplate: "urlaubsverwaltung/urlaubsverwaltung",
+      datasourceTemplate: "docker",
+      depTypeTemplate: "app-version",
+    },
+    {
+      customType: "regex",
+      managerFilePatterns: ["voucher-vault/Chart.yaml"],
+      matchStrings: ["(?m)^appVersion:\\s*\"?(?<currentValue>[^\"\\s]+)\"?"],
+      depNameTemplate: "l4rm4nd/vouchervault",
+      datasourceTemplate: "docker",
+      depTypeTemplate: "app-version",
+    },
+    {
+      customType: "regex",
+      managerFilePatterns: ["zipline/Chart.yaml"],
+      matchStrings: ["(?m)^appVersion:\\s*\"?(?<currentValue>[^\"\\s]+)\"?"],
+      depNameTemplate: "ghcr.io/diced/zipline",
+      datasourceTemplate: "docker",
+      depTypeTemplate: "app-version",
+    },
+  ],
+}

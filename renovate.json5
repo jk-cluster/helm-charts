@@ -119,6 +119,37 @@
       // "updates": [] and "warnings": [].
       allowedVersions: "/^\\d+\\.\\d*[02468]\\.\\d+(-.+)?$/",
     },
+    {
+      description: [
+        "linuxserver/qbittorrent carries two historic tags from earlier tagging schemes,",
+        "14.3.9 and 20.04.1, which docker versioning sorts above every real release and",
+        "offers as major updates — PRs #152 and #153 are exactly those. Both are excluded",
+        "by name.",
+      ],
+      matchDatasources: ["docker"],
+      matchPackageNames: [
+        "linuxserver/qbittorrent",
+        "docker.io/linuxserver/qbittorrent",
+      ],
+      // Excluded by name rather than by a bound such as "<10": the strays are
+      // finished artifacts that cannot grow, so naming them can never block a
+      // release that does not exist yet, while any upper bound would sooner or
+      // later reject a genuine major. Shape-based filters were measured and
+      // rejected too: requiring a non-padded minor removes 20.04.1 and leaves
+      // 14.3.9 (verified, the lookup then offers 14.3.9 instead).
+      //
+      // Verified with renovate 44.41.0 (dry-run=lookup, real registry), two
+      // fixtures against the live tag list:
+      //   currentValue 5.2.1 -> updates [5.2.3 (patch)]; both strays gone.
+      //   currentValue 4.6.4 -> updates [4.6.7 (patch), 5.2.3 (major)].
+      // The second fixture is the guard the nginx rule taught us to run: it
+      // proves a genuine major still comes through instead of the filter
+      // silently emptying the update list. It also shows what the strays cost
+      // today — without the rule that same lookup offers 20.04.1 as the major
+      // candidate and never mentions the real 5.2.3, because Renovate fills
+      // the major bucket once.
+      allowedVersions: "!/^(14\\.3\\.9|20\\.04\\.1)$/",
+    },
   ],
 
   customManagers: [

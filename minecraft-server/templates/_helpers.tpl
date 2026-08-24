@@ -95,10 +95,19 @@ the heap instead, which keeps the two from drifting apart; an explicitly set
 request always wins. The limit follows from the request via the limitFactor
 rule in "minecraft-server.resources".
 
+Since chart 4.0.0 the values block first goes through "defaultedDict" (issue
+#99), so an erased "server.resources:" falls back to the chart's requests and
+computed limits instead of rendering a container without any resource
+accounting. The fallback deliberately leaves the memory request unset, exactly
+as values.yaml does, so the derivation from the JVM heap below still applies.
+
 Input: the root context.
 */}}
 {{- define "minecraft-server.serverResources" -}}
-{{- $resources := deepCopy (.Values.server.resources | default dict) -}}
+{{- $defaults := dict
+      "limitFactor" 3
+      "requests" (dict "cpu" "2" "ephemeral-storage" "100Mi") -}}
+{{- $resources := fromYaml (include "minecraft-server.defaultedDict" (dict "defaults" $defaults "given" .Values.server.resources "path" "server.resources")) -}}
 {{- $requests := deepCopy ($resources.requests | default dict) -}}
 {{- if kindIs "invalid" $requests.memory -}}
 {{- $_ := set $requests "memory" (printf "%vGi" .Values.minecraft.resources.memory) -}}
@@ -155,4 +164,169 @@ last one silently won. Fail loudly instead.
 {{- if and .Values.curseforgeServerpack.enabled (not .Values.curseforgeServerpack.downloadUrl) -}}
 {{- fail "minecraft-server: curseforgeServerpack.enabled is true but curseforgeServerpack.downloadUrl is not set - the init container would download an empty URL" -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+Merge a user-supplied values sub-tree onto a dict of chart defaults so that a
+null / empty override falls back to the defaults instead of erasing them.
+
+Input: dict "defaults" <dict> "given" <dict|nil> "path" <string, optional
+values path used in error messages>. Output: YAML of the merged dict (consume
+it with fromYaml).
+
+Why this exists (issue #99): Helm merges values maps recursively, but an
+override key written without children — e.g. a leftover
+
+  securityContext:
+
+after deleting its last remaining sub-key — is YAML null. Where the chart
+defines a default, Helm treats that null as a deletion of the default; the
+template then renders "securityContext: null": no readOnlyRootFilesystem, no
+dropped capabilities, no allowPrivilegeEscalation: false. The workload starts
+and reports healthy while being unhardened, so nothing points at the mistake.
+The same shape erases a probe (it disappears) or the resources block (no
+requests, no computed limits). This helper defines the opposite semantics: an
+empty block means "chart defaults apply".
+
+Rules:
+  - a nil "given" is treated as an empty dict (all defaults apply).
+  - a key whose override value is null keeps the default (nulls never delete).
+  - a key present in both as a map is merged recursively, so a partially
+    filled block only overrides the keys it actually sets.
+  - a scalar override for a key the defaults define as a map is rejected with
+    a message naming the values path, instead of failing later with a template
+    field error.
+  - any other set value wins as given, including an explicit false or 0 —
+    Helm's "default" and sprig's "mergeOverwrite" would both swallow those
+    zero values, hence the explicit kindIs "invalid" nil check.
+  - keys only present in the override are passed through unchanged.
+
+NOTE: like the helpers above, this is duplicated into every chart's
+templates/_helpers.tpl with the chart's name as define prefix, because charts
+in this repo deliberately have no dependencies. The reference implementation
+lives in template-chart.
+*/}}
+{{- define "minecraft-server.defaultedDict" -}}
+{{- $defaults := .defaults | default dict -}}
+{{- $given := .given -}}
+{{- $path := .path | default "value" -}}
+{{- if kindIs "invalid" $given -}}
+{{- $given = dict -}}
+{{- end -}}
+{{- if not (kindIs "map" $given) -}}
+{{- fail (printf "%s must be a mapping or null, got %s (%v)" $path (kindOf $given) $given) -}}
+{{- end -}}
+{{- $out := deepCopy $defaults -}}
+{{- range $key, $value := $given -}}
+{{- if not (kindIs "invalid" $value) -}}
+{{- $default := index $defaults $key -}}
+{{- if and (kindIs "map" $value) (kindIs "map" $default) -}}
+{{- $_ := set $out $key (fromYaml (include "minecraft-server.defaultedDict" (dict "defaults" $default "given" $value "path" (printf "%s.%s" $path $key)))) -}}
+{{- else if kindIs "map" $default -}}
+{{- fail (printf "%s.%s must be a mapping or null, got %s (%v)" $path $key (kindOf $value) $value) -}}
+{{- else -}}
+{{- $_ := set $out $key $value -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- toYaml $out -}}
+{{- end -}}
+
+{{/*
+Pick one sub-block out of a values block that may itself be null.
+
+Input: dict "block" <dict|nil> "key" <string> "path" <string>.
+Returns YAML of dict "value" <the sub-block, may be nil>, after rejecting a
+non-mapping block with a message that names the values path. Needed because
+".Values.securityContext" can itself be erased, and indexing into nil inside a
+template is not an error but silently yields nothing.
+*/}}
+{{- define "minecraft-server.subBlock" -}}
+{{- $block := .block -}}
+{{- if kindIs "invalid" $block -}}
+{{- $block = dict -}}
+{{- end -}}
+{{- if not (kindIs "map" $block) -}}
+{{- fail (printf "%s must be a mapping or null, got %s (%v)" .path (kindOf $block) $block) -}}
+{{- end -}}
+{{- toYaml (dict "value" (index $block .key)) -}}
+{{- end -}}
+
+{{/*
+The effective security contexts and probes (issue #99); the resources block is
+covered by "minecraft-server.serverResources" above.
+
+The defaults below MUST stay in sync with the corresponding blocks in
+values.yaml, which stays the documented, user-facing place for them; this copy
+is only the fallback for the case where an override has erased the block. The
+sync is not left to discipline: rendering with every one of these blocks set to
+null is byte-identical to rendering the defaults, so a drift shows up.
+
+This chart's deviations from the repo baseline, which a "cleaned up" standard
+fallback would silently undo:
+
+  - uid/gid are pinned to 1000, the image's "minecraft" user. The image's
+    entrypoint normally starts as root and drops to that user via gosu;
+    starting as the user directly takes the non-root branch, which skips the
+    recursive chown of /data and the write to /etc/nsswitch.conf that would
+    fail on a read-only root filesystem. It is also the uid that owns the
+    existing world data on the PVC.
+  - fsGroupChangePolicy is OnRootMismatch, not Always: a recursive chown of a
+    32Gi world on every pod start costs minutes.
+  - the capabilities block carries an explicit empty "add" list alongside
+    "drop: [ALL]", matching values.yaml.
+  - all three probes run the image's own mc-health script as an EXEC probe -
+    a real Minecraft server-list ping via mc-monitor against SERVER_PORT.
+    There is no HTTP endpoint to fall back to, so a probe default rebuilt as
+    an httpGet would leave this workload with no working probe at all.
+  - the startup budget is 15s x 80 = 20 minutes, because on a fresh volume the
+    image downloads the server jar and, for FTB/CurseForge modpacks, the whole
+    modpack before the world even starts loading.
+*/}}
+{{- define "minecraft-server.podSecurityContext" -}}
+{{- $given := (fromYaml (include "minecraft-server.subBlock" (dict "block" . "key" "pod" "path" "securityContext"))).value -}}
+{{- $defaults := dict
+      "runAsNonRoot" true
+      "runAsUser" 1000
+      "runAsGroup" 1000
+      "fsGroup" 1000
+      "fsGroupChangePolicy" "OnRootMismatch" -}}
+{{- include "minecraft-server.defaultedDict" (dict "defaults" $defaults "given" $given "path" "securityContext.pod") -}}
+{{- end -}}
+
+{{- define "minecraft-server.containerSecurityContext" -}}
+{{- $given := (fromYaml (include "minecraft-server.subBlock" (dict "block" . "key" "container" "path" "securityContext"))).value -}}
+{{- $defaults := dict
+      "allowPrivilegeEscalation" false
+      "readOnlyRootFilesystem" true
+      "runAsNonRoot" true
+      "capabilities" (dict "drop" (list "ALL") "add" (list)) -}}
+{{- include "minecraft-server.defaultedDict" (dict "defaults" $defaults "given" $given "path" "securityContext.container") -}}
+{{- end -}}
+
+{{- define "minecraft-server.livenessProbe" -}}
+{{- $defaults := dict
+      "exec" (dict "command" (list "mc-health"))
+      "periodSeconds" 30
+      "timeoutSeconds" 10
+      "failureThreshold" 3 -}}
+{{- include "minecraft-server.defaultedDict" (dict "defaults" $defaults "given" . "path" "livenessProbe") -}}
+{{- end -}}
+
+{{- define "minecraft-server.readinessProbe" -}}
+{{- $defaults := dict
+      "exec" (dict "command" (list "mc-health"))
+      "periodSeconds" 15
+      "timeoutSeconds" 10
+      "failureThreshold" 3 -}}
+{{- include "minecraft-server.defaultedDict" (dict "defaults" $defaults "given" . "path" "readinessProbe") -}}
+{{- end -}}
+
+{{- define "minecraft-server.startupProbe" -}}
+{{- $defaults := dict
+      "exec" (dict "command" (list "mc-health"))
+      "periodSeconds" 15
+      "timeoutSeconds" 10
+      "failureThreshold" 80 -}}
+{{- include "minecraft-server.defaultedDict" (dict "defaults" $defaults "given" . "path" "startupProbe") -}}
 {{- end -}}

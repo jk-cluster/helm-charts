@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "title": "minecraft-server values",
-  "description": "Strict values schema (issue #68 pilot). additionalProperties is false on every chart-owned object level, so a key that the chart does not read is rejected at render time instead of being silently ignored. The only objects that stay open are the ones passed verbatim into the Kubernetes pod spec (probes, security contexts, global) - the chart does not interpret their contents, so it cannot judge which keys are meaningful.",
+  "description": "Strict values schema (issue #68 pilot). additionalProperties is false on every chart-owned object level, so a key that the chart does not read is rejected at render time instead of being silently ignored. The only objects that stay open are the ones passed verbatim into the Kubernetes pod spec (probes, security contexts, global) - the chart does not interpret their contents, so it cannot judge which keys are meaningful. The hardening, probe and resources blocks additionally accept null, because an erased block falls back to the chart defaults (issue #99). Both halves are needed and cover different cases: for a key WITH a chart default Helm's coalescing deletes the null before validation ever sees it, and only the defaultedDict fallback in _helpers.tpl catches that; for a key WITHOUT one (e.g. server.resources.limits) the null survives into validation, where a strict \"object\" would abort the render. Everything else stays strictly typed.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -75,7 +75,8 @@
           "type": "string"
         },
         "resources": {
-          "type": "object",
+          "description": "May be null / empty: the chart then falls back to its default requests and computed limits (issue #99) instead of rendering the server container without resource accounting. The memory request stays deliberately unset in that fallback, as in values.yaml, so it keeps being derived from the JVM heap (minecraft.resources.memory).",
+          "type": ["object", "null"],
           "additionalProperties": false,
           "properties": {
             "limitFactor": {
@@ -130,16 +131,17 @@
       "$ref": "#/definitions/probe"
     },
     "securityContext": {
-      "type": "object",
+      "description": "May be null / empty at any level: the chart then falls back to its hardening defaults (issue #99) instead of rendering an unhardened workload. The pod context is consumed twice - as the pod's securityContext and by the serverpack init script, which chowns the migrated files to runAsUser:runAsGroup; both reads go through the same helper.",
+      "type": ["object", "null"],
       "additionalProperties": false,
       "properties": {
         "pod": {
-          "description": "Rendered verbatim as the pod's securityContext; kept open because the chart does not interpret it.",
-          "type": "object"
+          "description": "Merged onto the chart's pod hardening defaults and rendered as the pod's securityContext; kept open because the chart does not interpret the individual fields.",
+          "type": ["object", "null"]
         },
         "container": {
-          "description": "Rendered verbatim as the container's securityContext; kept open because the chart does not interpret it.",
-          "type": "object"
+          "description": "Merged onto the chart's container hardening defaults and rendered as the securityContext of the server container and the serverpack init container; kept open because the chart does not interpret the individual fields.",
+          "type": ["object", "null"]
         }
       }
     },
@@ -283,7 +285,7 @@
   },
   "definitions": {
     "resourceList": {
-      "type": "object",
+      "type": ["object", "null"],
       "additionalProperties": false,
       "properties": {
         "cpu": {
@@ -314,8 +316,8 @@
       }
     },
     "probe": {
-      "description": "Rendered verbatim as a container probe; kept open because the chart does not interpret it.",
-      "type": "object"
+      "description": "Merged onto the chart's probe defaults and rendered as a container probe; kept open because the chart does not interpret the individual fields. May be null / empty, which means the defaults apply (issue #99) rather than the probe disappearing. The defaults carry the probe's context, not just its timings: all three run the image's mc-health script as an exec probe, which is the only health check this image offers.",
+      "type": ["object", "null"]
     }
   }
 }

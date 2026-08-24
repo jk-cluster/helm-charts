@@ -1,3 +1,11 @@
+{{/*
+The chown at the end of init.sh used to be a hardcoded 1000:1000 while the uid
+it has to match was overridable through securityContext.pod - so an override
+made the two disagree in silence. Both now read the same null-safe helper, and
+with the chart defaults the rendered script is unchanged (1000:1000), so this
+does not move checksum/config and does not roll existing pods.
+*/}}
+{{- $podCtx := fromYaml (include "minecraft-server.podSecurityContext" .Values.securityContext) -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -40,7 +48,7 @@ data:
       # not be fatal: an unprivileged process cannot chown foreign files, and
       # with "set -e" a failure here would keep the whole pod from starting.
       echo "change owner of files"
-      chown -R 1000:1000 $SERVERPACK_DIR || echo "chown skipped (not permitted); continuing"
+      chown -R {{ $podCtx.runAsUser }}:{{ $podCtx.runAsGroup }} $SERVERPACK_DIR || echo "chown skipped (not permitted); continuing"
 
       echo "successfully migrated server"
 

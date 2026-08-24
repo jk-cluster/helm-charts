@@ -35,14 +35,14 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
-        {{- toYaml .Values.securityContext.pod | nindent 8 }}
+        {{- include "minecraft-server.podSecurityContext" .Values.securityContext | nindent 8 }}
       {{- if .Values.curseforgeServerpack.enabled }}
       initContainers:
         - name: download-serverpack
           image: {{ .Values.server.initImage }}
           command: [ 'sh', '/init/init.sh' ]
           securityContext:
-            {{- toYaml .Values.securityContext.container | nindent 12 }}
+            {{- include "minecraft-server.containerSecurityContext" .Values.securityContext | nindent 12 }}
           volumeMounts:
             - name: "mc-volume"
               mountPath: /modpacks
@@ -61,7 +61,7 @@ spec:
           image: "itzg/minecraft-server:{{ .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
           securityContext:
-            {{- toYaml .Values.securityContext.container | nindent 12 }}
+            {{- include "minecraft-server.containerSecurityContext" .Values.securityContext | nindent 12 }}
           ports:
             - name: mc-port
               containerPort: {{ .Values.server.port }}
@@ -205,11 +205,11 @@ spec:
             {{- end }}
             {{- end }}
           livenessProbe:
-            {{- toYaml .Values.livenessProbe | nindent 12 }}
+            {{- include "minecraft-server.livenessProbe" .Values.livenessProbe | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.readinessProbe | nindent 12 }}
+            {{- include "minecraft-server.readinessProbe" .Values.readinessProbe | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.startupProbe | nindent 12 }}
+            {{- include "minecraft-server.startupProbe" .Values.startupProbe | nindent 12 }}
           resources:
             {{- include "minecraft-server.serverResources" . | nindent 12 }}
           volumeMounts:

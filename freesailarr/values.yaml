@@ -59,15 +59,33 @@ storage:
 #   tv:        sonarr, bazarr
 #
 # subPath mounts a sub-directory of the claim instead of its root (null = the
-# claim root, i.e. one claim per category). The same existingClaim may be used
-# for all three categories with different subPaths - that is more than a
-# convenience: Radarr and Sonarr import finished downloads into the library by
-# *moving* them, and a move within one filesystem can be a hardlink or rename
-# instead of a copy. On one volume that costs no second copy of the data and no
-# copy time; across volume boundaries a hardlink is impossible, so every import
-# duplicates the file and the download and the library each hold a full copy
-# until the torrent is removed. Example: one claim, subPaths downloads /
-# movies / tv-shows.
+# claim root, i.e. one claim per category). The same existingClaim may back all
+# three categories with different subPaths - one library volume, one
+# sub-directory per category, e.g. downloads / movies / tv-shows.
+#
+# What this buys and what it does NOT buy - measured in a k3d cluster against
+# this chart, because the usual argument for a shared volume is hardlinking:
+#   - It buys the layout: one claim to provision, back up and share with
+#     Jellyfin, with the categories as sibling directories instead of three
+#     separate volumes.
+#   - It does NOT buy hardlinked imports. Radarr and Sonarr import by moving,
+#     and a move within one filesystem can be a hardlink or a rename instead of
+#     a copy - but Kubernetes turns every volumeMount into its own bind mount,
+#     and link()/rename() across two mount points fails with EXDEV even when
+#     both sides are the same claim on the same device. Measured: /downloads and
+#     /movies in the radarr container both report device 65025 and resolve to
+#     the same PV directory, yet `ln /downloads/f /movies/f` fails with
+#     "Cross-device link", while the identical link succeeds when the claim root
+#     is mounted once and both categories are sub-directories under it.
+#     This is not a property of subPath: two plain mounts of the same claim
+#     without any subPath fail exactly the same way, so the chart has never
+#     supported cross-category hardlinks.
+#   - Consequence today: an import still copies, so download and library each
+#     hold a full copy until the torrent is removed.
+# Getting hardlinks would mean giving the apps a single mount that contains all
+# categories (the "one /data mount" layout the *arr guides recommend) instead of
+# one mount per category - a separate change to the chart's mount layout, not a
+# values setting.
 media:
   downloads:
     existingClaim: null

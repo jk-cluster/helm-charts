@@ -13,8 +13,8 @@ type: application
 # continuously, so a pod restart could pull a different image than the last one
 # without anything being recorded anywhere. The dated tags are immutable, so the
 # image is now pinned by the chart version like every other chart in this repo.
-version: 4.0.0+up2026.8.2.java17
-appVersion: "2026.8.2-java17"
+version: 4.0.1+up2026.8.2.java21
+appVersion: "2026.8.2-java21"
 
 maintainers:
   - name: jklein

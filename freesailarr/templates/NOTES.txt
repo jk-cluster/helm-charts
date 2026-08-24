@@ -1,0 +1,106 @@
+{{- $name := printf "%s-%s" .Release.Name .Chart.Name -}}
+{{- $replicas := include "freesailarr.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.replicas) -}}
+{{- /* The effective (null-safe) startup probe, so the budget below matches the
+       container even when the block has been erased (#99). */ -}}
+{{- $startup := fromYaml (include "freesailarr.probeFor" (dict "root" $ "app" "gluetun" "kind" "startupProbe" "given" .Values.gluetun.startupProbe)) -}}
+{{- $budget := mul (int $startup.periodSeconds) (int $startup.failureThreshold) -}}
+{{- $ingressApps := include "freesailarr.ingressApps" . | fromJsonArray -}}
+{{- $portApps := include "freesailarr.portApps" . | fromJsonArray -}}
+freesailarr — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+Nine containers in ONE pod, sharing gluetun's network namespace.
+
+NOTHING IS READY UNTIL THE TUNNEL IS UP
+  gluetun's readiness probe is its health server, which answers 200 only while
+  the Wireguard tunnel is actually working. So "pod not Ready" almost always
+  means "no tunnel", not "app broken". The startup budget is {{ $budget }}s before
+  Kubernetes starts killing the container:
+
+    kubectl -n {{ .Release.Namespace }} logs {{ $name }}-sfs-0 -c gluetun -f
+
+  While gluetun is down its firewall keeps blocking every app container's
+  egress. That is the kill switch doing its job — the apps stay up and simply
+  reach nothing.
+
+THE 1PASSWORD ITEM AND THE TWO FIELDS IT MUST CONTAIN
+  secrets.gluetunSecretRef -> {{ .Values.secrets.gluetunSecretRef | default "(not set)" }}
+    wireguard-private-key
+    wireguard-addresses
+
+  A missing field does not fail the install: gluetun starts with the variable
+  empty and never completes a handshake.
+
+    kubectl -n {{ .Release.Namespace }} get onepassworditem {{ $name }}-gluetun-secret
+{{- if not .Values.gluetun.vpn.firewallOutboundSubnets }}
+
+SET gluetun.vpn.firewallOutboundSubnets — IT IS EMPTY RIGHT NOW
+  Without it the gluetun firewall blocks cluster-internal egress as well:
+  lookups against cluster DNS and seerr reaching an in-cluster Jellyfin both
+  fail, in a way that looks like an application bug. Set it to the cluster pod
+  and service CIDRs, e.g. "10.42.0.0/16,10.43.0.0/16" on k3s.
+{{- end }}
+
+ACCESS
+{{- if and .Values.ingress.enabled $ingressApps }}
+{{- range $ingressApps }}
+{{- $cfg := (index $.Values .name).ingress }}
+  {{ .name }}: https://{{ $cfg.host }}
+{{- end }}
+
+  Each app has its OWN Ingress and its own TLS secret; while cert-manager is
+  still issuing, the browser warns:
+
+    kubectl -n {{ .Release.Namespace }} get certificate
+{{- else }}
+  No Ingress is rendered{{ if not .Values.ingress.enabled }} (ingress.enabled is false){{ end }}. Reach an app through its own service:
+{{- range $portApps }}
+
+    kubectl -n {{ $.Release.Namespace }} port-forward svc/{{ $name }}-{{ .name }}-service {{ .port }}:{{ .port }}
+{{- end }}
+{{- end }}
+{{- if .Values.qbittorrent.enabled }}
+
+  qBittorrent's WebUI rejects a Host header whose port differs from its own
+  ({{ "8080" }}) with a plain 401. A port-forward on a different local port therefore
+  looks like a login failure — forward 8080:8080, or go through the ingress.
+{{- end }}
+
+EVERY SERVICE POINTS AT THE SAME POD IP
+  One ClusterIP service per app{{ if .Values.recyclarr.enabled }} (recyclarr has none — no port in daemon mode){{ end }}, but all
+  containers share gluetun's network namespace, so the services differ only in
+  their port. They give you stable per-app DNS names, NOT network separation
+  between the apps.
+
+TOGGLING AN APP OFF AND ON LATER NEEDS ONE MANUAL STEP
+  The config volumes come from volumeClaimTemplates, and those are immutable.
+  Changing any <app>.enabled after the first install makes the upgrade fail
+  until the StatefulSet is recreated — the data survives:
+
+    kubectl -n {{ .Release.Namespace }} delete statefulset {{ $name }}-sfs --cascade=orphan
+
+THE MEDIA CLAIMS ARE YOURS, THE CONFIG VOLUMES ARE THE CHART'S
+  media.<category>.existingClaim is mounted, never created, and is meant to be
+  shared with your Jellyfin. One claim can serve all three categories via
+  media.<category>.subPath.
+
+  Measured, so you do not plan around something that does not happen: Radarr
+  and Sonarr do NOT hardlink between the categories, not even on one claim.
+  Kubernetes makes every volumeMount its own bind mount and link() across two
+  mount points fails with EXDEV regardless of subPath, so an import copies.
+
+  The containers write as {{ .Values.puid }}:{{ .Values.pgid }}. If the claims already hold data
+  owned by someone else, fix the ownership before the first start — the pod
+  will not do it for you (fsGroupChangePolicy is OnRootMismatch, deliberately,
+  so a large library is not recursively re-chowned on every start).
+{{- if eq $replicas "0" }}
+
+SCALED TO ZERO
+  {{ if .Values.scaleDown }}scaleDown: true{{ else }}replicas: 0{{ end }} — the StatefulSet runs with replicas: 0. PVCs, secrets,
+  services{{ if .Values.ingress.enabled }} and ingresses{{ end }} stay in place; set it back and upgrade to bring the
+  stack up again.
+{{- else if ne $replicas "1" }}
+
+MORE THAN ONE REPLICA IS NOT MEANINGFUL
+  replicas is {{ $replicas }}. Each replica would run its own isolated stack on its own
+  config volumes, all of them fighting over the same media claims and the same
+  VPN credentials.
+{{- end }}

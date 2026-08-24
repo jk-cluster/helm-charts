@@ -218,3 +218,497 @@ alive. It is not what opens the ports today.
 {{- $ports = append $ports 9999 -}}
 {{- join "," $ports -}}
 {{- end -}}
+
+{{/*
+Recursive merge of an override onto defaults where null never deletes and set
+values always win, including false and 0 (issue #99).
+
+Input: dict "defaults" <dict> "given" <dict|nil> "path" <values path, for errors>.
+
+NOTE: like the resources helper above, this is duplicated into every chart's
+templates/_helpers.tpl with the chart's name as define prefix. The reference
+implementation lives in template-chart.
+*/}}
+{{- define "freesailarr.defaultedDict" -}}
+{{- $defaults := .defaults | default dict -}}
+{{- $given := .given -}}
+{{- $path := .path | default "value" -}}
+{{- if kindIs "invalid" $given -}}
+{{- $given = dict -}}
+{{- end -}}
+{{- if not (kindIs "map" $given) -}}
+{{- fail (printf "%s must be a mapping or null, got %s (%v)" $path (kindOf $given) $given) -}}
+{{- end -}}
+{{- $out := deepCopy $defaults -}}
+{{- range $key, $value := $given -}}
+{{- if not (kindIs "invalid" $value) -}}
+{{- $default := index $defaults $key -}}
+{{- if and (kindIs "map" $value) (kindIs "map" $default) -}}
+{{- $_ := set $out $key (fromYaml (include "freesailarr.defaultedDict" (dict "defaults" $default "given" $value "path" (printf "%s.%s" $path $key)))) -}}
+{{- else if kindIs "map" $default -}}
+{{- fail (printf "%s.%s must be a mapping or null, got %s (%v)" $path $key (kindOf $value) $value) -}}
+{{- else -}}
+{{- $_ := set $out $key $value -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- toYaml $out -}}
+{{- end -}}
+
+{{/*
+Pick one sub-block out of a values block that may itself be null.
+Input: dict "block" <dict|nil> "key" <string> "path" <string>.
+Needed because ".Values.<app>.securityContext" can itself be erased, and
+indexing into nil inside a template is not an error but silently yields
+nothing.
+*/}}
+{{- define "freesailarr.subBlock" -}}
+{{- $block := .block -}}
+{{- if kindIs "invalid" $block -}}
+{{- $block = dict -}}
+{{- end -}}
+{{- if not (kindIs "map" $block) -}}
+{{- fail (printf "%s must be a mapping or null, got %s (%v)" .path (kindOf $block) $block) -}}
+{{- end -}}
+{{- toYaml (dict "value" (index $block .key)) -}}
+{{- end -}}
+
+{{/*
+The chart's own defaults for every block of the "silent class" from issue #99 -
+security contexts, probes and resources. An override that erases one of these
+blocks (`key:` with no children, i.e. null) would otherwise render a container
+without hardening, without a probe or without resource accounting: it comes up,
+reports green and is quietly weaker. The accessors below merge the user's block
+onto these defaults with freesailarr.defaultedDict, where null never deletes.
+
+These MUST stay in sync with values.yaml, which remains the documented,
+user-facing place for them; this copy is only the fallback. The sync is not left
+to discipline: rendering the chart with every one of these blocks explicitly set
+to null must produce byte-identical output to rendering it with the defaults,
+which is how the table was verified and how a drift shows up.
+
+Two rules this table exists to honour (README, "Chart style guidelines"):
+
+  - It reproduces THIS chart's defaults, deviations included, not the repo
+    standard. The five linuxserver.io containers deliberately run without
+    runAsNonRoot and with a writable root filesystem, because their s6-overlay
+    init starts as root and drops to PUID/PGID; "restoring" the clean standard
+    here would leave them on the image's built-in uid 911 and make the existing
+    media volumes inaccessible - the exact failure calibre-web-automated hit.
+    flaresolverr's numerically pinned uid/gid 1000 and gluetun's NET_ADMIN are
+    reproduced for the same reason.
+  - The probe defaults carry their CONTEXT, not just timings: every httpGet
+    keeps its path and port, and recyclarr - which serves no HTTP port in
+    daemon mode - keeps its exec command. A probe default without them is worse
+    than no default.
+*/}}
+{{- define "freesailarr.fallbacks" -}}
+gluetun:
+  livenessProbe:
+    httpGet:
+      path: /
+      port: 9999
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 6
+  readinessProbe:
+    httpGet:
+      path: /
+      port: 9999
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  startupProbe:
+    httpGet:
+      path: /
+      port: 9999
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30
+  resources:
+    limitFactor: 3
+    requests:
+      cpu: 0.1
+      memory: 128Mi
+      ephemeralStorage: 50Mi
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - NET_ADMIN
+qbittorrent:
+  livenessProbe:
+    httpGet:
+      path: /
+      port: 8080
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /
+      port: 8080
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  startupProbe:
+    httpGet:
+      path: /
+      port: 8080
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30
+  resources:
+    limitFactor: 3
+    requests:
+      cpu: 0.2
+      memory: 512Mi
+      ephemeralStorage: 100Mi
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - CHOWN
+        - DAC_OVERRIDE
+        - FOWNER
+        - SETGID
+        - SETUID
+prowlarr:
+  livenessProbe:
+    httpGet:
+      path: /ping
+      port: 9696
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /ping
+      port: 9696
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  startupProbe:
+    httpGet:
+      path: /ping
+      port: 9696
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30
+  resources:
+    limitFactor: 3
+    requests:
+      cpu: 0.1
+      memory: 256Mi
+      ephemeralStorage: 100Mi
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - CHOWN
+        - DAC_OVERRIDE
+        - FOWNER
+        - SETGID
+        - SETUID
+flaresolverr:
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 8191
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 8191
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  startupProbe:
+    httpGet:
+      path: /health
+      port: 8191
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30
+  resources:
+    limitFactor: 3
+    requests:
+      cpu: 0.2
+      memory: 512Mi
+      ephemeralStorage: 200Mi
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    capabilities:
+      drop:
+        - ALL
+radarr:
+  livenessProbe:
+    httpGet:
+      path: /ping
+      port: 7878
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /ping
+      port: 7878
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  startupProbe:
+    httpGet:
+      path: /ping
+      port: 7878
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30
+  resources:
+    limitFactor: 3
+    requests:
+      cpu: 0.1
+      memory: 256Mi
+      ephemeralStorage: 100Mi
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - CHOWN
+        - DAC_OVERRIDE
+        - FOWNER
+        - SETGID
+        - SETUID
+recyclarr:
+  livenessProbe:
+    exec:
+      command:
+        - recyclarr
+        - --version
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 3
+  readinessProbe:
+    exec:
+      command:
+        - recyclarr
+        - --version
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 3
+  startupProbe:
+    exec:
+      command:
+        - recyclarr
+        - --version
+    periodSeconds: 5
+    timeoutSeconds: 10
+    failureThreshold: 30
+  resources:
+    limitFactor: 3
+    requests:
+      cpu: 0.05
+      memory: 128Mi
+      ephemeralStorage: 50Mi
+  securityContext:
+    runAsUser: {{ .Values.puid }}
+    runAsGroup: {{ .Values.pgid }}
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    capabilities:
+      drop:
+        - ALL
+sonarr:
+  livenessProbe:
+    httpGet:
+      path: /ping
+      port: 8989
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /ping
+      port: 8989
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  startupProbe:
+    httpGet:
+      path: /ping
+      port: 8989
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30
+  resources:
+    limitFactor: 3
+    requests:
+      cpu: 0.1
+      memory: 256Mi
+      ephemeralStorage: 100Mi
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - CHOWN
+        - DAC_OVERRIDE
+        - FOWNER
+        - SETGID
+        - SETUID
+seerr:
+  livenessProbe:
+    httpGet:
+      path: /api/v1/settings/public
+      port: 5055
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /api/v1/settings/public
+      port: 5055
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  startupProbe:
+    httpGet:
+      path: /api/v1/settings/public
+      port: 5055
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 30
+  resources:
+    limitFactor: 3
+    requests:
+      cpu: 0.1
+      memory: 256Mi
+      ephemeralStorage: 100Mi
+  securityContext:
+    runAsUser: {{ .Values.puid }}
+    runAsGroup: {{ .Values.pgid }}
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    capabilities:
+      drop:
+        - ALL
+bazarr:
+  livenessProbe:
+    httpGet:
+      path: /
+      port: 6767
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /
+      port: 6767
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  startupProbe:
+    httpGet:
+      path: /
+      port: 6767
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30
+  resources:
+    limitFactor: 3
+    requests:
+      cpu: 0.1
+      memory: 256Mi
+      ephemeralStorage: 100Mi
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - CHOWN
+        - DAC_OVERRIDE
+        - FOWNER
+        - SETGID
+        - SETUID
+configInit:
+  resources:
+    limitFactor: 3
+    requests:
+      cpu: 10m
+      memory: 16Mi
+      ephemeralStorage: 1Mi
+  securityContext:
+    runAsUser: {{ .Values.puid }}
+    runAsGroup: {{ .Values.pgid }}
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+{{- end -}}
+
+{{/*
+The effective pod security context. Separate from the per-container table
+because it is the one block shared by all nine containers.
+*/}}
+{{- define "freesailarr.podSecurityContext" -}}
+{{- $given := (fromYaml (include "freesailarr.subBlock" (dict "block" .Values.securityContext "key" "pod" "path" "securityContext"))).value -}}
+{{- $defaults := dict
+      "fsGroup" 1000
+      "fsGroupChangePolicy" "OnRootMismatch"
+      "seccompProfile" (dict "type" "RuntimeDefault") -}}
+{{- include "freesailarr.defaultedDict" (dict "defaults" $defaults "given" $given "path" "securityContext.pod") -}}
+{{- end -}}
+
+{{/*
+The effective probe / security context / resources for one container.
+
+Input: dict "root" $ "app" <key in the fallback table> "given" <the values block>
+       and, for probes, "kind" <livenessProbe|readinessProbe|startupProbe>.
+
+"given" is passed in rather than derived from "app" because the qbittorrent init
+container's blocks live under qbittorrent.configInit, not under a top-level key
+of the same name.
+*/}}
+{{- define "freesailarr.probeFor" -}}
+{{- $fb := fromYaml (include "freesailarr.fallbacks" .root) -}}
+{{- $defaults := index $fb .app .kind -}}
+{{- include "freesailarr.defaultedDict" (dict "defaults" $defaults "given" .given "path" (printf "%s.%s" .app .kind)) -}}
+{{- end -}}
+
+{{- define "freesailarr.securityContextFor" -}}
+{{- $fb := fromYaml (include "freesailarr.fallbacks" .root) -}}
+{{- $defaults := index $fb .app "securityContext" -}}
+{{- include "freesailarr.defaultedDict" (dict "defaults" $defaults "given" .given "path" (printf "%s.securityContext" .app)) -}}
+{{- end -}}
+
+{{- define "freesailarr.resourcesFor" -}}
+{{- $fb := fromYaml (include "freesailarr.fallbacks" .root) -}}
+{{- $defaults := index $fb .app "resources" -}}
+{{- $merged := fromYaml (include "freesailarr.defaultedDict" (dict "defaults" $defaults "given" .given "path" (printf "%s.resources" .app))) -}}
+{{- include "freesailarr.resources" $merged -}}
+{{- end -}}

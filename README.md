@@ -247,8 +247,8 @@ Reference implementation: `template-chart/values.schema.json` and `template-char
 
 ### 13. Everything else
 
-- `icon:` is mandatory in every `Chart.yaml`.
+- `icon:` is mandatory in every `Chart.yaml`. **Documented exception — freesailarr**: it bundles nine independently versioned projects, so every other chart's rule (the icon is its one upstream's logo) has no answer here, and picking one of the nine would imply a "main app" the stack does not have. The field is omitted; `helm lint --strict` reports `icon is recommended` as INFO and still exits 0.
 - `helm lint --strict` must pass without findings.
-- `NOTES.txt` for every chart is planned (#43); currently only homeassistant ships one.
+- `NOTES.txt` for every chart is planned (#43); seven charts ship one so far (`apache-tika`, `cyberchef`, `freesailarr`, `gotenberg`, `homeassistant`, `patchmon`, `rss-bridge`).
 - CI: every installable chart has fixtures under `ci/<chart>/` (`test-values.yaml`, optionally `fixtures.yaml`/`settings.env`) or a justified entry in `ci/excluded-charts.txt` — the install-test fails if both are missing.
 - Charts have no dependencies (`charts/` directories are empty).

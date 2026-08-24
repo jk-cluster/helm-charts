@@ -1,0 +1,730 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "freesailarr values",
+  "description": "Values schema (issue #68). additionalProperties is false on every chart-owned object level, so a key the chart does not read is rejected at render time instead of being silently ignored. The objects that go verbatim into the pod spec - probes, security contexts, free-form annotations, global - stay open, because the chart does not interpret their contents. The hardening, probe and resources blocks additionally accept null: an override may erase them, and the chart then falls back to its own defaults (issue #99) rather than rendering a container without hardening, without a probe or without resource accounting.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "global": {
+      "description": "Helm's conventional cross-chart values. Unused by this chart, kept open so an umbrella install cannot break on it.",
+      "type": "object"
+    },
+    "scaleDown": {
+      "type": "boolean"
+    },
+    "replicas": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "secrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "gluetunSecretRef": {
+          "description": "op:// item path for the gluetun VPN credentials. The item must carry the fields wireguard-private-key and wireguard-addresses; the template reads exactly those names.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "puid": {
+      "description": "User the linuxserver.io containers drop to after their s6-overlay init, and runAsUser for seerr and recyclarr.",
+      "type": "integer"
+    },
+    "pgid": {
+      "type": "integer"
+    },
+    "timezone": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "securityContext": {
+      "$ref": "#/definitions/podSecurityContextBlock"
+    },
+    "storage": {
+      "description": "StorageClass for the config volumeClaimTemplates. Deliberately NOT null-safe: an erased block yields an invalid claim template, which fails loudly, and issue #99 covers only the silent class.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "storageClass": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "media": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "downloads": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "existingClaim": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "subPath": {
+              "description": "Sub-directory of the claim to mount instead of its root. null means the claim root.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "movies": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "existingClaim": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "subPath": {
+              "description": "Sub-directory of the claim to mount instead of its root. null means the claim root.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "tv": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "existingClaim": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "subPath": {
+              "description": "Sub-directory of the claim to mount instead of its root. null means the claim root.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "ingress": {
+      "description": "Defaults for the per-app ingresses. There is deliberately no global domain - each app carries its own host.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "Master switch; false suppresses every app ingress regardless of the per-app toggles.",
+          "type": "boolean"
+        },
+        "clusterIssuer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "className": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "annotations": {
+          "description": "Extra Ingress annotations, merged with the cert-manager annotation the chart always sets. Free-form keys by nature, so this object stays open.",
+          "type": "object"
+        }
+      }
+    },
+    "gluetun": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "$ref": "#/definitions/image"
+        },
+        "vpn": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "serviceProvider": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "serverCities": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "serverCountries": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "dnsUpstreamResolvers": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "firewallOutboundSubnets": {
+              "description": "Comma-separated CIDRs the gluetun firewall allows outbound outside the tunnel. Set to the cluster pod and service CIDRs.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "storage": {
+          "$ref": "#/definitions/appStorage"
+        },
+        "env": {
+          "$ref": "#/definitions/env"
+        },
+        "livenessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "readinessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "startupProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "securityContext": {
+          "$ref": "#/definitions/containerSecurityContext"
+        }
+      }
+    },
+    "qbittorrent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "image": {
+          "$ref": "#/definitions/image"
+        },
+        "ingress": {
+          "$ref": "#/definitions/appIngress"
+        },
+        "storage": {
+          "$ref": "#/definitions/appStorage"
+        },
+        "networkInterface": {
+          "description": "Interface the BitTorrent session binds to (gluetun's tun device). null or \"\" removes the init container that seeds it and leaves the binding unset - which lets libtorrent announce past the tunnel.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "configInit": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "image": {
+              "$ref": "#/definitions/image"
+            },
+            "resources": {
+              "$ref": "#/definitions/resources"
+            },
+            "securityContext": {
+              "$ref": "#/definitions/containerSecurityContext"
+            }
+          }
+        },
+        "env": {
+          "$ref": "#/definitions/env"
+        },
+        "livenessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "readinessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "startupProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "securityContext": {
+          "$ref": "#/definitions/containerSecurityContext"
+        }
+      }
+    },
+    "prowlarr": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "image": {
+          "$ref": "#/definitions/image"
+        },
+        "ingress": {
+          "$ref": "#/definitions/appIngress"
+        },
+        "storage": {
+          "$ref": "#/definitions/appStorage"
+        },
+        "env": {
+          "$ref": "#/definitions/env"
+        },
+        "livenessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "readinessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "startupProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "securityContext": {
+          "$ref": "#/definitions/containerSecurityContext"
+        }
+      }
+    },
+    "flaresolverr": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "image": {
+          "$ref": "#/definitions/image"
+        },
+        "env": {
+          "$ref": "#/definitions/env"
+        },
+        "livenessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "readinessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "startupProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "securityContext": {
+          "$ref": "#/definitions/containerSecurityContext"
+        }
+      }
+    },
+    "radarr": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "image": {
+          "$ref": "#/definitions/image"
+        },
+        "ingress": {
+          "$ref": "#/definitions/appIngress"
+        },
+        "storage": {
+          "$ref": "#/definitions/appStorage"
+        },
+        "env": {
+          "$ref": "#/definitions/env"
+        },
+        "livenessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "readinessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "startupProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "securityContext": {
+          "$ref": "#/definitions/containerSecurityContext"
+        }
+      }
+    },
+    "recyclarr": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "image": {
+          "$ref": "#/definitions/image"
+        },
+        "storage": {
+          "$ref": "#/definitions/appStorage"
+        },
+        "env": {
+          "$ref": "#/definitions/env"
+        },
+        "livenessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "readinessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "startupProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "securityContext": {
+          "$ref": "#/definitions/containerSecurityContext"
+        }
+      }
+    },
+    "sonarr": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "image": {
+          "$ref": "#/definitions/image"
+        },
+        "ingress": {
+          "$ref": "#/definitions/appIngress"
+        },
+        "storage": {
+          "$ref": "#/definitions/appStorage"
+        },
+        "env": {
+          "$ref": "#/definitions/env"
+        },
+        "livenessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "readinessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "startupProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "securityContext": {
+          "$ref": "#/definitions/containerSecurityContext"
+        }
+      }
+    },
+    "seerr": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "image": {
+          "$ref": "#/definitions/image"
+        },
+        "ingress": {
+          "$ref": "#/definitions/appIngress"
+        },
+        "storage": {
+          "$ref": "#/definitions/appStorage"
+        },
+        "env": {
+          "$ref": "#/definitions/env"
+        },
+        "livenessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "readinessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "startupProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "securityContext": {
+          "$ref": "#/definitions/containerSecurityContext"
+        }
+      }
+    },
+    "bazarr": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "image": {
+          "$ref": "#/definitions/image"
+        },
+        "ingress": {
+          "$ref": "#/definitions/appIngress"
+        },
+        "storage": {
+          "$ref": "#/definitions/appStorage"
+        },
+        "env": {
+          "$ref": "#/definitions/env"
+        },
+        "livenessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "readinessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "startupProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "securityContext": {
+          "$ref": "#/definitions/containerSecurityContext"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "image": {
+      "description": "Every image in this chart is pinned here, gluetun included; no tag comes from appVersion. This is also what puts them all under Renovate's helm-values manager, which reads exactly these two keys.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "tag": {
+          "type": [
+            "string",
+            "number"
+          ]
+        }
+      }
+    },
+    "appIngress": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "host": {
+          "description": "Required while this app's ingress is enabled, and never demanded when it is off.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "clusterIssuer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "className": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "annotations": {
+          "description": "Overrides the global ingress annotations for this app; free-form, so kept open.",
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      }
+    },
+    "appStorage": {
+      "description": "Size of this app's config volumeClaimTemplate. Not null-safe on purpose: an erased size yields an invalid claim template and fails loudly.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "size": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "resources": {
+      "description": "May be null / empty: the chart then falls back to this container's own default requests and computed limits (issue #99).",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "limitFactor": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "requests": {
+          "$ref": "#/definitions/resourceList"
+        },
+        "limits": {
+          "$ref": "#/definitions/resourceList"
+        }
+      }
+    },
+    "resourceList": {
+      "description": "Both spellings of the ephemeral-storage key are accepted because the resources helper normalizes camelCase to the Kubernetes key.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "cpu": {
+          "type": [
+            "string",
+            "number",
+            "null"
+          ]
+        },
+        "memory": {
+          "type": [
+            "string",
+            "number",
+            "null"
+          ]
+        },
+        "ephemeral-storage": {
+          "type": [
+            "string",
+            "number",
+            "null"
+          ]
+        },
+        "ephemeralStorage": {
+          "type": [
+            "string",
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "env": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "valueFrom": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "secretKeyRef": {
+                "$ref": "#/definitions/keyRef"
+              },
+              "configMapKeyRef": {
+                "$ref": "#/definitions/keyRef"
+              }
+            }
+          }
+        }
+      }
+    },
+    "keyRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "key"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        }
+      }
+    },
+    "podSecurityContextBlock": {
+      "description": "May be null / empty at any level: the chart then falls back to its pod hardening defaults (issue #99), seccompProfile included.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "pod": {
+          "description": "Merged onto the chart's pod hardening defaults; kept open because the chart does not interpret the individual fields.",
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      }
+    },
+    "containerSecurityContext": {
+      "description": "Merged onto THIS container's hardening defaults; kept open because the chart does not interpret the individual fields. May be null / empty, in which case those defaults apply (issue #99). The fallbacks reproduce this chart's deliberate deviations - the linuxserver.io containers start as root and keep a writable root filesystem so their s6 init can drop to PUID/PGID, and restoring the 'clean' standard there would leave them on the image's uid 911.",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "probe": {
+      "description": "Merged onto this container's probe defaults; kept open because the chart does not interpret the individual fields. May be null / empty, which means the defaults apply (issue #99) rather than the probe disappearing. The defaults carry their context - path and port, and recyclarr's exec command, since it serves no HTTP port.",
+      "type": [
+        "object",
+        "null"
+      ]
+    }
+  }
+}

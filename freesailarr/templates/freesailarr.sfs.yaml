@@ -17,12 +17,23 @@ spec:
   template:
     metadata:
       name: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
+      annotations:
+        # There is no ConfigMap in this chart, so checksum/config does not
+        # apply. What does apply is the op:// path: Helm never sees the secret's
+        # contents - the 1Password operator fills the Secret in the cluster -
+        # but it does see which item the OnePasswordItem points at. Repointing
+        # secrets.gluetunSecretRef at a different vault item therefore takes
+        # effect instead of silently leaving the old credentials in the running
+        # pod. The name differs from checksum/config on purpose: that one
+        # promises "the config changed", this one only "the config source
+        # changed" (#82).
+        checksum/secret-ref: {{ include (print $.Template.BasePath "/freesailarr-gluetun.secret.yaml") . | sha256sum }}
       labels:
         app: {{ .Release.Name }}-{{ .Chart.Name }}-sfs
     spec:
       automountServiceAccountToken: false
       securityContext:
-        {{- toYaml .Values.securityContext.pod | nindent 8 }}
+        {{- include "freesailarr.podSecurityContext" . | nindent 8 }}
       {{- if and .Values.qbittorrent.enabled .Values.qbittorrent.networkInterface }}
       initContainers:
         # qBittorrent has no environment variable for the session's network
@@ -71,11 +82,9 @@ spec:
             - name: QBT_INTERFACE
               value: {{ .Values.qbittorrent.networkInterface | quote }}
           resources:
-            {{- include "freesailarr.resources" .Values.qbittorrent.configInit.resources | nindent 12 }}
+            {{- include "freesailarr.resourcesFor" (dict "root" $ "app" "configInit" "given" .Values.qbittorrent.configInit.resources) | nindent 12 }}
           securityContext:
-            runAsUser: {{ .Values.puid }}
-            runAsGroup: {{ .Values.pgid }}
-            {{- toYaml .Values.qbittorrent.configInit.securityContext | nindent 12 }}
+            {{- include "freesailarr.securityContextFor" (dict "root" $ "app" "configInit" "given" .Values.qbittorrent.configInit.securityContext) | nindent 12 }}
           volumeMounts:
             - mountPath: /config
               name: qbittorrent-config
@@ -151,15 +160,15 @@ spec:
               protocol: TCP
               name: health
           livenessProbe:
-            {{- toYaml .Values.gluetun.livenessProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "gluetun" "kind" "livenessProbe" "given" .Values.gluetun.livenessProbe) | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.gluetun.readinessProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "gluetun" "kind" "readinessProbe" "given" .Values.gluetun.readinessProbe) | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.gluetun.startupProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "gluetun" "kind" "startupProbe" "given" .Values.gluetun.startupProbe) | nindent 12 }}
           resources:
-            {{- include "freesailarr.resources" .Values.gluetun.resources | nindent 12 }}
+            {{- include "freesailarr.resourcesFor" (dict "root" $ "app" "gluetun" "given" .Values.gluetun.resources) | nindent 12 }}
           securityContext:
-            {{- toYaml .Values.gluetun.securityContext | nindent 12 }}
+            {{- include "freesailarr.securityContextFor" (dict "root" $ "app" "gluetun" "given" .Values.gluetun.securityContext) | nindent 12 }}
           volumeMounts:
             - mountPath: /gluetun
               name: gluetun-config
@@ -201,15 +210,15 @@ spec:
               protocol: TCP
               name: qbittorrent
           livenessProbe:
-            {{- toYaml .Values.qbittorrent.livenessProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "qbittorrent" "kind" "livenessProbe" "given" .Values.qbittorrent.livenessProbe) | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.qbittorrent.readinessProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "qbittorrent" "kind" "readinessProbe" "given" .Values.qbittorrent.readinessProbe) | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.qbittorrent.startupProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "qbittorrent" "kind" "startupProbe" "given" .Values.qbittorrent.startupProbe) | nindent 12 }}
           resources:
-            {{- include "freesailarr.resources" .Values.qbittorrent.resources | nindent 12 }}
+            {{- include "freesailarr.resourcesFor" (dict "root" $ "app" "qbittorrent" "given" .Values.qbittorrent.resources) | nindent 12 }}
           securityContext:
-            {{- toYaml .Values.qbittorrent.securityContext | nindent 12 }}
+            {{- include "freesailarr.securityContextFor" (dict "root" $ "app" "qbittorrent" "given" .Values.qbittorrent.securityContext) | nindent 12 }}
           volumeMounts:
             - mountPath: /config
               name: qbittorrent-config
@@ -236,15 +245,15 @@ spec:
               protocol: TCP
               name: prowlarr
           livenessProbe:
-            {{- toYaml .Values.prowlarr.livenessProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "prowlarr" "kind" "livenessProbe" "given" .Values.prowlarr.livenessProbe) | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.prowlarr.readinessProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "prowlarr" "kind" "readinessProbe" "given" .Values.prowlarr.readinessProbe) | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.prowlarr.startupProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "prowlarr" "kind" "startupProbe" "given" .Values.prowlarr.startupProbe) | nindent 12 }}
           resources:
-            {{- include "freesailarr.resources" .Values.prowlarr.resources | nindent 12 }}
+            {{- include "freesailarr.resourcesFor" (dict "root" $ "app" "prowlarr" "given" .Values.prowlarr.resources) | nindent 12 }}
           securityContext:
-            {{- toYaml .Values.prowlarr.securityContext | nindent 12 }}
+            {{- include "freesailarr.securityContextFor" (dict "root" $ "app" "prowlarr" "given" .Values.prowlarr.securityContext) | nindent 12 }}
           volumeMounts:
             - mountPath: /config
               name: prowlarr-config
@@ -262,15 +271,15 @@ spec:
               protocol: TCP
               name: flaresolverr
           livenessProbe:
-            {{- toYaml .Values.flaresolverr.livenessProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "flaresolverr" "kind" "livenessProbe" "given" .Values.flaresolverr.livenessProbe) | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.flaresolverr.readinessProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "flaresolverr" "kind" "readinessProbe" "given" .Values.flaresolverr.readinessProbe) | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.flaresolverr.startupProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "flaresolverr" "kind" "startupProbe" "given" .Values.flaresolverr.startupProbe) | nindent 12 }}
           resources:
-            {{- include "freesailarr.resources" .Values.flaresolverr.resources | nindent 12 }}
+            {{- include "freesailarr.resourcesFor" (dict "root" $ "app" "flaresolverr" "given" .Values.flaresolverr.resources) | nindent 12 }}
           securityContext:
-            {{- toYaml .Values.flaresolverr.securityContext | nindent 12 }}
+            {{- include "freesailarr.securityContextFor" (dict "root" $ "app" "flaresolverr" "given" .Values.flaresolverr.securityContext) | nindent 12 }}
           volumeMounts:
             # Writable paths for headless chromium so the root filesystem
             # stays read-only; /dev/shm is a memory-backed emptyDir because
@@ -297,15 +306,15 @@ spec:
               protocol: TCP
               name: radarr
           livenessProbe:
-            {{- toYaml .Values.radarr.livenessProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "radarr" "kind" "livenessProbe" "given" .Values.radarr.livenessProbe) | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.radarr.readinessProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "radarr" "kind" "readinessProbe" "given" .Values.radarr.readinessProbe) | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.radarr.startupProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "radarr" "kind" "startupProbe" "given" .Values.radarr.startupProbe) | nindent 12 }}
           resources:
-            {{- include "freesailarr.resources" .Values.radarr.resources | nindent 12 }}
+            {{- include "freesailarr.resourcesFor" (dict "root" $ "app" "radarr" "given" .Values.radarr.resources) | nindent 12 }}
           securityContext:
-            {{- toYaml .Values.radarr.securityContext | nindent 12 }}
+            {{- include "freesailarr.securityContextFor" (dict "root" $ "app" "radarr" "given" .Values.radarr.securityContext) | nindent 12 }}
           volumeMounts:
             - mountPath: /config
               name: radarr-config
@@ -331,17 +340,15 @@ spec:
               value: "true"
             {{- include "freesailarr.env" (dict "root" $ "env" .Values.recyclarr.env) | nindent 12 }}
           livenessProbe:
-            {{- toYaml .Values.recyclarr.livenessProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "recyclarr" "kind" "livenessProbe" "given" .Values.recyclarr.livenessProbe) | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.recyclarr.readinessProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "recyclarr" "kind" "readinessProbe" "given" .Values.recyclarr.readinessProbe) | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.recyclarr.startupProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "recyclarr" "kind" "startupProbe" "given" .Values.recyclarr.startupProbe) | nindent 12 }}
           resources:
-            {{- include "freesailarr.resources" .Values.recyclarr.resources | nindent 12 }}
+            {{- include "freesailarr.resourcesFor" (dict "root" $ "app" "recyclarr" "given" .Values.recyclarr.resources) | nindent 12 }}
           securityContext:
-            runAsUser: {{ .Values.puid }}
-            runAsGroup: {{ .Values.pgid }}
-            {{- toYaml .Values.recyclarr.securityContext | nindent 12 }}
+            {{- include "freesailarr.securityContextFor" (dict "root" $ "app" "recyclarr" "given" .Values.recyclarr.securityContext) | nindent 12 }}
           volumeMounts:
             - mountPath: /config
               name: recyclarr-config
@@ -367,15 +374,15 @@ spec:
               protocol: TCP
               name: sonarr
           livenessProbe:
-            {{- toYaml .Values.sonarr.livenessProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "sonarr" "kind" "livenessProbe" "given" .Values.sonarr.livenessProbe) | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.sonarr.readinessProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "sonarr" "kind" "readinessProbe" "given" .Values.sonarr.readinessProbe) | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.sonarr.startupProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "sonarr" "kind" "startupProbe" "given" .Values.sonarr.startupProbe) | nindent 12 }}
           resources:
-            {{- include "freesailarr.resources" .Values.sonarr.resources | nindent 12 }}
+            {{- include "freesailarr.resourcesFor" (dict "root" $ "app" "sonarr" "given" .Values.sonarr.resources) | nindent 12 }}
           securityContext:
-            {{- toYaml .Values.sonarr.securityContext | nindent 12 }}
+            {{- include "freesailarr.securityContextFor" (dict "root" $ "app" "sonarr" "given" .Values.sonarr.securityContext) | nindent 12 }}
           volumeMounts:
             - mountPath: /config
               name: sonarr-config
@@ -403,17 +410,15 @@ spec:
               protocol: TCP
               name: seerr
           livenessProbe:
-            {{- toYaml .Values.seerr.livenessProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "seerr" "kind" "livenessProbe" "given" .Values.seerr.livenessProbe) | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.seerr.readinessProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "seerr" "kind" "readinessProbe" "given" .Values.seerr.readinessProbe) | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.seerr.startupProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "seerr" "kind" "startupProbe" "given" .Values.seerr.startupProbe) | nindent 12 }}
           resources:
-            {{- include "freesailarr.resources" .Values.seerr.resources | nindent 12 }}
+            {{- include "freesailarr.resourcesFor" (dict "root" $ "app" "seerr" "given" .Values.seerr.resources) | nindent 12 }}
           securityContext:
-            runAsUser: {{ .Values.puid }}
-            runAsGroup: {{ .Values.pgid }}
-            {{- toYaml .Values.seerr.securityContext | nindent 12 }}
+            {{- include "freesailarr.securityContextFor" (dict "root" $ "app" "seerr" "given" .Values.seerr.securityContext) | nindent 12 }}
           volumeMounts:
             - mountPath: /app/config
               name: seerr-config
@@ -437,15 +442,15 @@ spec:
               protocol: TCP
               name: bazarr
           livenessProbe:
-            {{- toYaml .Values.bazarr.livenessProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "bazarr" "kind" "livenessProbe" "given" .Values.bazarr.livenessProbe) | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.bazarr.readinessProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "bazarr" "kind" "readinessProbe" "given" .Values.bazarr.readinessProbe) | nindent 12 }}
           startupProbe:
-            {{- toYaml .Values.bazarr.startupProbe | nindent 12 }}
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "bazarr" "kind" "startupProbe" "given" .Values.bazarr.startupProbe) | nindent 12 }}
           resources:
-            {{- include "freesailarr.resources" .Values.bazarr.resources | nindent 12 }}
+            {{- include "freesailarr.resourcesFor" (dict "root" $ "app" "bazarr" "given" .Values.bazarr.resources) | nindent 12 }}
           securityContext:
-            {{- toYaml .Values.bazarr.securityContext | nindent 12 }}
+            {{- include "freesailarr.securityContextFor" (dict "root" $ "app" "bazarr" "given" .Values.bazarr.securityContext) | nindent 12 }}
           volumeMounts:
             - mountPath: /config
               name: bazarr-config

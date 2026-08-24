@@ -108,8 +108,15 @@
       matchDatasources: ["docker"],
       matchPackageNames: ["nginx", "library/nginx", "docker.io/library/nginx"],
       // Even minor: any minor whose last digit is even, so 1.30.x passes and
-      // 1.31.x does not.
-      allowedVersions: "/^\\d+\\.\\d*[02468]\\.\\d+$/",
+      // 1.31.x does not. The trailing (-.+)? is load-bearing: #84 proposes
+      // moving this sidecar to a slimmer base image, and with a variant tag
+      // like 1.30.4-alpine docker versioning only ever offers candidates
+      // carrying the same suffix. Without the optional suffix, every one of
+      // them would fail this filter and nginx would silently stop receiving
+      // updates - no error, no warning, green dashboard. Verified: with the
+      // anchored form and currentValue 1.28.0-alpine, the lookup returns
+      // "updates": [] and "warnings": [].
+      allowedVersions: "/^\\d+\\.\\d*[02468]\\.\\d+(-.+)?$/",
     },
   ],
 

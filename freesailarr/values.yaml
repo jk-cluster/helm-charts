@@ -203,11 +203,22 @@ media:
 #     (RADARR__SERVER__URLBASE and friends) as soon as they render under a
 #     path other than "/" - unless that app's own env block already contains
 #     the variable, in which case yours wins and the chart stays out.
+#     One measured detail, in case a probe ever looks odd: with a UrlBase set,
+#     these apps answer the bare /ping with "307 Temporary Redirect,
+#     Location: /<urlbase>/ping" instead of 200. The probes keep passing -
+#     the kubelet counts every status from 200 to 399 as success, and the
+#     containers come up Ready with 0 restarts (verified in k3d) - so the
+#     probe paths are deliberately left at /ping and stay valid in both
+#     ingress shapes. Worth knowing before reading anything into that 307.
 #   - bazarr: ONE manual step. Bazarr reads its base path only from its own
 #     configuration, it has no environment variable for it, so after the first
 #     start set Settings -> General -> Base URL to the same value as
-#     bazarr.ingress.path and restart the pod. Until then bazarr answers only
-#     at the root and the sub-path yields a broken UI. Deliberately not
+#     bazarr.ingress.path and restart the pod. Until then the sub-path yields
+#     a broken UI - and it does NOT announce itself with a 404: bazarr answers
+#     every unknown path with its index page, so /bazarr/ AND /bazarr/<asset>
+#     both return "200 text/html" of identical length (measured in k3d). The
+#     page loads, its assets silently come back as HTML, and nothing looks
+#     like an error. Check the content type, not the status code. Deliberately not
 #     automated: seeding it would mean an init container writing into bazarr's
 #     config database, which is a much bigger promise than this chart wants to
 #     make. Note that bazarr's probes address "/" - if it does not answer

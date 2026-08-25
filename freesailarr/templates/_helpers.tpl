@@ -195,6 +195,131 @@ ingress block with enabled: true. Used by the ingress template.
 {{- end -}}
 
 {{/*
+The sub-path an app is served under in the shared-domain mode, e.g. "/sonarr".
+Null-safe by construction: an absent or erased <app>.ingress.path falls back to
+"/<app>", and to "/" for seerr, which has no base-path support at all and can
+therefore only live at the root.
+
+Input: dict "root" $ "app" <app name>.
+*/}}
+{{- define "freesailarr.appPath" -}}
+{{- $config := (index .root.Values .app).ingress -}}
+{{- $path := "" -}}
+{{- if kindIs "map" $config -}}
+{{- $path = $config.path -}}
+{{- end -}}
+{{- if or (kindIs "invalid" $path) (eq (toString $path) "") -}}
+{{- if eq .app "seerr" -}}
+{{- $path = "/" -}}
+{{- else -}}
+{{- $path = printf "/%s" .app -}}
+{{- end -}}
+{{- end -}}
+{{- $path -}}
+{{- end -}}
+
+{{/*
+The apps served under the shared domain (ingress.host), as a JSON array of
+{name, port, path} dicts, sorted by path length descending so the rendered list
+is deterministic.
+
+The shared-domain mode is off unless ingress.host is set; then it covers the
+apps whose ingress renders at all (freesailarr.ingressApps, i.e. the enabled
+port apps with ingress.enabled) and which do not carry a host of their own. A
+per-app host always wins and keeps rendering its own object exactly as before,
+which is what makes mixed operation fall out for free.
+
+Two guards live here rather than in the ingress template, so that every
+consumer - the ingress objects, the UrlBase env vars and NOTES.txt - sees the
+same validated list:
+
+  1. seerr under any path other than "/". seerr has no base-path support
+     (upstream request open since May 2022), so a chart that rendered it under
+     a sub-path would produce something that provably cannot work.
+  2. Two apps claiming the same path on the shared host. Only paths on the
+     shared host can collide; apps with their own host are on a different host
+     and are therefore not part of this check.
+
+  {{- $shared := include "freesailarr.sharedIngressApps" . | fromJsonArray }}
+*/}}
+{{- define "freesailarr.sharedIngressApps" -}}
+{{- $root := . -}}
+{{- $apps := list -}}
+{{- $host := $root.Values.ingress.host | default "" -}}
+{{- if and $root.Values.ingress.enabled $host -}}
+{{- $seen := dict -}}
+{{- range $app := include "freesailarr.ingressApps" $root | fromJsonArray -}}
+{{- $config := (index $root.Values $app.name).ingress -}}
+{{- if not ($config.host | default "") -}}
+{{- $path := include "freesailarr.appPath" (dict "root" $root "app" $app.name) -}}
+{{- if and (eq $app.name "seerr") (ne $path "/") -}}
+{{- fail (printf "seerr.ingress.path is %q, but seerr has no base-path support and can only be served at \"/\" (https://github.com/Fallenbagel/jellyseerr/issues/97). Either leave seerr.ingress.path at \"/\" or give seerr its own seerr.ingress.host." $path) -}}
+{{- end -}}
+{{- if hasKey $seen $path -}}
+{{- fail (printf "%s.ingress.path and %s.ingress.path are both %q on the shared host %q - every app under ingress.host needs its own path" (index $seen $path) $app.name $path $host) -}}
+{{- end -}}
+{{- $_ := set $seen $path $app.name -}}
+{{- $apps = append $apps (dict "name" $app.name "port" $app.port "path" $path) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- /* Sort by path length descending, ties broken alphabetically. The keys are
+       unique because the guard above rejects duplicate paths. */ -}}
+{{- $keyed := dict -}}
+{{- $keys := list -}}
+{{- range $app := $apps -}}
+{{- $key := printf "%03d|%s" (sub 999 (len $app.path)) $app.path -}}
+{{- $_ := set $keyed $key $app -}}
+{{- $keys = append $keys $key -}}
+{{- end -}}
+{{- $sorted := list -}}
+{{- range $key := sortAlpha $keys -}}
+{{- $sorted = append $sorted (index $keyed $key) -}}
+{{- end -}}
+{{- toJson $sorted -}}
+{{- end -}}
+
+{{/*
+The value for a servarr app's <APP>__SERVER__URLBASE variable, or the empty
+string when the chart must not set it. Radarr, Sonarr and Prowlarr read their
+base path from this environment variable (schema
+<APP>__CONFIGNAMESPACE__CONFIGITEM, https://wiki.servarr.com/sonarr/environment-variables),
+so the chart can configure them itself as soon as they render under a sub-path.
+
+Empty - i.e. the chart sets nothing - in three cases:
+
+  - the app does not render under the shared host, or renders at "/";
+  - the app's own env block already carries the variable. The env blocks are
+    documented as additive; emitting a second entry with the same name would
+    break that promise, and two identically named variables in one container
+    are not a defined state to build on.
+
+Input: dict "root" $ "app" <"radarr"|"sonarr"|"prowlarr">.
+*/}}
+{{- define "freesailarr.urlBase" -}}
+{{- $root := .root -}}
+{{- $app := .app -}}
+{{- $var := printf "%s__SERVER__URLBASE" (upper $app) -}}
+{{- $path := "" -}}
+{{- range $entry := include "freesailarr.sharedIngressApps" $root | fromJsonArray -}}
+{{- if eq $entry.name $app -}}
+{{- $path = $entry.path -}}
+{{- end -}}
+{{- end -}}
+{{- if eq $path "/" -}}
+{{- $path = "" -}}
+{{- end -}}
+{{- if $path -}}
+{{- range $entry := (index $root.Values $app).env -}}
+{{- if eq (toString $entry.name) $var -}}
+{{- $path = "" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $path -}}
+{{- end -}}
+
+{{/*
 Comma-separated FIREWALL_INPUT_PORTS for gluetun: the ports of the enabled app
 containers (ingress traffic and the kubelet probes both arrive on the pod IP)
 plus 9999 for gluetun's own health server.

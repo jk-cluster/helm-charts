@@ -1,13 +1,38 @@
 {{/*
-One Ingress object per app whose ingress is enabled, each with its own host and
-its own TLS secret. The hosts are independent values - they do not have to
-share a domain - and each ingress points at its own app's service.
+Two ingress shapes, and they mix freely.
 
-<app>.ingress.host is required, but only for an app whose ingress is actually
-enabled: the required call sits inside the loop over the enabled apps, so
-turning an app's ingress off must never make the chart demand a host for it.
+1. One host per app (the default): every app whose ingress is enabled gets its
+   own Ingress object with its own host and its own TLS secret. The hosts are
+   independent values - they do not have to share a domain - and each ingress
+   points at its own app's service.
+
+   <app>.ingress.host is required, but only for an app whose ingress is
+   actually enabled and which is not served under the shared domain: the
+   required call sits inside the loop over the enabled apps, so turning an
+   app's ingress off must never make the chart demand a host for it.
+
+2. One shared domain with sub-paths (ingress.host): the apps that carry no host
+   of their own move into ONE object with one path each, one TLS secret, and
+   therefore one DNS name and one certificate for the whole stack. An app that
+   does keep its own host stays in shape 1.
+
+qBittorrent renders a second object on the same host in shape 2 - see the
+comment on that block.
 */}}
 {{- if .Values.ingress.enabled }}
+{{- $sharedHost := .Values.ingress.host | default "" }}
+{{- $shared := include "freesailarr.sharedIngressApps" $ | fromJsonArray }}
+{{- /* qBittorrent needs a rewrite annotation the others must not get, so it is
+       split out of the shared object and rendered separately below. */}}
+{{- $sharedMain := list }}
+{{- $sharedQbt := dict }}
+{{- range $app := $shared }}
+{{- if eq $app.name "qbittorrent" }}
+{{- $sharedQbt = $app }}
+{{- else }}
+{{- $sharedMain = append $sharedMain $app }}
+{{- end }}
+{{- end }}
 {{- range $app := include "freesailarr.ingressApps" $ | fromJsonArray }}
 {{- $config := (index $.Values $app.name).ingress }}
 {{- /* clusterIssuer, className and annotations default to the global ingress
@@ -19,7 +44,9 @@ turning an app's ingress off must never make the chart demand a host for it.
 {{- if not (kindIs "invalid" $config.className) }}{{- $className = $config.className }}{{- end }}
 {{- $annotations := $.Values.ingress.annotations }}
 {{- if not (kindIs "invalid" $config.annotations) }}{{- $annotations = $config.annotations }}{{- end }}
-{{- $host := required (printf "%s.ingress.host must be provided while %s.ingress.enabled is true" $app.name $app.name) $config.host }}
+{{- /* Skip the apps that live on the shared domain; they are rendered below. */}}
+{{- if or (not $sharedHost) ($config.host | default "") }}
+{{- $host := required (printf "%s.ingress.host must be provided while %s.ingress.enabled is true (or set the shared ingress.host to serve the app under a sub-path instead)" $app.name $app.name) $config.host }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -47,5 +74,97 @@ spec:
     - hosts:
         - {{ $host | quote }}
       secretName: tls-{{ $.Release.Name }}-{{ $.Chart.Name }}-{{ $app.name }}-ingress
+{{- end }}
+{{- end }}
+{{- if $sharedMain }}
+{{/*
+The shared-domain object. Rendered only when at least one non-qBittorrent app
+actually contributes a path, so switching every app ingress off while leaving
+ingress.host set produces NO object rather than an empty one without rules.
+
+The paths come sorted by length descending. nginx matches the longest prefix
+regardless of order, so this is about a deterministic, reviewable rendering,
+not about matching behaviour.
+*/}}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-ingress
+  annotations:
+    cert-manager.io/cluster-issuer: {{ required "A Cluster-Issuer must be provided" .Values.ingress.clusterIssuer }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ $sharedHost | quote }}
+      http:
+        paths:
+          {{- range $app := $sharedMain }}
+          - backend:
+              service:
+                name: {{ $.Release.Name }}-{{ $.Chart.Name }}-{{ $app.name }}-service
+                port:
+                  name: {{ $app.name }}
+            path: {{ $app.path | quote }}
+            pathType: Prefix
+          {{- end }}
+  tls:
+    - hosts:
+        - {{ $sharedHost | quote }}
+      secretName: tls-{{ .Release.Name }}-{{ .Chart.Name }}-ingress
+{{- end }}
+{{- if $sharedQbt }}
+{{/*
+qBittorrent on the shared domain, as its own object on the same host.
+
+qBittorrent has no base-path setting: it serves its WebUI at the root and the
+proxy has to strip the prefix
+(https://github.com/qbittorrent/wiki/blob/master/NGINX-Reverse-Proxy-for-Web-UI.md).
+nginx applies rewrite-target per INGRESS OBJECT, not per path, and the other
+apps must not be rewritten - their UrlBase contains the prefix, so they expect
+the full path. Hence the split.
+
+The tls block repeats the SAME secret name as the main object on purpose: this
+way neither object depends on an assumption about whether nginx applies the
+other one's TLS configuration to its paths - both state it themselves. The
+cert-manager annotation is deliberately absent, so only one Certificate is
+requested for that one secret. The one case where it IS set here is when no
+main object renders at all (qBittorrent is the only app on the shared host) -
+otherwise nothing would ever request the certificate.
+*/}}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-qbittorrent-ingress
+  annotations:
+    # Strip the path prefix: capture group 2 is everything after "<path>/".
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    {{- if not $sharedMain }}
+    cert-manager.io/cluster-issuer: {{ required "A Cluster-Issuer must be provided" .Values.ingress.clusterIssuer }}
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ $sharedHost | quote }}
+      http:
+        paths:
+          - backend:
+              service:
+                name: {{ .Release.Name }}-{{ .Chart.Name }}-qbittorrent-service
+                port:
+                  name: qbittorrent
+            path: {{ printf "%s(/|$)(.*)" $sharedQbt.path | quote }}
+            pathType: ImplementationSpecific
+  tls:
+    - hosts:
+        - {{ $sharedHost | quote }}
+      secretName: tls-{{ .Release.Name }}-{{ .Chart.Name }}-ingress
 {{- end }}
 {{- end }}

@@ -149,10 +149,23 @@ storage:
 #     supported cross-category hardlinks.
 #   - Consequence today: an import still copies, so download and library each
 #     hold a full copy until the torrent is removed.
-# Getting hardlinks would mean giving the apps a single mount that contains all
-# categories (the "one /data mount" layout the *arr guides recommend) instead of
-# one mount per category - a separate change to the chart's mount layout, not a
-# values setting.
+#
+# HARDLINKS NEED ONE MOUNT, NOT ONE CLAIM. This is the conclusion people draw
+# from the paragraph above and get wrong, so it is spelled out: adding downloads
+# as a third subPath on the shared claim changes NOTHING about hardlinks. The
+# kernel compares the VFSMOUNT in do_linkat, not the superblock, and two bind
+# mounts of the same filesystem are two vfsmounts - hence EXDEV. Measured again
+# on Longhorn/NFS: both mount points report st_dev 0:56, the mount table shows
+# two mount IDs on that one device, a cross-mount link() fails, and a link()
+# inside a single mount succeeds with link count 2.
+# The device number is the trap. "stat" reports the same device on both sides
+# and thereby suggests the exact opposite of what happens - which is why this
+# reads like an application bug instead of a property of the mount namespace.
+# The layout that WOULD hardlink is one claim with exactly ONE mount and the
+# categories as sub-directories inside it (the "one /data mount" layout the *arr
+# guides recommend). The chart cannot express that today - it mounts each
+# category separately. Named as a possibility, not as instructions: there are no
+# values for it, and providing them would be a change to the mount layout.
 media:
   downloads:
     existingClaim: null
@@ -164,15 +177,68 @@ media:
     existingClaim: null
     subPath: null
 
-# Ingress defaults. There is deliberately no global domain: every app carries
-# its own <app>.ingress.host, so the hosts are independent of each other and
-# may live in completely different domains. clusterIssuer, className and
-# annotations are the defaults for all apps and can be overridden per app in
-# the <app>.ingress block (an explicitly set per-app value always wins).
+# Ingress defaults. There are two shapes, and they mix freely:
+#
+#   1. One host per app (the default). Every app carries its own
+#      <app>.ingress.host, so the hosts are independent of each other and may
+#      live in completely different domains. Each app gets its own Ingress
+#      object and its own certificate.
+#   2. One shared domain with sub-paths: set ingress.host and leave the per-app
+#      hosts empty. Every app then moves into ONE Ingress object as a sub-path
+#      (<app>.ingress.path, default /<app>), which means one DNS name and one
+#      certificate for the whole stack instead of six.
+#
+# A per-app host always wins: an app that has one keeps its own object even
+# while ingress.host is set, so a mixed setup needs no extra values.
+#
+# clusterIssuer, className and annotations are the defaults for all apps and
+# can be overridden per app in the <app>.ingress block (an explicitly set
+# per-app value always wins). The shared object uses the global values only -
+# it belongs to no single app.
+#
+# What the sub-path mode costs, per app, measured against the upstream
+# documentation and not assumed:
+#
+#   - radarr, sonarr, prowlarr: nothing. The chart sets their UrlBase itself
+#     (RADARR__SERVER__URLBASE and friends) as soon as they render under a
+#     path other than "/" - unless that app's own env block already contains
+#     the variable, in which case yours wins and the chart stays out.
+#   - bazarr: ONE manual step. Bazarr reads its base path only from its own
+#     configuration, it has no environment variable for it, so after the first
+#     start set Settings -> General -> Base URL to the same value as
+#     bazarr.ingress.path and restart the pod. Until then bazarr answers only
+#     at the root and the sub-path yields a broken UI. Deliberately not
+#     automated: seeding it would mean an init container writing into bazarr's
+#     config database, which is a much bigger promise than this chart wants to
+#     make. Note that bazarr's probes address "/" - if it does not answer
+#     there once a base URL is set, adjust bazarr.livenessProbe/readinessProbe/
+#     startupProbe accordingly (they are values, precisely for cases like this).
+#   - qbittorrent: it has no base path at all, so the chart gives it its own
+#     Ingress object on the same host with an nginx rewrite that strips the
+#     prefix. Two traps from the upstream recipe, both of which look like a
+#     login failure and therefore point in the wrong direction:
+#       * qBittorrent marks its session cookie "Secure". Reaching the UI over
+#         plain HTTP means the browser never sends the cookie back and every
+#         click bounces to the login form. Use https.
+#       * qBittorrent bans the client IP for a while after a few failed login
+#         attempts. Once that has triggered, even correct credentials fail -
+#         the ban has to expire (or the pod be restarted) first.
+#     If it does not work behind the stripped prefix, the fallback costs no
+#     chart change: set qbittorrent.ingress.host and qBittorrent is back on a
+#     host of its own while everything else stays on the shared domain.
+#   - seerr: it has no base-path support either and, unlike qBittorrent,
+#     cannot be fixed by a rewrite (the upstream request has been open since
+#     May 2022, https://github.com/Fallenbagel/jellyseerr/issues/97). It
+#     therefore sits at "/" and the chart refuses to render it anywhere else.
+#     If seerr is switched off, nothing serves the root and the shared domain
+#     answers 404 there. That is correct and left alone on purpose.
 ingress:
   # Master switch: false suppresses every app ingress regardless of the
   # per-app toggles.
   enabled: true
+  # The shared domain for the sub-path mode, e.g. "media.example.com". Empty
+  # means the default: each app on a host of its own.
+  host: ""
   clusterIssuer: null
   className: nginx
   # Extra annotations for the Ingress objects; merged with the cert-manager
@@ -270,17 +336,40 @@ qbittorrent:
   # with its own TLS secret tls-<release>-<chart>-<app>-ingress, so the apps can
   # be exposed independently and under unrelated hosts.
   # host is required while enabled is true and has no default - an app whose
-  # ingress is switched off never demands one. clusterIssuer, className and
-  # annotations may be set here to override the global ingress block.
+  # ingress is switched off never demands one, and neither does an app served
+  # under the shared ingress.host. clusterIssuer, className and annotations may
+  # be set here to override the global ingress block.
+  # path is only read in the shared-domain mode (see the ingress block above);
+  # it defaults to /<app> and is ignored while this app has a host of its own.
   # (Same block for prowlarr, radarr, sonarr, seerr and bazarr below.)
   ingress:
     enabled: true
     host: null
+    path: /qbittorrent
     # clusterIssuer: null
     # className: null
     # annotations: {}
   storage:
+    # The CONFIG volume, and it is meant to stay small: it holds
+    # qBittorrent.conf, the BT_backup state and nothing else. Downloads must
+    # never land here - see savePath below for what happens when they do.
     size: 1Gi
+  # Default save path for new torrents, seeded into the persisted config by the
+  # init container below. Without it qBittorrent falls back to its built-in
+  # default /config/Downloads, which is this 1Gi config volume: it fills within
+  # minutes, every torrent goes to "errored", and qBittorrent can no longer
+  # even write its own metadata to BT_backup - so a restart in that state costs
+  # the torrent list. The failure looks like a network, tracker or VPN problem
+  # and needs a "df" to recognise. Measured on a real cluster, not assumed.
+  # /downloads is the media claim (media.downloads), mounted into this
+  # container.
+  # Unlike networkInterface below this value is seeded ONLY when the key is
+  # absent from the config, never replaced: the save path is a legitimate
+  # operator decision, and someone who changes it in the WebUI must not be
+  # overwritten on every pod restart. Set it to null or "" to opt out entirely
+  # and leave the path to qBittorrent's built-in default (not recommended, see
+  # above).
+  savePath: /downloads
   # Network interface qBittorrent binds its BitTorrent session to - gluetun's
   # Wireguard device. Without this binding libtorrent listens and announces on
   # every interface in the shared pod network namespace, including eth0 (the
@@ -290,13 +379,16 @@ qbittorrent:
   # are found and torrents stall at 0 bytes in stalledDL. Binding to tun0 is
   # therefore both the functional fix and a leak fix - it stops qBittorrent
   # from listening on the pod IP past the tunnel. The value is written into
-  # /config/qBittorrent/qBittorrent.conf by the config-interface init
-  # container below; setting it to null or "" removes that init container and
-  # leaves the binding to the user (not recommended).
+  # /config/qBittorrent/qBittorrent.conf by the config-seed init container
+  # below, and it is ENFORCED on every start (unlike savePath), because a
+  # deviating value would be a leak; setting it to null or "" drops the binding
+  # and leaves it to the user (not recommended).
   networkInterface: tun0
-  # The init container that seeds qbittorrent.networkInterface into the
-  # persisted qBittorrent config before the app starts. Runs as puid/pgid so
-  # the config file keeps the ownership the app expects.
+  # The init container that seeds qbittorrent.networkInterface and
+  # qbittorrent.savePath into the persisted qBittorrent config before the app
+  # starts. Runs as puid/pgid so the config file keeps the ownership the app
+  # expects. Setting both networkInterface and savePath to null removes the
+  # init container entirely.
   configInit:
     # Auxiliary busybox image for the init container, pinned here like every
     # other image in this chart and proposed by Renovate the same way.
@@ -382,6 +474,7 @@ prowlarr:
   ingress:
     enabled: true
     host: null
+    path: /prowlarr
     # clusterIssuer: null
     # className: null
     # annotations: {}
@@ -495,6 +588,7 @@ radarr:
   ingress:
     enabled: true
     host: null
+    path: /radarr
     # clusterIssuer: null
     # className: null
     # annotations: {}
@@ -605,6 +699,7 @@ sonarr:
   ingress:
     enabled: true
     host: null
+    path: /sonarr
     # clusterIssuer: null
     # className: null
     # annotations: {}
@@ -662,6 +757,7 @@ seerr:
   ingress:
     enabled: true
     host: null
+    path: /
     # clusterIssuer: null
     # className: null
     # annotations: {}
@@ -718,6 +814,7 @@ bazarr:
   ingress:
     enabled: true
     host: null
+    path: /bazarr
     # clusterIssuer: null
     # className: null
     # annotations: {}

@@ -122,13 +122,20 @@
       }
     },
     "ingress": {
-      "description": "Defaults for the per-app ingresses. There is deliberately no global domain - each app carries its own host.",
+      "description": "Ingress defaults. Two shapes: one host per app (each app carries its own host), or one shared domain with sub-paths (ingress.host set, per-app hosts empty). A per-app host always wins, so both mix.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "enabled": {
           "description": "Master switch; false suppresses every app ingress regardless of the per-app toggles.",
           "type": "boolean"
+        },
+        "host": {
+          "description": "Shared domain for the sub-path mode. Empty or null means the default: every app on a host of its own.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "clusterIssuer": {
           "type": [
@@ -238,7 +245,14 @@
           "$ref": "#/definitions/appStorage"
         },
         "networkInterface": {
-          "description": "Interface the BitTorrent session binds to (gluetun's tun device). null or \"\" removes the init container that seeds it and leaves the binding unset - which lets libtorrent announce past the tunnel.",
+          "description": "Interface the BitTorrent session binds to (gluetun's tun device). Enforced on every start, because a deviating value would be a leak. null or \"\" leaves the binding unset - which lets libtorrent announce past the tunnel.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "savePath": {
+          "description": "Default save path for new torrents, seeded into the persisted config ONLY when the key is absent - never replaced, so a path changed in the WebUI survives a restart. null or \"\" opts out and leaves qBittorrent on its built-in default /config/Downloads, i.e. the small config volume.",
           "type": [
             "string",
             "null"
@@ -548,7 +562,14 @@
           "type": "boolean"
         },
         "host": {
-          "description": "Required while this app's ingress is enabled, and never demanded when it is off.",
+          "description": "Host of this app's own Ingress object. Required while this app's ingress is enabled AND the shared ingress.host is not set; never demanded when this app's ingress is off, and never demanded for an app served under the shared domain. Setting it always wins over the shared domain.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "description": "Sub-path under the shared ingress.host, e.g. /sonarr. Read only in the shared-domain mode and ignored while this app has a host of its own. Null or empty falls back to /<app>, and to / for seerr, which cannot be served anywhere else.",
           "type": [
             "string",
             "null"

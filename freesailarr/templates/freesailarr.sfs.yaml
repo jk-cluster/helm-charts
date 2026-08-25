@@ -34,21 +34,31 @@ spec:
       automountServiceAccountToken: false
       securityContext:
         {{- include "freesailarr.podSecurityContext" . | nindent 8 }}
-      {{- if and .Values.qbittorrent.enabled .Values.qbittorrent.networkInterface }}
+      {{- if and .Values.qbittorrent.enabled (or .Values.qbittorrent.networkInterface .Values.qbittorrent.savePath) }}
       initContainers:
-        # qBittorrent has no environment variable for the session's network
-        # interface - it only reads it from the persisted config file, which
-        # the app itself creates on first start. Without the binding
-        # libtorrent listens and announces on every interface of the shared
-        # pod network namespace (eth0/pod IP and loopback included); gluetun's
-        # kill switch drops those packets, trackers stay unreachable and
-        # torrents stall at 0 bytes. Seeding the two keys before qbittorrent
-        # starts closes that leak and makes a fresh install work out of the
-        # box. The edit is idempotent and preserves all other settings:
-        # existing keys are replaced, missing ones are inserted into the
-        # [BitTorrent] section (qBittorrent 5.x reads them there), and a
-        # missing file or section is created.
-        - name: qbittorrent-config-interface
+        # qBittorrent reads neither the session's network interface nor its
+        # default save path from the environment - both live only in the
+        # persisted config file, which the app itself creates on first start.
+        # This container seeds them before qbittorrent starts, so a fresh
+        # install works out of the box. Both edits preserve all other settings:
+        # keys are inserted into the [BitTorrent] section (qBittorrent 5.x
+        # reads them there), and a missing file or section is created.
+        #
+        # The two keys are handled DIFFERENTLY on purpose:
+        #
+        #   - Session\Interface is ENFORCED on every start. Without the binding
+        #     libtorrent listens and announces on every interface of the shared
+        #     pod network namespace (eth0/pod IP and loopback included);
+        #     gluetun's kill switch drops those packets, trackers stay
+        #     unreachable and torrents stall at 0 bytes. A deviating value is a
+        #     leak, so an existing key is replaced.
+        #   - Session\DefaultSavePath is only INSERTED WHEN ABSENT, never
+        #     replaced. Without it qBittorrent falls back to /config/Downloads,
+        #     i.e. the small config volume, which fills within minutes and puts
+        #     every torrent into "errored" (#166). But where downloads go is a
+        #     legitimate operator decision: someone who changes the path in the
+        #     WebUI must not have it overwritten on every pod restart.
+        - name: qbittorrent-config-seed
           image: "{{ .Values.qbittorrent.configInit.image.repository }}:{{ .Values.qbittorrent.configInit.image.tag }}"
           imagePullPolicy: IfNotPresent
           command:
@@ -65,6 +75,7 @@ spec:
                 printf '\n' >> "$conf"
               fi
               grep -q '^\[BitTorrent\]$' "$conf" || printf '[BitTorrent]\n' >> "$conf"
+              {{- if .Values.qbittorrent.networkInterface }}
               # Drop any existing binding keys, then re-insert them directly
               # after the [BitTorrent] header.
               awk -v ifc="$QBT_INTERFACE" '
@@ -78,9 +89,30 @@ spec:
               ' "$conf" > "${conf}.tmp"
               mv "${conf}.tmp" "$conf"
               echo "qBittorrent session bound to interface $QBT_INTERFACE"
+              {{- end }}
+              {{- if .Values.qbittorrent.savePath }}
+              # Insert only when the key is absent - an existing value is the
+              # operator's and stays untouched.
+              if grep -q '^Session\\DefaultSavePath=' "$conf"; then
+                echo "qBittorrent save path already set, left untouched: $(grep -m1 '^Session\\DefaultSavePath=' "$conf")"
+              else
+                awk -v sp="$QBT_SAVE_PATH" '
+                  { print }
+                  /^\[BitTorrent\]$/ { print "Session\\DefaultSavePath=" sp }
+                ' "$conf" > "${conf}.tmp"
+                mv "${conf}.tmp" "$conf"
+                echo "qBittorrent default save path seeded: $QBT_SAVE_PATH"
+              fi
+              {{- end }}
           env:
+            {{- if .Values.qbittorrent.networkInterface }}
             - name: QBT_INTERFACE
               value: {{ .Values.qbittorrent.networkInterface | quote }}
+            {{- end }}
+            {{- if .Values.qbittorrent.savePath }}
+            - name: QBT_SAVE_PATH
+              value: {{ .Values.qbittorrent.savePath | quote }}
+            {{- end }}
           resources:
             {{- include "freesailarr.resourcesFor" (dict "root" $ "app" "configInit" "given" .Values.qbittorrent.configInit.resources) | nindent 12 }}
           securityContext:
@@ -239,6 +271,14 @@ spec:
               value: {{ .Values.pgid | quote }}
             - name: TZ
               value: {{ .Values.timezone | quote }}
+            {{- /* Base path for the shared-domain mode: the chart sets
+                   UrlBase itself as soon as prowlarr renders under a
+                   sub-path, unless the env block above already carries
+                   the variable - see the freesailarr.urlBase helper. */}}
+            {{- with (include "freesailarr.urlBase" (dict "root" $ "app" "prowlarr")) }}
+            - name: PROWLARR__SERVER__URLBASE
+              value: {{ . | quote }}
+            {{- end }}
             {{- include "freesailarr.env" (dict "root" $ "env" .Values.prowlarr.env) | nindent 12 }}
           ports:
             - containerPort: 9696
@@ -300,6 +340,14 @@ spec:
               value: {{ .Values.pgid | quote }}
             - name: TZ
               value: {{ .Values.timezone | quote }}
+            {{- /* Base path for the shared-domain mode: the chart sets
+                   UrlBase itself as soon as radarr renders under a
+                   sub-path, unless the env block above already carries
+                   the variable - see the freesailarr.urlBase helper. */}}
+            {{- with (include "freesailarr.urlBase" (dict "root" $ "app" "radarr")) }}
+            - name: RADARR__SERVER__URLBASE
+              value: {{ . | quote }}
+            {{- end }}
             {{- include "freesailarr.env" (dict "root" $ "env" .Values.radarr.env) | nindent 12 }}
           ports:
             - containerPort: 7878
@@ -368,6 +416,14 @@ spec:
               value: {{ .Values.pgid | quote }}
             - name: TZ
               value: {{ .Values.timezone | quote }}
+            {{- /* Base path for the shared-domain mode: the chart sets
+                   UrlBase itself as soon as sonarr renders under a
+                   sub-path, unless the env block above already carries
+                   the variable - see the freesailarr.urlBase helper. */}}
+            {{- with (include "freesailarr.urlBase" (dict "root" $ "app" "sonarr")) }}
+            - name: SONARR__SERVER__URLBASE
+              value: {{ . | quote }}
+            {{- end }}
             {{- include "freesailarr.env" (dict "root" $ "env" .Values.sonarr.env) | nindent 12 }}
           ports:
             - containerPort: 8989

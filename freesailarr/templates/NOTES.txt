@@ -6,6 +6,10 @@
 {{- $budget := mul (int $startup.periodSeconds) (int $startup.failureThreshold) -}}
 {{- $ingressApps := include "freesailarr.ingressApps" . | fromJsonArray -}}
 {{- $portApps := include "freesailarr.portApps" . | fromJsonArray -}}
+{{- $sharedHost := .Values.ingress.host | default "" -}}
+{{- $shared := include "freesailarr.sharedIngressApps" . | fromJsonArray -}}
+{{- $sharedNames := list -}}
+{{- range $shared }}{{ $sharedNames = append $sharedNames .name }}{{ end -}}
 freesailarr — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
 Nine containers in ONE pod, sharing gluetun's network namespace.
 
@@ -41,13 +45,53 @@ SET gluetun.vpn.firewallOutboundSubnets — IT IS EMPTY RIGHT NOW
 
 ACCESS
 {{- if and .Values.ingress.enabled $ingressApps }}
+{{- range $shared }}
+  {{ .name }}: https://{{ $sharedHost }}{{ if ne .path "/" }}{{ .path }}{{ end }}
+{{- end }}
 {{- range $ingressApps }}
 {{- $cfg := (index $.Values .name).ingress }}
+{{- if not (has .name $sharedNames) }}
   {{ .name }}: https://{{ $cfg.host }}
 {{- end }}
+{{- end }}
+{{- if $shared }}
 
-  Each app has its OWN Ingress and its own TLS secret; while cert-manager is
-  still issuing, the browser warns:
+  These apps share one host, one Ingress and one certificate.
+{{- if has "bazarr" $sharedNames }}
+
+  BAZARR NEEDS ONE MANUAL STEP UNDER A SUB-PATH
+    Bazarr reads its base path only from its own configuration - it has no
+    environment variable for it, so the chart cannot set it. Open bazarr,
+    go to Settings -> General -> Base URL, enter
+
+      {{ include "freesailarr.appPath" (dict "root" $ "app" "bazarr") }}
+
+    and restart the pod. Until then bazarr answers only at the root and the
+    sub-path shows a broken UI. radarr, sonarr and prowlarr need nothing -
+    the chart sets their UrlBase itself.
+{{- end }}
+{{- if has "qbittorrent" $sharedNames }}
+
+  QBITTORRENT SITS BEHIND A PREFIX-STRIPPING REWRITE
+    It has no base path of its own, so it gets a second Ingress object on the
+    same host whose rewrite cuts the prefix off. Two things there look exactly
+    like a login failure and send you looking in the wrong place: its session
+    cookie is marked "Secure" (over plain HTTP the browser never sends it back
+    and every click bounces to the login form), and it bans the client IP for a
+    while after a few failed attempts. If it does not work at all, set
+    qbittorrent.ingress.host and it is back on a host of its own - no chart
+    change needed.
+{{- end }}
+{{- if not (has "seerr" $sharedNames) }}
+
+  NOTHING SERVES THE ROOT OF {{ $sharedHost }}
+    seerr is the app that sits at "/" and it is not on the shared host, so
+    https://{{ $sharedHost }}/ answers 404. The sub-paths are unaffected.
+{{- end }}
+{{- end }}
+
+  Every app listed with a host of its own has its OWN Ingress and its own TLS
+  secret. While cert-manager is still issuing, the browser warns:
 
     kubectl -n {{ .Release.Namespace }} get certificate
 {{- else }}
@@ -62,6 +106,33 @@ ACCESS
   qBittorrent's WebUI rejects a Host header whose port differs from its own
   ({{ "8080" }}) with a plain 401. A port-forward on a different local port therefore
   looks like a login failure — forward 8080:8080, or go through the ingress.
+{{- if .Values.qbittorrent.savePath }}
+
+QBITTORRENT DOWNLOADS GO TO {{ .Values.qbittorrent.savePath }}
+  The chart seeds Session\DefaultSavePath into qBittorrent's config, because
+  its built-in default is /config/Downloads — the config volume{{ with .Values.qbittorrent.storage.size }} ({{ . }}){{ end }}, which
+  fills within minutes and puts EVERY torrent into "errored" while a large,
+  empty media volume sits next to it. The failure looks like a network or VPN
+  problem; only "df" shows what it is.
+
+  The value is seeded ONLY when the key is absent, never replaced. So if you
+  changed the path in the WebUI, it stays yours and this value does nothing —
+  check which one is actually in effect:
+
+    kubectl -n {{ .Release.Namespace }} exec {{ $name }}-sfs-0 -c qbittorrent -- \
+      grep SavePath /config/qBittorrent/qBittorrent.conf
+
+  If that shows a path under /config, downloads are landing on the config
+  volume: fix it under Options -> Downloads -> Default Save Path (the running
+  app owns the file; editing it under the app is overwritten on exit).
+{{- else }}
+
+QBITTORRENT HAS NO SAVE PATH SET (qbittorrent.savePath is empty)
+  It therefore falls back to /config/Downloads — the small config volume. That
+  fills within minutes and puts every torrent into "errored". Either set
+  qbittorrent.savePath or set Options -> Downloads -> Default Save Path in the
+  WebUI before starting any download.
+{{- end }}
 {{- end }}
 
 EVERY SERVICE POINTS AT THE SAME POD IP
@@ -86,6 +157,29 @@ THE MEDIA CLAIMS ARE YOURS, THE CONFIG VOLUMES ARE THE CHART'S
   and Sonarr do NOT hardlink between the categories, not even on one claim.
   Kubernetes makes every volumeMount its own bind mount and link() across two
   mount points fails with EXDEV regardless of subPath, so an import copies.
+
+  HARDLINKS NEED ONE MOUNT, NOT ONE CLAIM
+    This is the point where the obvious conclusion is wrong, so it is spelled
+    out: putting downloads on the same claim as movies and tv, as a third
+    subPath, does NOT produce hardlinks. It buys the layout, nothing else.
+
+    The kernel compares the VFSMOUNT in do_linkat, not the superblock, and two
+    bind mounts of the same filesystem are two vfsmounts — so link() across
+    them is EXDEV even though it is one volume. Measured on Longhorn/NFS: both
+    mount points report st_dev 0:56, the mount table shows two mount IDs on
+    that same device, a cross-mount link() fails, a link() inside one mount
+    succeeds with link count 2.
+
+    Note the trap in that measurement: "stat" reports the SAME device number
+    on both sides. Every intuition says a hardlink must work there. It does
+    not, and the device number is exactly what makes this look like a bug in
+    the app instead of a property of the mount namespace.
+
+    The layout that WOULD hardlink is one claim with exactly ONE mount and the
+    categories as sub-directories inside it — the "single /data mount" the *arr
+    guides recommend. This chart cannot express that today: it mounts each
+    category separately. Naming the possibility, not giving instructions —
+    there are no values for it.
 
   The containers write as {{ .Values.puid }}:{{ .Values.pgid }}. The claim's root directory has to be
   writable for them, and a subPath directory the kubelet creates inherits that

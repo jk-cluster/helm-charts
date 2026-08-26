@@ -1,0 +1,39 @@
+# freesailarr: the whole stack in one pod - gluetun plus eight app containers
+# that share its network namespace and sit behind its kill switch. Nothing here
+# is a shortcut around that: the install-test brings up a real Wireguard tunnel
+# with a CI-only Mullvad key (see ci/freesailarr/fixtures.env.yaml), because a
+# gluetun without a handshake keeps every app container from becoming Ready.
+#
+# Release name is ci, so the chart looks for the gluetun credentials in the
+# Secret ci-freesailarr-gluetun-secret, which the fixtures create. The chart's
+# own OnePasswordItem CR applies against the stub CRD and stays unreconciled -
+# there is no 1Password operator in the CI cluster.
+secrets:
+  # Required by the chart. Only the CR's itemPath, never resolved in CI.
+  gluetunSecretRef: op://ci/freesailarr-gluetun
+
+media:
+  # The three media claims are pre-created in fixtures.yaml (one claim per
+  # category, no subPath - the shared-claim layout is a values question, not a
+  # startup question). local-path hands out its directories mode 0777, so the
+  # claim roots are writable for PUID/PGID as the chart requires.
+  downloads:
+    existingClaim: ci-freesailarr-downloads
+  movies:
+    existingClaim: ci-freesailarr-movies
+  tv:
+    existingClaim: ci-freesailarr-tv
+
+gluetun:
+  vpn:
+    # Without this the kill switch drops cluster-internal egress as well, and
+    # the very first DNS lookup against cluster DNS fails. k3s defaults:
+    # 10.42.0.0/16 pods, 10.43.0.0/16 services.
+    firewallOutboundSubnets: "10.42.0.0/16,10.43.0.0/16"
+
+ingress:
+  # Shared-domain mode with a placeholder host: the Ingress objects only have to
+  # be accepted by the API server. There is no ingress-nginx and no cert-manager
+  # in the CI cluster, and the install-test checks readiness, not routing.
+  host: freesailarr.example.com
+  clusterIssuer: ci

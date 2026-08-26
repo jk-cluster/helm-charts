@@ -149,13 +149,61 @@ jobs:
         uses: actions/checkout@v7
       - name: "Install Helm"
         uses: azure/setup-helm@v5
+      # freesailarr is the one chart whose install-test needs credentials:
+      # without a real Wireguard key gluetun never completes a handshake, and
+      # behind its kill switch not a single app container becomes Ready. The key
+      # comes from 1Password Connect like the registry credentials in
+      # publish-helm-chart.yml, and it is a CI-ONLY Mullvad key: Mullvad ties an
+      # address to a key and sends the tunnel to the endpoint it saw last, so
+      # reusing the production key would let every PR run pull the tunnel out
+      # from under the running stack - with the symptom in the cluster and the
+      # cause in a pull request. Loaded only for this chart; no other chart run
+      # touches the VPN key.
+      - name: "Configure OP-Connect"
+        if: matrix.chart == 'freesailarr'
+        uses: 1password/load-secrets-action/configure@v5
+        with:
+          connect-host: https://op-connect.jk-dev.de
+      - name: "Load freesailarr VPN credentials"
+        id: load-freesailarr-vpn
+        if: matrix.chart == 'freesailarr'
+        uses: 1password/load-secrets-action@v5
+        env:
+          OP_CONNECT_TOKEN: ${{ secrets.OP_CONNECT_TOKEN }}
+          FREESAILARR_WG_KEY: op://GitHub-Actions/freesailarr-mullvad-test-config/credential
+          FREESAILARR_WG_ADDRESSES: op://GitHub-Actions/freesailarr-mullvad-test-config/ip-address
+      # The same trap publish-helm-chart.yml documents at length: v5 of
+      # load-secrets-action does NOT export the loaded values as environment
+      # variables for later steps, only its step outputs carry them, and the
+      # loading step logs "Populating variable" and stays green either way. So
+      # the values are mapped into each step's own env block via
+      # steps.<id>.outputs.* and read as quoted shell variables. The ":?" guards
+      # run before the cluster is even created and name the op:// field that is
+      # missing - an empty key would otherwise reach gluetun and look like a
+      # broken chart instead of a missing secret. They print the variable name,
+      # never its value.
+      - name: "Verify the VPN credentials arrived"
+        if: matrix.chart == 'freesailarr'
+        env:
+          FREESAILARR_WG_KEY: ${{ steps.load-freesailarr-vpn.outputs.FREESAILARR_WG_KEY }}
+          FREESAILARR_WG_ADDRESSES: ${{ steps.load-freesailarr-vpn.outputs.FREESAILARR_WG_ADDRESSES }}
+        run: |-
+          : "${FREESAILARR_WG_KEY:?empty - check op://GitHub-Actions/freesailarr-mullvad-test-config/credential}"
+          : "${FREESAILARR_WG_ADDRESSES:?empty - check op://GitHub-Actions/freesailarr-mullvad-test-config/ip-address}"
+          echo "Both VPN values arrived non-empty."
       - name: "Install k3d"
         run: curl -sSfL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | TAG="$K3D_VERSION" bash
       - name: "Create k3d cluster"
         run: k3d cluster create install-test --image "$K3S_IMAGE" --wait --timeout 180s
       # Excluded charts (see ci/excluded-charts.txt) are skipped inside the
-      # script with their documented reason.
+      # script with their documented reason. The variables below are empty for
+      # every other chart and are read only by the chart that declares them in
+      # ci/<chart>/settings.env (REQUIRED_ENV); the script fails loudly if a
+      # declared one is missing, it never skips over it.
       - name: "Install chart and wait for readiness"
+        env:
+          FREESAILARR_WG_KEY: ${{ steps.load-freesailarr-vpn.outputs.FREESAILARR_WG_KEY }}
+          FREESAILARR_WG_ADDRESSES: ${{ steps.load-freesailarr-vpn.outputs.FREESAILARR_WG_ADDRESSES }}
         run: ci/run-install-test.sh "${{ matrix.chart }}"
       - name: "Delete k3d cluster"
         if: always()

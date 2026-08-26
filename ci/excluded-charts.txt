@@ -1,5 +1,4 @@
 # Charts excluded from the PR install-test, one per line: <chart> <reason>.
 # ci/run-install-test.sh skips these with the given reason.
-freesailarr gluetun never becomes healthy without a real Wireguard key and VPN connectivity, and every app container sits behind its firewall - the pod cannot become Ready on a CI runner
 satisfactory the game-server image is multiple GB and Steam downloads 10GB+ game files on first start - impractical on a CI runner
 template-chart scaffold with placeholder image "ghcr.io/ORG/IMAGE:xxx", never published

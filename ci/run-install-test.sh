@@ -78,6 +78,25 @@ for VAR in $REQUIRED_ENV; do
 done
 
 # --- Failure diagnostics ----------------------------------------------------
+# The diagnostics echo application output, and an app may well print a value it
+# was given: gluetun logs its Wireguard address on startup. So everything the
+# failure path prints runs through a filter that replaces the values of the
+# declared REQUIRED_ENV variables with the variable name. GitHub masks them as
+# well, but that is the platform's promise rather than this harness's - and the
+# script runs locally too, where nothing masks anything.
+redact_secrets() {
+  if [ -z "$REQUIRED_ENV" ]; then
+    cat
+    return
+  fi
+  local SED_ARGS=()
+  local VAR
+  for VAR in $REQUIRED_ENV; do
+    SED_ARGS+=(-e "s|${!VAR}|<redacted:$VAR>|g")
+  done
+  sed "${SED_ARGS[@]}"
+}
+
 diagnose() {
   echo "=================== INSTALL-TEST FAILED: DIAGNOSTICS ==================="
   echo "--- pods ---"
@@ -94,7 +113,7 @@ diagnose() {
   done
   echo "========================================================================"
 }
-trap 'RC=$?; if [ $RC -ne 0 ]; then diagnose; fi; exit $RC' EXIT
+trap 'RC=$?; if [ $RC -ne 0 ]; then diagnose | redact_secrets; fi; exit $RC' EXIT
 
 # --- 1. Apply fixtures ------------------------------------------------------
 echo "::group::Apply fixtures"
@@ -102,8 +121,8 @@ kubectl apply -f "$CI_DIR/common/"
 if [ -f "$CI_DIR/$CHART/fixtures.yaml" ]; then
   kubectl apply -f "$CI_DIR/$CHART/fixtures.yaml"
 fi
-# Fixtures with values that must not be committed are rendered first: the
-# checked-in fixtures.env.yaml holds ${VARIABLE} placeholders and nothing else.
+# Fixtures with values that must not be committed are rendered before they are
+# applied: the checked-in fixtures.env.yaml holds ${VARIABLE} placeholders only.
 # envsubst is restricted to the names from REQUIRED_ENV (its SHELL-FORMAT
 # argument), so a variable that is not declared there is never substituted, no
 # unrelated "$..." in the manifest is touched, and no other variable of the

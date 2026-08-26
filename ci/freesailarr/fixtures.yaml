@@ -1,0 +1,43 @@
+# Fixtures for the freesailarr install-test: the three media claims the chart
+# mounts but never creates (media.*.existingClaim). The config volumes come from
+# the StatefulSet's own volumeClaimTemplates and need nothing here.
+#
+# Default StorageClass (k3d's local-path), so the claims stay Pending until the
+# pod is scheduled - WaitForFirstConsumer, which is exactly what the chart sees
+# on a real cluster. local-path creates its directories mode 0777, so the claim
+# roots are writable for PUID/PGID 1000 without a chown job.
+#
+# The gluetun credentials Secret is NOT here: it carries values that must not be
+# committed and lives in fixtures.env.yaml.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ci-freesailarr-downloads
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ci-freesailarr-movies
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ci-freesailarr-tv
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

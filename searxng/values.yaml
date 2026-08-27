@@ -187,10 +187,13 @@ searxng:
   #
   # For it: /healthz is the ONLY path SearXNG's bot detection lets through
   # unconditionally - searx/limiter.py filter_request() returns early on
-  # exactly this path before any of its checks run. A probe on "/" would risk
-  # collecting a 429 the moment settings.limiter is switched on; the pod would
-  # go NotReady and the symptom would point at the application instead of at
-  # the bot detection. It also costs nothing: the handler is
+  # exactly this path before any of its checks run. This is not a theoretical
+  # margin. Measured in k3d against a reachable Valkey with settings.limiter
+  # true: "/" answered 429 while /healthz answered 200. A probe on "/" would
+  # therefore not merely risk a 429, it would collect one the moment the
+  # limiter is switched on - the pod would go NotReady and the symptom would
+  # point at the application instead of at the bot detection. It also costs
+  # nothing: the handler is
   # `return Response('OK', mimetype='text/plain')`, no engines, no cache, no
   # network - so liveness carries no external dependency (README, "Values that
   # must not lie", point 3).

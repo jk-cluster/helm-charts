@@ -1,0 +1,32 @@
+# searxng: stateless, one secret and no infrastructure to stand up. The
+# Ingress just has to apply - there is no ingress-nginx/cert-manager in the CI
+# cluster.
+#
+# The install runs the DEFAULT path (bot detection off, no Valkey), which is
+# what a real installation of this chart runs. The optional Valkey branch is
+# rendered but not installed here: switching the limiter on without a reachable
+# Valkey produces a Ready pod that logs an error per request, so it would make
+# the install-test slower without making it stricter.
+ingress:
+  domain: searxng.ci.local
+  clusterIssuer: ci
+
+# The dummy 1Password Secret is created in fixtures.yaml; the operator does not
+# run in CI, so the OnePasswordItem CR stays unfulfilled and only the stub CRD
+# has to accept it.
+secrets:
+  searxngSecretRef: op://ci/searxng/dummy
+
+# Deliberately not the chart defaults. The install-test is the only place that
+# proves the ConfigMap is more than a fixed file: instanceName exercises the
+# first-class keys, and "extra" exercises the merge over them - including a
+# nested map that has to be joined rather than replaced (search.safe_search
+# from above must survive next to search.default_lang from here).
+settings:
+  instanceName: "SearXNG CI"
+  safeSearch: 1
+  extra:
+    search:
+      default_lang: "en"
+    ui:
+      default_theme: simple

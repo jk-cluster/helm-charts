@@ -1,0 +1,31 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-ingress
+  annotations:
+    cert-manager.io/cluster-issuer: {{ required "A Cluster-Issuer must be provided (ingress.clusterIssuer)" .Values.ingress.clusterIssuer }}
+    # Extra annotations are MERGED with the cert-manager annotation above, not
+    # substituted for it. This is where forward-auth (Authentik and friends)
+    # goes; see the example in values.yaml.
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ required "A Domain/Host must be provided (ingress.domain)" .Values.ingress.domain }}
+      http:
+        paths:
+          - backend:
+              service:
+                name: {{ .Release.Name }}-{{ .Chart.Name }}-service
+                port:
+                  name: http
+            path: /
+            pathType: Prefix
+  tls:
+    - hosts:
+        - {{ required "A Domain/Host must be provided (ingress.domain)" .Values.ingress.domain }}
+      secretName: tls-{{ .Release.Name }}-{{ .Chart.Name }}-ingress
+{{- end }}

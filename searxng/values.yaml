@@ -1,0 +1,339 @@
+# Scale the whole chart down without uninstalling it: scaleDown: true renders
+# every Deployment/StatefulSet with replicas: 0 (and suspends CronJobs) and
+# takes precedence over any per-workload replicas value. PVCs, Secrets and
+# Services stay in place; scaleDown: false brings the workloads back up.
+scaleDown: false
+
+secrets:
+  # op:// item path for the 1Password operator; the item must carry a
+  # "secret-key" field. REQUIRED - the chart has no default and fails to
+  # render without it.
+  #
+  # Why it is required rather than optional: server.secret_key signs the
+  # settings cookie and the image-proxy URLs. SearXNG refuses to start when it
+  # is still the upstream placeholder - searx/webapp.py init():
+  #
+  #   if not app.debug and get_setting("server.secret_key") == 'ultrasecretkey':
+  #       logger.error("server.secret_key is not changed. ...")
+  #       sys.exit(1)
+  #
+  # The image's entrypoint has a self-generating fallback, but it only fires
+  # when /etc/searxng/settings.yml is MISSING, and this chart always mounts one
+  # from its ConfigMap - so the fallback can never run here. Without this value
+  # the instance would inherit "ultrasecretkey" from the upstream defaults and
+  # exit 1 in a crash loop.
+  #
+  # And it is a Secret, not a ConfigMap key, because a ConfigMap is the place
+  # people look into without thinking twice: anyone with read access in the
+  # namespace would see the key that signs every user's cookies.
+  searxngSecretRef: null
+  # op:// item path for an EXTERNAL Valkey/Redis, carrying a "valkey-url"
+  # field (e.g. redis://valkey.example.svc:6379/0). Optional: leave it null
+  # unless the bot detection below is switched on.
+  #
+  # Setting it renders a second OnePasswordItem and passes the URL to the
+  # container as SEARXNG_VALKEY_URL. The chart ships NO Valkey of its own -
+  # charts in this repo have no dependencies (README, guideline 13), so an
+  # external connection through a secret is the same shape outline and
+  # paperless-ngx use for their databases.
+  valkeySecretRef: null
+  #
+  # Documented limitation (README, guideline 9): the CONTENT of these items is
+  # invisible to Helm - the 1Password operator fills the Kubernetes Secret in
+  # the cluster after rendering, so there is nothing to hash and no checksum
+  # can cover it. Repointing either *SecretRef at a different item DOES roll
+  # the pods (the Deployment hashes the rendered OnePasswordItem into
+  # checksum/secret-ref), but rotating the value inside the same item does
+  # not: both are consumed as environment variables, which Kubernetes never
+  # refreshes in a running container. After such a rotation, restart by hand:
+  #
+  #   kubectl -n <namespace> rollout restart deployment/<release>-searxng-deployment
+
+# The contents of /etc/searxng/settings.yml, rendered into the ConfigMap.
+#
+# The file is deliberately minimal and starts with use_default_settings: true,
+# so it inherits the ~3500-line settings.yml the image ships and only names the
+# deviations. That is what keeps every upstream engine change flowing in
+# without a chart release, and it is why this chart does NOT map SearXNG's
+# hundreds of engine options onto first-class values: such a mapping would be
+# out of date with the first upstream change and would then lie about what the
+# instance actually runs.
+#
+# Everything else goes through "extra" below, which is merged over the block
+# the four keys build. Changing anything here rolls the pods - the Deployment
+# carries a checksum over the rendered ConfigMap. Without it the change would
+# never reach the running container: settings.yml is a subPath mount, which
+# the kubelet never refreshes, and SearXNG reads its configuration once at
+# start.
+settings:
+  # general.instance_name - the name shown in the UI and in the OpenSearch
+  # description. Upstream default: "SearXNG".
+  instanceName: "SearXNG"
+  # search.safe_search - 0 = off, 1 = moderate, 2 = strict.
+  safeSearch: 0
+  # search.autocomplete - the suggestion backend, e.g. "duckduckgo", "google",
+  # "startpage", "wikipedia". The empty string disables suggestions.
+  # Upstream default: "duckduckgo".
+  autocomplete: "duckduckgo"
+  # server.image_proxy - route image thumbnails through the instance instead
+  # of letting the browser fetch them from the origin. true is the value the
+  # upstream container template sets (the library default is false).
+  imageProxy: true
+  # server.limiter - SearXNG's bot detection.
+  #
+  # Off by default, and that is a decision rather than an omission: the limiter
+  # needs a Valkey/Redis to keep its counters, and this chart deploys none. The
+  # instance is meant to sit behind authentication at the Ingress (see
+  # ingress.annotations below), so nothing that the bot detection would look at
+  # ever reaches the application - switching it on would only add a second
+  # place to debug.
+  #
+  # If you do switch it on, set secrets.valkeySecretRef as well. What happens
+  # WITHOUT it was measured rather than guessed, and the answer is the
+  # uncomfortable middle one - a quiet fall-back, not a loud failure:
+  #
+  #   * one ERROR at worker start, "searx.limiter: The limiter requires
+  #     Valkey, please consult the documentation: ...", and nothing after that
+  #   * the pod becomes Ready and stays Ready
+  #   * every request is served normally - /, /search and /healthz all
+  #     answered 200, with no rate limiting in effect at all
+  #
+  # So a limiter switched on without a Valkey is not protecting anything, and
+  # the only sign of it is a single log line at start. With a reachable Valkey
+  # the same setup does limit: measured against a throwaway Valkey, "/" then
+  # answers 429 while /healthz still answers 200 - which is the whole reason
+  # the probes use /healthz.
+  limiter: false
+  # server.public_instance - extra protections for instances listed publicly.
+  # Off for the same reason as the limiter: it depends on the limiter's
+  # infrastructure and this instance is not public.
+  publicInstance: false
+  # Free-form passthrough, merged OVER the block the keys above build and
+  # rendered verbatim into settings.yml. This is where everything the chart
+  # does not model first-class goes, in SearXNG's own key names:
+  #
+  #   extra:
+  #     search:
+  #       default_lang: "de"
+  #       formats: ["html", "json"]
+  #     ui:
+  #       default_theme: simple
+  #     engines:
+  #       - name: wikipedia
+  #         disabled: false
+  #
+  # Merge semantics come from the same null-safe helper the security contexts
+  # use: nested maps are merged key by key, an explicit false or 0 wins, and a
+  # null keeps the value from the block above (nulls never delete). A scalar
+  # written where the base has a map is rejected by name instead of failing
+  # later with a template error.
+  #
+  # This object stays open in values.schema.json on purpose: its schema is
+  # SearXNG's, not this chart's, and restricting it would only reject keys the
+  # upstream has not invented yet.
+  extra: {}
+
+searxng:
+  # Replica count for this workload; 0 is allowed and scales it down.
+  # The chart-global scaleDown flag takes precedence.
+  #
+  # Note before raising this above 1: SearXNG keeps its settings in a signed
+  # cookie rather than server-side, so several replicas do not need a shared
+  # session store - but they DO need the same server.secret_key, which they
+  # have here (one Secret for the whole release). The per-pod SQLite caches
+  # under /tmp are independent and merely warm up separately.
+  replicas: 1
+  # uid/gid 977 is the "searxng" user of the image, and the number is not
+  # interchangeable: /etc/searxng and /var/cache/searxng are created 0755 and
+  # owned 977:977 in the image (searxng/base Dockerfile), and the entrypoint
+  # compares the ownership of both against searxng:searxng by name.
+  #
+  # EXPECTED LOG LINE, not a fault: the emptyDir mounted at
+  # /var/cache/searxng below is owned root:977 (fsGroup only sets the group),
+  # so the entrypoint prints a multi-line
+  #
+  #   !!! WARNING
+  #   !!! "/var/cache/searxng" directory is not owned by "searxng:searxng"
+  #
+  # and then continues. It cannot fix the ownership because the process is not
+  # root - which is the point - and it does not need to: the directory is
+  # group-writable through fsGroup. The warning is written down here because
+  # otherwise the next person who finds it in the log spends an hour on it.
+  securityContext:
+    pod:
+      runAsNonRoot: true
+      runAsUser: 977
+      runAsGroup: 977
+      fsGroup: 977
+      fsGroupChangePolicy: Always
+      # RuntimeDefault applies the container runtime's default seccomp filter,
+      # which blocks the syscalls a normal workload never makes. It sits in the
+      # pod context on purpose: from here it covers every container in the pod
+      # including init containers, while a container-level seccompProfile would
+      # have to be repeated for each one (and silently missed on the next one
+      # added). A container that genuinely needs a different filter can still
+      # override it under securityContext.container, which wins over this value.
+      seccompProfile:
+        type: RuntimeDefault
+    container:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      capabilities:
+        drop:
+          - ALL
+  # All three probes hit /healthz, and that is a deliberate choice in both
+  # directions.
+  #
+  # For it: /healthz is the ONLY path SearXNG's bot detection lets through
+  # unconditionally - searx/limiter.py filter_request() returns early on
+  # exactly this path before any of its checks run. This is not a theoretical
+  # margin. Measured in k3d against a reachable Valkey with settings.limiter
+  # true: "/" answered 429 while /healthz answered 200. A probe on "/" would
+  # therefore not merely risk a 429, it would collect one the moment the
+  # limiter is switched on - the pod would go NotReady and the symptom would
+  # point at the application instead of at the bot detection. It also costs
+  # nothing: the handler is
+  # `return Response('OK', mimetype='text/plain')`, no engines, no cache, no
+  # network - so liveness carries no external dependency (README, "Values that
+  # must not lie", point 3).
+  #
+  # Against it, stated plainly: a fixed string proves that the WSGI worker
+  # answers. It does not prove that a search works, that any engine is
+  # reachable, or that this chart's settings.yml was the file that got loaded.
+  # A green pod here is a running process, nothing more.
+  livenessProbe:
+    httpGet:
+      path: /healthz
+      port: http
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /healthz
+      port: http
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # The startup probe gates liveness/readiness, so those need no
+  # initialDelaySeconds. Startup budget = 5s * 30 = 150s. Measured in k3d
+  # (k3s v1.35.5) with the image already on the node: 6 s from container start
+  # to Ready. The budget is therefore about 25x a healthy start - the margin is
+  # for a cold node under load, not for a slow application.
+  startupProbe:
+    httpGet:
+      path: /healthz
+      port: http
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30
+  # Extra environment variables, appended to the ones the chart always sets
+  # (SEARXNG_SECRET, SEARXNG_BASE_URL and - when secrets.valkeySecretRef is
+  # set - SEARXNG_VALKEY_URL). Values are rendered through tpl; the value,
+  # secretKeyRef and configMapKeyRef forms are supported.
+  #
+  # NOTE that the list below is a DEFAULT, not an addition to one: an
+  # installation that sets searxng.env replaces it wholesale and has to repeat
+  # the GRANIAN_HOST entry.
+  #
+  # Also note the precedence: SearXNG's own SEARXNG_* variables
+  # (settings_defaults.py) override the ConfigMap, so an env entry named e.g.
+  # SEARXNG_LIMITER wins over settings.limiter above. That is a way out if you
+  # need it, and a trap if you forget it.
+  env:
+    # The bind address of granian, the WSGI server the image runs since it
+    # dropped uwsgi. It is a value rather than a template constant because it
+    # is the one setting that could plausibly need correcting per cluster, and
+    # the correction should be a values change, not a chart release.
+    #
+    # "::" is the image's own default and it was MEASURED here, not assumed.
+    # In k3d (k3s v1.35.5) the pod is single-stack IPv4 - one podIP, and eth0
+    # carries nothing but a link-local fe80:: address - and granian still logs
+    #
+    #   [INFO] Listening at: http://:::8080
+    #
+    # while the kubelet's IPv4 probes are answered and the pod goes Ready. The
+    # v4-mapped socket therefore works without a routable IPv6 address. On a
+    # cluster where it does not (an IPv6-disabled kernel: granian would fail to
+    # bind and the container would never answer), set this to "0.0.0.0".
+    #
+    # Note that there is no SEARXNG_* alias for the bind address: the
+    # entrypoint maps only SEARXNG_PORT onto GRANIAN_PORT, and the
+    # SEARXNG_BIND_ADDRESS setting is a leftover from the uwsgi era that
+    # granian never reads.
+    - name: GRANIAN_HOST
+      value: "::"
+  resources:
+    # Limits are optional: memory and ephemeral-storage limits default to
+    # limitFactor x the request, an explicitly set limit always wins, and a
+    # CPU limit is only set when configured explicitly under "limits".
+    limitFactor: 3
+    requests:
+      cpu: 0.1
+      # Measured on the shipped image in k3d, cgroup memory.current of the
+      # container: 152 MiB once the worker is up and answering, peaking at
+      # 157 MiB across a real search. 256Mi covers that with headroom; the
+      # computed limit (3x = 768Mi) leaves room for the per-request engine
+      # work, which fans out to many upstreams at once.
+      memory: 256Mi
+      # SearXNG writes its SQLite caches into /tmp - searx/cache.py falls back
+      # to tempfile.gettempdir() when no db_url is configured. Measured after a
+      # real search: 356 KiB total (DATA_CACHE and ENGINES_CACHE, each a small
+      # db plus its -shm/-wal files), and the application expires entries
+      # itself. 64Mi is roughly 180x the measured footprint while still
+      # bounding a runaway; the computed limit is 192Mi.
+      ephemeralStorage: 64Mi
+    # No CPU limit by default (repo standard): CPU is compressible, so a limit
+    # only throttles.
+
+ingress:
+  # Gates the whole Ingress template.
+  #
+  # Checked in both directions per guideline 1, and the answer here is NOT the
+  # comfortable one: ingress.domain is read a SECOND time, outside this
+  # template, to build SEARXNG_BASE_URL in the Deployment. It therefore keeps
+  # its own required() there and stays mandatory even with the Ingress turned
+  # off; only clusterIssuer becomes unnecessary.
+  #
+  # Why that read cannot be dropped: server.base_url is what SearXNG puts into
+  # the OpenSearch description, into the image-proxy URLs it signs and into
+  # every absolute link it generates. Left empty, the instance renders and the
+  # pod goes green while browsers get sent to a broken address - exactly the
+  # silent failure the guideline exists for.
+  enabled: true
+  clusterIssuer: null
+  # The hostname this instance is served under. Required (see above), with no
+  # default - hostnames are installation data and have no business in a chart.
+  domain: null
+  className: nginx
+  # Extra annotations for the Ingress; merged with the cert-manager
+  # cluster-issuer annotation the chart always sets.
+  #
+  # This is where authentication in front of SearXNG belongs, and it needs no
+  # chart change: forward-auth is entirely an ingress-nginx matter. With
+  # Authentik, for example:
+  #
+  #   annotations:
+  #     nginx.ingress.kubernetes.io/auth-url: |-
+  #       http://ak-outpost-authentik-embedded-outpost.authentik.svc.cluster.local:9000/outpost.goauthentik.io/auth/nginx
+  #     nginx.ingress.kubernetes.io/auth-signin: |-
+  #       https://searxng.example.com/outpost.goauthentik.io/start?rd=$escaped_request_uri
+  #     nginx.ingress.kubernetes.io/auth-response-headers: |-
+  #       Set-Cookie,X-authentik-username,X-authentik-groups,X-authentik-email,X-authentik-name,X-authentik-uid
+  #     nginx.ingress.kubernetes.io/auth-snippet: |
+  #       proxy_set_header X-Forwarded-Host $http_host;
+  #
+  # (example.com is a placeholder - substitute your own hostname.)
+  #
+  # Two things to know before relying on it:
+  #
+  #   * The kubelet's probes go straight to the pod and never pass the
+  #     Ingress, so an authentication outpost that is down cannot turn this
+  #     release red. Good for availability - and it also means a green pod
+  #     says nothing about whether the login in front of it works.
+  #   * Anyone who adds this instance as a browser search engine sends their
+  #     queries through the same login. That is not a chart concern, but it is
+  #     the reason such a setup "suddenly stops working" after a session
+  #     expires.
+  annotations: {}

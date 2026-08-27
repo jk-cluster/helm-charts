@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "{{ .Release.Name }}-{{ .Chart.Name }}-configmap"
+data:
+  # Mounted at /etc/searxng/settings.yml via subPath. That path is not free
+  # choice: the image exports __SEARXNG_SETTINGS_PATH=/etc/searxng/settings.yml
+  # and its entrypoint creates the file from its own template only when it does
+  # NOT exist. Because this mount is always there, the entrypoint finds the
+  # file, skips both the copy and the sed that would otherwise invent a random
+  # secret_key, and never needs to write into /etc/searxng - which is what lets
+  # the container run with a read-only root filesystem.
+  settings.yml: |
+    {{- include "searxng.settingsYaml" . | nindent 4 }}

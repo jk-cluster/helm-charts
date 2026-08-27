@@ -1,0 +1,16 @@
+apiVersion: v2
+name: searxng
+description: A Helm chart to deploy SearXNG on Kubernetes
+icon: https://raw.githubusercontent.com/searxng/searxng/master/client/simple/src/brand/searxng.svg
+
+type: application
+
+# SearXNG publishes no semver line at all: every image tag is <date>-<commit>
+# (2026.8.22-9fea41204) and "latest" moves daily. appVersion is therefore the
+# exact tag, and the +up suffix normalizes the dash to a dot as the versioning
+# scheme requires - the same shape rss-bridge and minecraft-server use.
+version: 1.0.0+up2026.8.22.9fea41204
+appVersion: "2026.8.22-9fea41204"
+
+maintainers:
+  - name: jklein

@@ -1,0 +1,15 @@
+name: Publish SearXNG Helm Chart
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - searxng/**
+jobs:
+  publish-searxng:
+    name: Publish SearXNG Helm Chart
+    uses: ./.github/workflows/publish-helm-chart.yml
+    with:
+      chart-name: 'searxng'
+    secrets: inherit

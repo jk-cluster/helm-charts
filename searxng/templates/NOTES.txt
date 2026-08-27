@@ -1,0 +1,89 @@
+{{- $replicas := include "searxng.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.searxng.replicas) -}}
+{{- $settings := fromYaml (include "searxng.effectiveSettings" .Values.settings) -}}
+SearXNG {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+{{- if .Values.ingress.enabled }}
+
+ACCESS
+  https://{{ .Values.ingress.domain }}
+
+  The certificate is requested by cert-manager through the "{{ .Values.ingress.clusterIssuer }}"
+  cluster issuer. Until it has been issued the browser shows a warning; follow it with
+
+    kubectl -n {{ .Release.Namespace }} get certificate tls-{{ .Release.Name }}-{{ .Chart.Name }}-ingress
+{{- else }}
+
+ACCESS — NO INGRESS
+  ingress.enabled is false, so this release has no Ingress and no certificate.
+  ingress.domain is still required: it builds SEARXNG_BASE_URL, which SearXNG
+  puts into its OpenSearch description, into the signed image-proxy URLs and
+  into every absolute link. Reach the instance inside the cluster with
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-{{ .Chart.Name }}-service 8080:80
+
+  and open http://localhost:8080. Note that links on the page will still point
+  at https://{{ .Values.ingress.domain }}/.
+{{- end }}
+{{ if eq $replicas "0" }}
+SCALED TO ZERO
+  {{ if .Values.scaleDown }}scaleDown: true{{ else }}searxng.replicas: 0{{ end }} — the deployment runs with replicas: 0, so the endpoint
+  above does not answer until you set it back and upgrade again. Service{{ if .Values.ingress.enabled }} and
+  Ingress stay in place, so the certificate is not re-issued.{{ else }} stays in
+  place.{{ end }}
+{{ end }}
+CONFIGURATION
+  Instance name: {{ $settings.instanceName }}
+  settings.yml is rendered from the "settings" values into
+  {{ .Release.Name }}-{{ .Chart.Name }}-configmap and mounted at /etc/searxng/settings.yml.
+  It starts with use_default_settings: true and names only the deviations, so
+  every engine the image ships stays available and upstream engine changes
+  arrive with the app version instead of with a chart release.
+
+  Anything the chart does not model first-class goes into settings.extra in
+  SearXNG's own key names; it is merged over the generated block. Changing any
+  of it rolls the pods — the deployment hashes the ConfigMap, because a subPath
+  mount would otherwise never reach the running container.
+
+WHAT THE GREEN CHECKMARK DOES AND DOES NOT MEAN
+  All three probes hit /healthz, the only path SearXNG's bot detection lets
+  through unconditionally. Its handler returns a fixed "OK". So a Ready pod
+  means the worker answers — not that a search works, not that any engine is
+  reachable, and not that a login placed in front of the Ingress is up (probes
+  go straight to the pod and never pass the Ingress).
+{{- if not $settings.limiter }}
+
+BOT DETECTION IS OFF
+  settings.limiter is false and no Valkey is configured. The instance relies on
+  whatever sits in front of it — put authentication there via
+  ingress.annotations if it must not be open to everyone.
+{{- else if not .Values.secrets.valkeySecretRef }}
+
+BOT DETECTION IS ON WITHOUT A VALKEY
+  settings.limiter is true but secrets.valkeySecretRef is unset. The limiter
+  needs a Valkey to keep its counters, so it does nothing at all: SearXNG logs
+
+    ERROR:searx.limiter: The limiter requires Valkey, please consult the
+    documentation: https://docs.searxng.org/admin/searx.limiter.html
+
+  once at worker start, the pod becomes Ready, and every request is served
+  unlimited. This release is therefore NOT rate limited, and the only trace of
+  that is one line at the top of the log. Set secrets.valkeySecretRef, or set
+  settings.limiter back to false.
+{{- end }}
+
+ROTATING THE SIGNING KEY
+  secrets.searxngSecretRef carries the key that signs the settings cookie and
+  the image-proxy URLs. Pointing it at a DIFFERENT 1Password item rolls the
+  pods; changing the value INSIDE the same item does not — Helm never sees that
+  content. After such a rotation:
+
+    kubectl -n {{ .Release.Namespace }} rollout restart deployment/{{ .Release.Name }}-{{ .Chart.Name }}-deployment
+
+  A new key invalidates every user's saved preferences cookie, which is a
+  logout-shaped event for the people using it.
+
+NOTHING TO BACK UP
+  The pod holds no state worth keeping: settings.yml comes from the ConfigMap,
+  the signing key from the Secret, and the SQLite caches under /tmp plus
+  /var/cache/searxng are emptyDirs that refill on their own. App-version
+  upgrades and rollbacks therefore carry no data risk.

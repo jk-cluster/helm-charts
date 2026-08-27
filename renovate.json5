@@ -21,7 +21,7 @@
   timezone: "Europe/Berlin",
   labels: ["dependencies"],
 
-  // 20 charts plus the workflows: without a cap the first run after a quiet
+  // 21 charts plus the workflows: without a cap the first run after a quiet
   // week opens a wall of PRs, and every chart PR spins up a k3d install-test.
   prConcurrentLimit: 10,
   prHourlyLimit: 4,
@@ -174,8 +174,8 @@
     // its own manager that hard-codes the repository and reads `appVersion:`.
     //
     // Deliberately *not* solved with a `# renovate:` comment inside each
-    // Chart.yaml: that would touch all 20 chart directories and force 20
-    // version bumps plus 20 publishes for a pure comment change. Keeping the
+    // Chart.yaml: that would touch all 21 chart directories and force 21
+    // version bumps plus 21 publishes for a pure comment change. Keeping the
     // mapping here leaves the charts untouched.
     //
     // When adding a chart, add a block here — see README "Creating a new chart".
@@ -299,6 +299,47 @@
       datasourceTemplate: "docker",
       depTypeTemplate: "app-version",
       versioningTemplate: "regex:^(?<major>\\d{4})-(?<minor>\\d{2})-(?<patch>\\d{2})$",
+    },
+    {
+      description: [
+        "searxng: every tag is <date>-<commit> (2026.8.22-9fea41204) - no semver line at all,",
+        "and 'latest' moves daily. The date carries the ordering; the commit hash is matched",
+        "but deliberately NOT captured.",
+      ],
+      customType: "regex",
+      managerFilePatterns: ["searxng/Chart.yaml"],
+      matchStrings: ["(?m)^appVersion:\\s*\"?(?<currentValue>[^\"\\s]+)\"?"],
+      depNameTemplate: "docker.io/searxng/searxng",
+      datasourceTemplate: "docker",
+      depTypeTemplate: "app-version",
+      // The hash sits outside every capture group on purpose, and that is the
+      // whole point of this line. Renovate's regex versioning reads a "build"
+      // group NUMERICALLY - regex/index.js _parse() does
+      // release.push(Number.parseInt(build)) - so a commit hash becomes
+      // whatever digits happen to lead it: parseInt("9fea41204") is 9,
+      // parseInt("777ba8fa4") is 777, and any hash starting with a letter
+      // (6 of the 25 tags live today) is NaN.
+      //
+      // Verified against the real API on renovate 41.173.1 and 44.48.0, with
+      // currentValue 2026.8.22-9fea41204:
+      //   with (?<build>[0-9a-f]+):
+      //     isGreaterThan("2026.8.22-777ba8fa4", current) -> true
+      //   without it (this line):
+      //     isGreaterThan("2026.8.22-777ba8fa4", current) -> false, equals -> true
+      // 777ba8fa4 was pushed at 03:06 and 9fea41204 at 05:38 the SAME day, so
+      // the build group makes Renovate offer the older image as an update -
+      // a downgrade, unattended, because date updates land in the patch/minor
+      // automerge rule. With NaN the pair is neither equal nor ordered at all.
+      //
+      // Uncaptured, the hash still has to be THERE (the pattern is anchored),
+      // it just takes no part in the comparison: two builds of one day are
+      // equal, so no sideways update is proposed, and a newer date wins
+      // whatever the hash looks like.
+      //
+      // "prerelease" instead of "build" was measured too and rejected: it
+      // sorts correctly but marks every single tag isStable === false, which
+      // hands the whole chart to ignoreUnstable.
+      versioningTemplate: "regex:^(?<major>\\d{4})\\.(?<minor>\\d{1,2})\\.(?<patch>\\d{1,2})-[0-9a-f]+$",
     },
     {
       customType: "regex",

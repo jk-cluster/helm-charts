@@ -1,0 +1,15 @@
+# Fixtures for the searxng install-test: the one Secret the 1Password operator
+# would otherwise materialize (release name: ci).
+#
+# The value is a throwaway string, and this chart genuinely needs nothing more
+# than that - unlike freesailarr, whose fixtures need a real credential to get
+# past a VPN handshake. What it does need is a value that is NOT the upstream
+# placeholder "ultrasecretkey": SearXNG's webapp.py init() exits 1 on that, so
+# an empty or careless fixture would produce a crash loop rather than a
+# passing install-test.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ci-searxng-secret
+stringData:
+  secret-key: searxng-ci-secret-key-0123456789abcdef0123456789abcdef

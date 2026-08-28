@@ -1,0 +1,267 @@
+{{- $replicas := include "matrix-synapse.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.matrix.replicas) -}}
+{{- $delegation := .Values.matrix.delegation | default dict -}}
+{{- $delegationReplicas := include "matrix-synapse.replicas" (dict "scaleDown" .Values.scaleDown "replicas" $delegation.replicas) -}}
+{{- $res := fromYaml (include "matrix-synapse.effectiveResources" .Values.matrix.resources) -}}
+{{- $eph := index ($res.limits | default dict) "ephemeral-storage" | default "the computed ephemeral-storage limit" -}}
+{{- $startup := fromYaml (include "matrix-synapse.startupProbe" .Values.matrix.startupProbe) -}}
+{{- $budget := "" -}}
+{{- if and (kindIs "float64" $startup.periodSeconds) (kindIs "float64" $startup.failureThreshold) -}}
+{{- $budget = printf "%.0f seconds" (mulf $startup.periodSeconds $startup.failureThreshold) -}}
+{{- end -}}
+{{- $sfs := printf "%s-%s-sfs" .Release.Name .Chart.Name -}}
+{{- $pod := printf "%s-0" $sfs -}}
+Matrix Synapse {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+{{- if .Values.ingress.enabled }}
+
+ACCESS
+  https://{{ .Values.ingress.domain }}
+
+  That host carries the whole client and federation API: the Ingress sends "/"
+  on it to the Synapse Service, which forwards port 80 to the container's
+  8008. The certificate is requested by cert-manager through the
+  "{{ .Values.ingress.clusterIssuer }}" cluster issuer; until it has been issued the browser
+  shows a warning and federation fails. Follow it with
+
+    kubectl -n {{ .Release.Namespace }} get certificate tls-{{ .Release.Name }}-{{ .Chart.Name }}-ingress
+{{- else }}
+
+ACCESS — NO INGRESS
+  ingress.enabled is false, so this release has no Ingress and no certificate;
+  ingress.clusterIssuer is not needed.
+{{- if $delegation.enabled }}
+  ingress.domain still is: the delegation nginx renders it into the
+  /.well-known/matrix/* documents, so it stays the host every other Matrix
+  server is told to talk to, not merely an Ingress entry.
+{{- else }}
+  With the delegation off as well, ingress.domain is read by nothing in this
+  release — no object rendered here carries it.
+{{- end }}
+  Reach the server inside the cluster with
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-{{ .Chart.Name }}-service 8008:80
+
+  and point a client at http://127.0.0.1:8008/. Nothing in this release
+  terminates TLS, and Matrix federation is HTTPS-only: no remote server can
+  reach this one until something in front of the cluster serves this Service
+  over HTTPS{{ if .Values.ingress.domain }} as https://{{ .Values.ingress.domain }}{{ end }}.
+{{- end }}
+{{- if $delegation.enabled }}
+
+DELEGATION — TWO HOSTNAMES THAT ARE NOT INTERCHANGEABLE
+  matrix.delegation.enabled is true, so a second nginx Deployment serves the
+  two .well-known documents, filled in from ingress.domain:
+
+    /.well-known/matrix/server
+      → {"m.server": "{{ .Values.ingress.domain }}:443"}
+    /.well-known/matrix/client
+      → {"m.homeserver": {"base_url": "https://{{ .Values.ingress.domain }}"}}
+{{- if .Values.ingress.enabled }}
+
+  The Ingress publishes them on a SECOND host. Read that split carefully,
+  because the chart cannot check it for you:
+
+    matrix.delegation.serverUrl ({{ $delegation.serverUrl }})
+      is the DELEGATING host — the domain in every user ID (@user:{{ $delegation.serverUrl }}).
+      Remote servers look up .well-known here, so this is the name that must
+      equal the server_name of the running homeserver.
+    ingress.domain ({{ .Values.ingress.domain }})
+      is where Synapse actually answers. It appears inside the documents
+      above and needs no relation to the server name.
+
+  Only the path /.well-known/matrix is routed to nginx on {{ $delegation.serverUrl }};
+  everything else on that host is not served by this release. Both hosts need
+  a certificate — the second one is tls-{{ .Release.Name }}-{{ .Chart.Name }}-delegation — and
+  cert-manager only issues it once {{ $delegation.serverUrl }} resolves to this cluster.
+  A pending certificate there is a federation outage, not a cosmetic problem.
+
+  Check what is actually being served, from outside the cluster:
+
+    curl -s https://{{ $delegation.serverUrl }}/.well-known/matrix/server
+{{- else }}
+
+  Nothing publishes them, though: ingress.enabled is false, so the documents
+  exist only on the in-cluster Service {{ .Release.Name }}-{{ .Chart.Name }}-delegation-service, and
+  matrix.delegation.serverUrl ({{ $delegation.serverUrl }}) is rendered into no object of this
+  release. Whatever terminates TLS in front of the cluster has to route
+  https://<server name>/.well-known/matrix to that Service, or federation
+  never finds this homeserver. Inspect the documents meanwhile with
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-{{ .Chart.Name }}-delegation-service 8080:80
+{{- end }}
+
+  The nginx image is pinned separately at {{ $delegation.image.repository }}:{{ $delegation.image.tag }} — it is the one
+  image in this chart that does not follow the chart's appVersion.
+{{- else }}
+
+NO DELEGATION IN THIS RELEASE — FEDERATION LIKELY DOES NOT WORK
+  matrix.delegation.enabled is false, so nothing here serves
+  /.well-known/matrix/server. A remote server that finds no such document
+  falls back to port 8448 of the server name — and this release exposes no
+  8448 anywhere: the container publishes 8008 only, and the Service maps port
+  80 onto it. Unless the delegation is served by something else (a static
+  .well-known on the server-name host, or an SRV record), federation stays
+  broken{{ if .Values.ingress.enabled }} while clients on {{ .Values.ingress.domain }} work fine{{ end }}.
+  Setting matrix.delegation.enabled to true and matrix.delegation.serverUrl
+  to the server name lets this chart serve it.
+{{- end }}
+{{- if or (eq $replicas "0") (and $delegation.enabled (eq $delegationReplicas "0")) }}
+
+SCALED TO ZERO
+{{- if .Values.scaleDown }}
+  scaleDown: true — every workload of this release runs with replicas: 0.
+{{- else }}
+{{- if eq $replicas "0" }}
+  matrix.replicas: 0 — the Synapse StatefulSet runs with replicas: 0.
+{{- end }}
+{{- if and $delegation.enabled (eq $delegationReplicas "0") }}
+  matrix.delegation.replicas: 0 — the delegation nginx runs with replicas: 0,
+  so the .well-known documents 404 while remote servers keep asking for them.
+{{- end }}
+{{- end }}
+  The PVC, the Secret and the Services stay in place, so no data is lost{{ if .Values.ingress.enabled }} and
+  the certificates are not re-issued{{ end }}. Set it back and upgrade again to
+  return.
+{{- end }}
+
+SECRETS — WHAT THE 1PASSWORD ITEM MUST CARRY
+  secrets.configSecretRef → {{ .Values.secrets.configSecretRef }}
+  → OnePasswordItem and Secret {{ .Release.Name }}-{{ .Chart.Name }}-config-secret
+
+  The operator copies the item's FIELDS into that Secret, one key per field
+  name, and this chart reads exactly one of them. The item therefore needs a
+  field named literally
+
+    homeserver.yaml
+
+  holding the COMPLETE Synapse configuration file; it is mounted read-only at
+  /data/homeserver.yaml. A field spelled differently produces a Secret without
+  that key, the pod never starts, and the reason appears only as a volume
+  error in "kubectl -n {{ .Release.Namespace }} describe pod {{ $pod }}" — the
+  Secret itself exists, so the operator looks as if it had done its job.
+
+  Four settings inside that file are dictated by this chart's mounts, and
+  getting them wrong is not a config error the app reports clearly:
+
+    media_store_path: /media_store     the second PVC subPath. The root
+                                       filesystem is read-only, so a path
+                                       outside /data, /media_store and /tmp
+                                       fails on the first upload.
+    signing_key_path: under /data      the federation identity. Losing it
+                                       makes this server a stranger to every
+                                       server that ever spoke to it.
+    log_config: under /data            anywhere else is unwritable.
+    a listener on port 8008, type http — the Service and all three probes
+                                       target that port by name.
+
+  This chart deploys NO database. Whatever "database:" names — an external
+  PostgreSQL, or an SQLite file, which then has to live under /data — must
+  exist and be reachable from namespace {{ .Release.Namespace }}.
+
+  Note that /data is the PVC and homeserver.yaml is mounted ON TOP of it: a
+  homeserver.yaml already lying in the volume (from a "synapse generate" run,
+  for instance) is shadowed and never read. What runs is the item's content.
+
+CHANGING THE ITEM DOES NOT RESTART SYNAPSE
+  Pointing secrets.configSecretRef at a DIFFERENT item changes the rendered
+  StatefulSet and rolls the pod. Changing the content INSIDE the same item
+  does not: Helm never sees that content, so nothing in the pod template
+  changes — and because the file is a subPath mount, the kubelet does not
+  refresh it in the running container either. Both halves have to be undone
+  by hand:
+
+    kubectl -n {{ .Release.Namespace }} rollout restart statefulset/{{ $sfs }}
+
+  The operator's own "auto-restart" annotation is no substitute here: it
+  restarts Deployments, and this workload is a StatefulSet. The delegation
+  nginx is the opposite case — its ConfigMap is hashed into the pod template
+  (checksum/config), so a changed ingress.domain rolls it automatically.
+
+THE SERVER NAME IS DECIDED ONCE, AND NOT BY matrix.serverName
+  matrix.serverName ({{ .Values.matrix.serverName }}) is rendered into the SYNAPSE_SERVER_NAME
+  environment variable. The server that actually runs reads its name from
+  "server_name:" in the mounted homeserver.yaml — the env var matters to the
+  image only when it generates a configuration, which is not what happens
+  here. Changing matrix.serverName alone rolls the pod and changes nothing
+  else.
+
+  And the name cannot be changed afterwards at all: it is baked into every
+  user ID, room ID and event this server has ever signed. A server that needs
+  a different name is a new server with a new database, not an upgrade. Decide
+  it before the first start — together with matrix.delegation.serverUrl, which
+  has to match it.
+{{- if and .Values.ingress.enabled $delegation.enabled .Values.matrix.serverName $delegation.serverUrl }}
+{{- if ne (printf "%v" .Values.matrix.serverName) (printf "%v" $delegation.serverUrl) }}
+
+  MISMATCH IN THIS RELEASE: matrix.serverName is "{{ .Values.matrix.serverName }}" but the
+  delegation is published on "{{ $delegation.serverUrl }}". Remote servers resolve
+  .well-known on the SERVER NAME, so unless something outside this chart
+  serves it on "{{ .Values.matrix.serverName }}", the nginx deployed here is
+  never asked. Both values name the same host in a working setup.
+{{- end }}
+{{- end }}
+
+WHAT A READY POD PROVES — AND WHAT IT DOES NOT
+  All three Synapse probes hit /health, which answers 200 as soon as the HTTP
+  listener is up. It says nothing about the database, the signing key or
+  federation: a homeserver.yaml pointing at an unreachable database usually
+  fails at start (CrashLoopBackOff, log only), but every problem that appears
+  later leaves the pod Ready. The startup probe covers the first start{{ if $budget }}
+  ({{ $budget }}), which is where schema migrations and cache warmup happen{{ end }}:
+
+    kubectl -n {{ .Release.Namespace }} logs {{ $pod }}
+{{- if $delegation.enabled }}
+
+  The delegation probe is weaker still. It requests
+  /.well-known/matrix/server, and that endpoint is a static "return 200" in
+  the generated nginx.conf — it passes with a wrong ingress.domain baked into
+  the document. Read the body, not the probe.
+{{- end }}
+
+THE VOLUME BELONGS TO THIS RELEASE
+  /data (database when SQLite, signing key, log config) and /media_store (all
+  uploaded media) are two subPaths of ONE ReadWriteOnce claim,
+  {{ .Release.Name }}-{{ .Chart.Name }}-pvc ({{ .Values.storage.amount }}{{ if .Values.storage.storageClass }} from storageClass {{ .Values.storage.storageClass }}{{ end }}). It is an
+  ordinary PVC in this release, not a StatefulSet volumeClaimTemplate, and it
+  carries no resource-policy annotation: "helm uninstall {{ .Release.Name }}" deletes it, and
+  with a Delete reclaim policy the media and the signing key go with it. Add
+  the annotation to the live PVC afterwards and it still will not help — Helm
+  reads that annotation from the release manifest. Back the volume up first.
+
+  Growing storage.amount only takes effect if the StorageClass allows volume
+  expansion; shrinking it is refused by Kubernetes and fails the next upgrade
+  on the PVC instead of touching the data. Media is what grows here, and it
+  grows without an upper bound unless the homeserver.yaml sets retention.
+
+  The container runs as uid/gid 1000 with fsGroup 1000 — the gosu default the
+  upstream image used before this chart pinned the user, so data written by
+  an older release stays readable. Files in the volume that belong to
+  another uid — restored from a backup, written by an older release — are not
+  readable, and the signing key (mode 0600) is the first thing to fail.
+
+  Everything else the process writes has to go to /tmp, which is an emptyDir
+  and counts against the container's ephemeral-storage limit ({{ $eph }}).
+  Raise matrix.resources.requests.ephemeralStorage to move it; the limit
+  follows through matrix.resources.limitFactor.
+{{- if gt (atoi $replicas) 1 }}
+
+MORE THAN ONE SYNAPSE REPLICA WILL NOT WORK
+  matrix.replicas is {{ $replicas }}, but every pod of this StatefulSet mounts the same
+  ReadWriteOnce claim {{ .Release.Name }}-{{ .Chart.Name }}-pvc and the same homeserver.yaml — there is
+  no volumeClaimTemplate and no per-pod configuration. Additional pods either
+  stay Pending on a node without the volume, or start as a second full
+  homeserver on the same data. Scaling Synapse means running workers with
+  distinct configurations, which this chart does not deploy.
+{{- end }}
+{{- if .Values.matrix.env }}
+
+matrix.env IS APPENDED, NOT MERGED
+  Its {{ len .Values.matrix.env }} entr{{ if eq (len .Values.matrix.env) 1 }}y lands{{ else }}ies land{{ end }} after the three the chart sets itself —
+  SYNAPSE_SERVER_NAME, SYNAPSE_REPORT_STATS ("no") and TZ ({{ .Values.matrix.timezone }}) — so
+  repeating one of those names leaves two entries of the same name in the pod
+  spec. Values are rendered through tpl and may contain template expressions.
+  Anything sensitive belongs in valueFrom.secretKeyRef: a plain "value" is
+  stored in the pod spec and readable by everyone who can read pods in
+  {{ .Release.Namespace }}. Note that Synapse takes its real configuration from
+  homeserver.yaml, not from the environment.
+{{- end }}

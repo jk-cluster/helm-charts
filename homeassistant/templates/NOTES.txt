@@ -1,1 +1,291 @@
-Hello :)
+{{- $replicas := include "homeassistant.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.replicas) -}}
+{{- $res := fromYaml (include "homeassistant.effectiveResources" .Values.resources) -}}
+{{/*
+The ephemeral-storage limit goes through formatNumber for the reason issue #157
+documents: it comes back from fromYaml as float64, and a bare byte count would
+print as "1e+06" here just as it did in the rendered manifest.
+*/}}
+{{- $ephRaw := index ($res.limits | default dict) "ephemeral-storage" -}}
+{{- $eph := "the computed ephemeral-storage limit" -}}
+{{- if not (kindIs "invalid" $ephRaw) -}}
+{{- $eph = include "homeassistant.formatNumber" $ephRaw -}}
+{{- end -}}
+{{- $startup := fromYaml (include "homeassistant.startupProbe" .Values.startupProbe) -}}
+{{- $budget := "" -}}
+{{- if and (kindIs "float64" $startup.periodSeconds) (kindIs "float64" $startup.failureThreshold) -}}
+{{- $budget = printf "%.0f seconds" (mulf $startup.periodSeconds $startup.failureThreshold) -}}
+{{- end -}}
+{{- $ctr := fromYaml (include "homeassistant.containerSecurityContext" .Values.securityContext) -}}
+{{- $caps := (index $ctr "capabilities") | default dict -}}
+{{- $netRaw := has "NET_RAW" ((index $caps "add") | default list) -}}
+{{- $ing := .Values.ingress -}}
+{{- $hosts := $ing.hosts | default list -}}
+{{- $tls := $ing.tls | default list -}}
+{{- $ann := $ing.annotations | default dict -}}
+{{- $issuer := or (hasKey $ann "cert-manager.io/cluster-issuer") (hasKey $ann "cert-manager.io/issuer") -}}
+{{- $certName := "" -}}
+{{- range $t := $tls }}{{ if not $certName }}{{ $certName = ($t.secretName | default "") }}{{ end }}{{ end }}
+{{- $placeholder := false -}}
+{{- range $h := $hosts }}{{ if eq ($h.host | default "") "chart-example.local" }}{{ $placeholder = true }}{{ end }}{{ end }}
+{{- $pod := printf "%s-%s-sfs-0" .Release.Name .Chart.Name -}}
+{{- $sfs := printf "%s-%s-sfs" .Release.Name .Chart.Name -}}
+Home Assistant {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+{{- if $ing.enabled }}
+
+ACCESS
+{{- range $h := $hosts }}
+{{- $scheme := "http" }}
+{{- range $t := $tls }}
+{{- if has ($h.host | default "") ($t.hosts | default list) }}{{ $scheme = "https" }}{{ end }}
+{{- end }}
+{{- range $p := ($h.paths | default list) }}
+  {{ $scheme }}://{{ $h.host }}{{ $p.path }}
+{{- end }}
+{{- end }}
+
+  This chart keeps the upstream-style ingress block — hosts and tls lists
+  instead of the domain/clusterIssuer pair the other charts in this repo use.
+  That is a documented exception, and it has one consequence worth knowing
+  before you go looking for a certificate:
+{{- if not $tls }}
+
+  ingress.tls is empty, so the Ingress carries no TLS section at all and the
+  URLs above are plain http. Nothing here requests a certificate.
+{{- else if not $issuer }}
+
+  ingress.tls names a secretName, but NOTHING IN THIS RELEASE CREATES THAT
+  SECRET. The chart adds no cert-manager annotation of its own — unlike the
+  other charts here, which build one from ingress.clusterIssuer — and
+  ingress.annotations carries neither cert-manager.io/cluster-issuer nor
+  cert-manager.io/issuer. Until that Secret exists by some other means,
+  ingress-nginx answers with its own default certificate and every browser
+  shows a name mismatch. Add the annotation under ingress.annotations:
+
+    ingress:
+      annotations:
+        cert-manager.io/cluster-issuer: letsencrypt
+{{- else }}
+
+  The certificate is requested by cert-manager through the annotation you set
+  under ingress.annotations; the chart adds none by itself, and it does not
+  name the TLS Secret either — you did, in ingress.tls. cert-manager's
+  ingress-shim names the Certificate after that Secret, so this is the object
+  to watch while the browser still shows a warning:
+
+    kubectl -n {{ .Release.Namespace }} get certificate {{ $certName | default "<your ingress.tls secretName>" }}
+{{- end }}
+{{- else }}
+
+ACCESS — NO INGRESS
+  ingress.enabled is false, so this release has no Ingress. Nothing else in
+  this chart reads ingress.hosts, so no other setting silently depends on it.
+  Reach the instance inside the cluster with
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-{{ .Chart.Name }}-service 8123:{{ .Values.service.port }}
+
+  and open http://localhost:8123. The Service listens on port {{ .Values.service.port }} and
+  forwards to the container's 8123; keeping 8123 as the LOCAL port matters,
+  because a browser that has already talked to another Home Assistant on
+  localhost:8123 will otherwise mix up the stored tokens.
+{{- end }}
+{{- if and $ing.enabled $placeholder }}
+
+THE INGRESS IS PUBLISHED UNDER THE CHART'S PLACEHOLDER HOST
+  ingress.enabled is true while ingress.hosts still contains the default entry
+  "chart-example.local". That name resolves nowhere, so the Ingress exists,
+  ingress-nginx accepts it, and no request ever arrives. Set ingress.hosts to
+  the name you actually serve — for example example.com — before assuming the
+  release is unreachable for some deeper reason.
+{{- end }}
+{{ if eq $replicas "0" }}
+SCALED TO ZERO
+  {{ if .Values.scaleDown }}scaleDown: true{{ else }}replicas: 0{{ end }} — the StatefulSet runs with replicas: 0, so nothing answers
+  until you set it back and upgrade again. The PVC, the OnePasswordItem and
+  the Service{{ if $ing.enabled }} and Ingress stay in place, so no state is lost and no
+  certificate is re-issued.{{ else }} stay in place, so no state is lost.{{ end }}
+
+  Bringing this release back up is not a no-op: the pod re-reads the config
+  item from the vault as it starts, and it starts on whatever app version the
+  chart carries now. A release parked at zero for a long time therefore comes
+  back changed in two ways at once.
+{{ end }}
+THE CONFIGURATION IS A 1PASSWORD ITEM, AND IT IS READ-ONLY IN THE CONTAINER
+  Home Assistant is configured from files, not from the environment, and this
+  chart delivers those files out of a single 1Password item. The operator
+  copies the item's FIELDS into the Kubernetes Secret, one key per field name,
+  and this chart mounts exactly three of them. The field names are decided
+  here and appear nowhere in 1Password, so they have to match to the letter:
+
+    secrets.configSecretRef → {{ .Values.secrets.configSecretRef | default "(not set — the render fails without it)" }}
+      → Secret {{ .Release.Name }}-{{ .Chart.Name }}-config-secret
+
+        config           → /config/configuration.yaml
+        http-config      → /config/http-config.yaml
+        recorder-config  → /config/recorder-config.yaml
+
+  The three are separate files on purpose, and configuration.yaml has to pull
+  the other two in itself — the chart only mounts them, it does not wire them
+  together. A working minimum for the "config" field is
+
+    default_config:
+    http: !include http-config.yaml
+    recorder: !include recorder-config.yaml
+
+  A field spelled differently yields a Secret without that key. The pod then
+  hangs in CreateContainerConfigError while the Secret itself exists, so it
+  looks as if the operator had done its job. What it actually delivered:
+
+    kubectl -n {{ .Release.Namespace }} get secret {{ .Release.Name }}-{{ .Chart.Name }}-config-secret -o jsonpath='{.data}'
+
+  All three are mounted with subPath from a Secret volume, which makes them
+  READ-ONLY inside the container. Home Assistant's own file editor and every
+  UI page that offers to write configuration.yaml will fail on these three
+  paths — and only on these three. Everything else under /config is on the
+  PVC and writable as usual.
+
+  Pointing secrets.configSecretRef at a DIFFERENT item rolls the pod: the
+  StatefulSet carries a checksum over the rendered OnePasswordItem, so the
+  item path is part of the pod spec. Changing the CONTENT of the same item
+  does not, and this is the sharp edge — Helm never sees that content, and a
+  subPath mount is never refreshed by the kubelet even after the operator has
+  updated the Secret. The running pod keeps the old files until something
+  else restarts it, which may be months later, so a broken value surfaces far
+  away from the edit that caused it. After every content change:
+
+    kubectl -n {{ .Release.Namespace }} rollout restart statefulset/{{ $sfs }}
+
+BEHIND AN INGRESS, THE http BLOCK DECIDES BETWEEN 400 AND WRONG CLIENT IPs
+  Every request reaching Home Assistant through ingress-nginx arrives from the
+  controller's pod IP, not from the browser. The http-config field is where
+  that is dealt with, and both ways of getting it wrong are quiet in their own
+  way:
+
+    use_x_forwarded_for: true without the proxy's address in trusted_proxies
+    makes Home Assistant reject the request outright — the browser gets
+    400 Bad Request and the log names the untrusted address it saw.
+
+    Neither setting at all means every client looks like the ingress
+    controller. Nothing fails; you simply get one address in the logbook for
+    everyone, and Home Assistant's login-attempt ban then locks out all users
+    at once because they share that address.
+
+  The value belongs to the ingress controller's POD network, not to the nodes
+  and not to the clients:
+
+    use_x_forwarded_for: true
+    trusted_proxies:
+      - 10.42.0.0/16      # the cluster's pod CIDR — check yours
+
+  Read the address Home Assistant actually sees straight out of the log
+  rather than guessing at the CIDR:
+
+    kubectl -n {{ .Release.Namespace }} logs {{ $pod }} | grep -i forwarded
+
+THE FIRST VISITOR BECOMES THE OWNER
+  Against an empty /config Home Assistant has no users and sends every visitor
+  into onboarding, where the first account created is the owner. There is no
+  password to look up anywhere and no Secret holding one — whoever reaches the
+  URL first owns this instance. Do the onboarding right after the first
+  rollout, not the next morning.
+
+  Onboarding also decides the instance's location, unit system and time zone
+  and stores them under /config/.storage. That is state on the PVC, not
+  configuration in the 1Password item: it survives a pod restart, and it is
+  gone with the volume.
+
+TZ AND HOME ASSISTANT'S OWN TIME ZONE ARE TWO SETTINGS, NOT ONE
+  core.timezone ({{ .Values.core.timezone | default "unset" }}) is passed to the container as TZ and is the only
+  environment variable this chart sets by itself. Home Assistant's own time
+  zone is the one from onboarding or from configuration.yaml, and it is NOT
+  derived from this value. When the two disagree, log timestamps and
+  time-based automations disagree with them, and nothing reports a problem.
+
+WHAT A READY POD PROVES — AND WHAT IT DOES NOT
+  All three probes fetch "/" on the container port. That path is served by the
+  HTTP integration as soon as it has come up, which happens early in the
+  bootstrap and says nothing about the rest:
+
+    A configuration.yaml that cannot be loaded does not necessarily keep the
+    pod from becoming Ready. Home Assistant falls back to safe mode, serves
+    the frontend with none of your configuration in effect, and the rollout
+    goes green. An instance that comes back "empty" after a config change is
+    this, and the reason is only in the log.
+
+    An integration that fails to set up, a recorder that cannot reach its
+    database, a full volume — none of them are in the probe's answer.
+
+  So check the log after every config change, not the rollout status:
+
+    kubectl -n {{ .Release.Namespace }} logs {{ $pod }}
+
+  The startup probe gates liveness and readiness and gives the first boot
+  {{ if $budget }}{{ $budget }}{{ else }}its configured budget{{ end }}, which is deliberately generous: a cold start
+  installs and initializes integrations. If a start outruns that budget the
+  kubelet kills the container mid-setup and the next attempt begins again,
+  which looks like CrashLoopBackOff with no error in the log at all.
+
+/config IS THE WHOLE OF THE STATE, AND helm uninstall DELETES IT
+  The owner account, every long-lived token, all UI-created automations and
+  dashboards, every integration's stored credentials and the recorder
+  database live under /config — on {{ .Release.Name }}-{{ .Chart.Name }}-pvc ({{ .Values.core.storage.size }}
+  from storage class {{ .Values.core.storage.storageClass | default "the cluster default" }}), inside its subPath "hass-config".
+  Only the three files above come from the vault; nothing else here is
+  reproducible from the chart's values.
+
+  That PVC is an ordinary claim in this release, not a StatefulSet
+  volumeClaimTemplate: "helm uninstall {{ .Release.Name }}" deletes it, and with a Delete
+  reclaim policy the instance is then gone for good. Back it up before
+  uninstalling — a resource-policy annotation added to the live PVC afterwards
+  does not help, because Helm reads that annotation from the release manifest.
+
+  The recorder is what makes the volume grow, and its retention is a field of
+  the 1Password item (purge_keep_days in recorder-config), not a chart value.
+  Growing core.storage.size only takes effect if the storage class allows
+  volume expansion; shrinking it is refused by Kubernetes and makes the next
+  helm upgrade fail on the PVC instead of touching the data.
+
+/tmp AND /run ARE emptyDirs AND COUNT AGAINST ephemeral-storage
+  The root filesystem is read-only, so the two paths the image must write to —
+  /run for s6-overlay's state and /tmp for Home Assistant's scratch files —
+  are emptyDirs. An emptyDir counts against the container's ephemeral-storage
+  limit ({{ $eph }}). Going over it does not fail a request: the kubelet evicts the
+  whole pod, and the reason is on the pod, not in Home Assistant's log. Where
+  integrations pull large downloads through /tmp, raise
+  resources.requests.ephemeralStorage — the limit follows it through
+  resources.limitFactor.
+{{- if gt (atoi $replicas) 1 }}
+
+MORE THAN ONE REPLICA WILL NOT WORK HERE
+  replicas is {{ $replicas }}, but every pod of this StatefulSet mounts the SAME
+  ReadWriteOnce claim {{ .Release.Name }}-{{ .Chart.Name }}-pvc at /config — there is no
+  volumeClaimTemplate and no per-pod volume. Unless the storage class hands
+  that claim to several nodes, the additional pods stay stuck before start;
+  where they do start, two Home Assistant processes write the same state
+  directory and the same recorder database at once. This chart is built for
+  one replica, and Home Assistant does not run active-active.
+{{- end }}
+{{- if not $netRaw }}
+
+NET_RAW HAS BEEN DROPPED FROM THE CONTAINER
+  The chart's default adds NET_RAW back after dropping ALL, and the effective
+  securityContext.container for this release no longer has it. That is a
+  values override, not a chart default. Home Assistant's device discovery —
+  the DHCP watcher, the ping and arp integrations — opens raw sockets, and
+  without the capability it does not fail loudly: those integrations log
+  "Operation not permitted" and simply find nothing. Devices that used to
+  appear on their own will stop appearing.
+{{- end }}
+{{- if .Values.env }}
+
+env IS APPENDED, AND HOME ASSISTANT WILL NOT READ IT ON ITS OWN
+  The {{ len .Values.env }} entries land after TZ and are rendered through tpl, so a value may
+  contain template expressions. Note what they do NOT do: apart from TZ, Home
+  Assistant takes no configuration from the environment. An entry here reaches
+  the application only if the YAML in the 1Password item picks it up with the
+  !env_var tag — otherwise it sits in the pod spec unused.
+
+  Anything sensitive belongs in valueFrom.secretKeyRef rather than a plain
+  value: a value is stored in the pod spec and readable by anyone who can read
+  pods in {{ .Release.Namespace }}.
+{{- end }}

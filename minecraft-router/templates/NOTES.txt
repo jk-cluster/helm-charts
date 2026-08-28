@@ -1,0 +1,140 @@
+{{- $replicas := include "minecraft-router.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.server.replicas) -}}
+{{- $outward := .Values.server.outwardPort | default 25565 -}}
+{{- $port := .Values.server.port | default 25565 -}}
+{{- $backendPort := .Values.server.backendPort | default 25565 -}}
+{{- $apiPort := .Values.server.apiPort | default 8080 -}}
+{{- $deploy := printf "%s-%s-deployment" .Release.Name .Chart.Name -}}
+{{- $svc := printf "%s-%s-service" .Release.Name .Chart.Name -}}
+{{- $cm := printf "%s-%s-configmap" .Release.Name .Chart.Name -}}
+{{- $mappings := .Values.mappings | default list -}}
+mc-router {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+ACCESS — A TCP PROXY, NOT A WEB SERVICE
+  This release has no Ingress, no certificate and no URL. Minecraft clients
+  speak raw TCP to the NodePort Service {{ $svc }}:
+
+    <any-node-ip>:{{ $outward }}
+
+  server.outwardPort ({{ $outward }}) is the port on the node and the one that goes into
+  the client. server.port ({{ $port }}) is what mc-router listens on inside the pod and
+  what the Service publishes cluster-internally; changing it does not change
+  what a player dials.
+
+  Which backend a connection reaches is decided by the HOSTNAME the client
+  typed, not by the port: mc-router reads the server address out of the
+  Minecraft handshake and looks it up in the routing table below. Every mapped
+  name therefore has to resolve to a node of this cluster (or to whatever sits
+  in front of it), and the player has to enter that name. Connecting to the
+  node's bare IP address carries no matching hostname and is routed nowhere.
+{{- if or (lt (int $outward) 30000) (gt (int $outward) 32767) }}
+
+  {{ $outward }} IS OUTSIDE THE DEFAULT NODE-PORT RANGE (30000-32767)
+  This install needs a cluster whose API server runs with an extended
+  --service-node-port-range; without it the API server rejects the Service and
+  the release fails on that one object while everything else applies. The
+  choice is deliberate — 25565 is the port Minecraft clients dial by default.
+  Confirm the Service actually exists:
+
+    kubectl -n {{ .Release.Namespace }} get svc {{ $svc }}
+{{- end }}
+
+ROUTING TABLE — {{ len $mappings }} MAPPING(S) ACTIVE IN THIS RELEASE
+{{ range $mapping := $mappings }}    {{ $mapping.domain }}  →  {{ $mapping.internalUrl }}:{{ $mapping.port | default $backendPort }}{{ if $mapping.port }}   (own port, overrides server.backendPort {{ $backendPort }}){{ end }}
+{{ end }}
+  mappings is the ONLY source of routes here. The chart does not run mc-router
+  in its Kubernetes auto-discovery mode — there is no ServiceAccount and
+  automountServiceAccountToken is false, so the router cannot watch the API and
+  never reads routing annotations on a backend Service. A server announced that
+  way stays unreachable through this router until its name stands in mappings,
+  and a name that is in mappings routes there no matter what any annotation
+  elsewhere says. Where both exist, this table wins.
+
+  The table is rendered into the ConfigMap {{ $cm }}
+  (key custom-routing-config.json) and mounted with subPath at
+  /data/custom-routing-config.json. Two consequences:
+
+    - mc-router reads that file once at startup, and the kubelet never
+      refreshes a subPath mount, so a routing change takes effect only through
+      a pod restart. The Deployment carries a checksum/config annotation, so
+      helm upgrade performs that restart for you — at the price of a few
+      seconds in which no client can connect and open sessions are dropped.
+      Treat a routing change as a short, planned outage.
+    - internalUrl is dialed by name. Point it at the backend's Service
+      (survival-service.minecraft.svc.cluster.local), not at a pod IP: the
+      Service name survives a restart of the Minecraft server, the pod IP does
+      not.
+
+  There is no fallback backend. The chart configures no default route, so a
+  client arriving with a hostname outside the table is not connected to
+  anything. mc-router itself knows the concept (its API has POST /defaultRoute)
+  and parses every flag equally as an environment variable, so server.env is
+  where you would set one.
+
+WHAT A READY ROUTER DOES NOT PROVE
+  All three probes call mc-router's own API — GET /routes on container port
+  api-port ({{ $apiPort }}) — which answers as soon as the config file has been read. It
+  answers just as happily when every backend behind it is down, and when a
+  domain or an internalUrl in the table is misspelled: the router is up, the
+  mapping is loaded, and the player still cannot connect. A green rollout here
+  is a statement about the proxy, never about a Minecraft server. Nothing in
+  this release watches the backends.
+
+  A backend that is unreachable also does not restart the router: mc-router
+  accepts the client, fails to dial the target and closes the connection, which
+  the player sees as an ordinary connection failure. The router's log is the
+  only place that names the address it tried:
+
+    kubectl -n {{ .Release.Namespace }} logs deploy/{{ $deploy }}
+
+  The API is not published by the Service (which carries proxy-port only), so
+  ask the pod directly:
+
+    kubectl -n {{ .Release.Namespace }} port-forward deploy/{{ $deploy }} {{ $apiPort }}:{{ $apiPort }}
+    curl -s -H 'Accept: application/json' http://127.0.0.1:{{ $apiPort }}/routes
+
+  That is the same endpoint the probes use; it returns the live table, and
+  /metrics returns the Prometheus metrics. The API also writes: POST /routes,
+  POST /defaultRoute and DELETE /routes/{addr} change the routing of the
+  RUNNING PROCESS only. Nothing written that way survives a restart — the
+  mounted ConfigMap is the source of truth and the next rollout silently
+  reinstates it. Fix routing in mappings, not over the API.
+
+NO SECRETS, NO VOLUMES, NO STATE
+  This chart creates no OnePasswordItem and mounts no Secret, so there is no
+  1Password item to prepare and no field names to get right. The only mounted
+  object is the routing ConfigMap, rendered entirely from mappings:
+  "helm uninstall {{ .Release.Name }}" destroys nothing that is not already in your values
+  file. The worlds live in the backend releases, not here.
+{{- if eq $replicas "0" }}
+
+SCALED TO ZERO
+  {{ if .Values.scaleDown }}scaleDown: true{{ else }}server.replicas: 0{{ end }} — no router pod runs, so every hostname above stops
+  connecting although the Service and the ConfigMap stay in place. The backend
+  Minecraft servers keep running and stay reachable through their own Services;
+  only the way in through this router is gone.
+{{- end }}
+{{- if gt (atoi $replicas) 1 }}
+
+MORE THAN ONE ROUTER REPLICA
+  server.replicas is {{ $replicas }}. mc-router keeps no state between connections and every
+  replica mounts the same routing ConfigMap, so the Service can spread clients
+  across them. Two things change: an established connection is pinned to the
+  replica that accepted it, so a rollout drops the open sessions pod by pod;
+  and a runtime change through the API reaches only the one pod you forwarded
+  to, leaving the replicas disagreeing until the next restart.
+{{- end }}
+{{- if .Values.server.env }}
+
+server.env IS APPENDED TO WHAT THE CHART SETS
+  The entries land after ROUTES_CONFIG and are rendered through tpl, so a value
+  may contain template expressions. Because mc-router parses its flags with
+  go-flagsfiller, this is also the place for every option the chart does not
+  model explicitly — LOG_LEVEL, BACKEND_DIAL_TIMEOUT, CONNECTION_RATE_LIMIT.
+
+  Two things it will not do. The chart passes --port and --api-binding as
+  command-line arguments, and those take precedence over the matching
+  environment variables, so PORT or API_BINDING set here change nothing — use
+  server.port and server.apiPort. And a plain "value" is stored in the pod spec
+  in clear text, readable by everyone who can read pods in {{ .Release.Namespace }}; anything
+  sensitive belongs in valueFrom.secretKeyRef.
+{{- end }}

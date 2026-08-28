@@ -9,7 +9,7 @@ type: application
 # (2026.8.22-9fea41204) and "latest" moves daily. appVersion is therefore the
 # exact tag, and the +up suffix normalizes the dash to a dot as the versioning
 # scheme requires - the same shape rss-bridge and minecraft-server use.
-version: 1.0.0+up2026.8.22.9fea41204
+version: 1.0.1+up2026.8.22.9fea41204
 appVersion: "2026.8.22-9fea41204"
 
 maintainers:

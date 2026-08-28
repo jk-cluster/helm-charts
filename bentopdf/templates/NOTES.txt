@@ -1,0 +1,81 @@
+{{- $replicas := include "bentopdf.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.bentopdf.replicas) -}}
+BentoPDF {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+{{- if .Values.ingress.enabled }}
+
+ACCESS
+  https://{{ .Values.ingress.domain }}
+
+  The certificate is requested by cert-manager through the "{{ .Values.ingress.clusterIssuer }}"
+  cluster issuer. Until it has been issued the browser shows a warning; follow it with
+
+    kubectl -n {{ .Release.Namespace }} get certificate tls-{{ .Release.Name }}-{{ .Chart.Name }}-ingress
+
+  This chart has no secrets and no volumes — the two ingress values above are
+  everything an installation needs.
+{{- else }}
+
+ACCESS — NO INGRESS
+  ingress.enabled is false, so this release has no Ingress and no certificate;
+  ingress.domain and ingress.clusterIssuer are not needed. The app is only
+  reachable inside the cluster, as
+  {{ .Release.Name }}-{{ .Chart.Name }}-service:80. To open it locally:
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-{{ .Chart.Name }}-service 8080:80
+
+  Then browse to http://localhost:8080. Set ingress.enabled=true together with
+  ingress.domain and ingress.clusterIssuer to publish it instead.
+{{- end }}
+{{ if eq $replicas "0" }}
+SCALED TO ZERO
+  {{ if .Values.scaleDown }}scaleDown: true{{ else }}bentopdf.replicas: 0{{ end }} — the deployment runs with replicas: 0, so the endpoint
+  above does not answer until you set it back and upgrade again. Service{{ if .Values.ingress.enabled }} and
+  Ingress stay in place, so the certificate is not re-issued.{{ else }} stays in
+  place.{{ end }}
+{{ end }}
+A GREEN POD ONLY PROVES DELIVERY
+  BentoPDF computes in the visitor's browser: not one of its tools runs in
+  this pod, which serves static files and nothing else. The probes hit "/"
+  because the image has no health endpoint, so they prove that nginx is
+  handing out index.html — no more. Whether PDF processing works is a
+  question about the browser, not about this release.
+
+TWO HEADERS HAVE TO SURVIVE YOUR INGRESS CONTROLLER
+  The image sends Cross-Origin-Opener-Policy: same-origin and
+  Cross-Origin-Embedder-Policy: credentialless. Without both arriving at the
+  browser there is no SharedArrayBuffer, and the LibreOffice-backed
+  conversions (Word, Excel, PowerPoint) fail while everything else keeps
+  working. Check them through the ingress, not at the pod:
+
+    curl -sI https://{{ if .Values.ingress.enabled }}{{ .Values.ingress.domain }}{{ else }}<host>{{ end }}/ | grep -i cross-origin
+
+ANYONE WHO REACHES THE URL CAN USE IT
+  BentoPDF has no login, and this chart adds none. That is defensible here —
+  the server takes nothing in, stores nothing and has no session — but a
+  public instance also gets indexed, and its pages carry a canonical link to
+  the vendor's site. Both are addressed through ingress.annotations; see
+  values.yaml.
+
+NOTHING TO BACK UP, NOTHING TO MIGRATE
+  No database, no volumes, no uploads: documents never leave the visitor's
+  device. App-version upgrades and rollbacks carry no data risk.
+{{- if .Values.bentopdf.config }}
+
+TOOLS ARE DISABLED VIA config.json
+  bentopdf.config is set and is served as /config.json. A change here rolls
+  the pods (checksum/config), but browsers may keep the old file for up to a
+  week — the image serves .json with Cache-Control: max-age=604800. Verify
+  what is actually being served with:
+
+    kubectl -n {{ .Release.Namespace }} exec deploy/{{ .Release.Name }}-{{ .Chart.Name }}-deployment -- wget -qO- localhost:8080/config.json
+{{- end }}
+{{- if .Values.bentopdf.env }}
+
+bentopdf.env HAS NO EFFECT ON THE APP — AND THREE VALUES BREAK THE POD
+  The served BentoPDF bundle is static and reads no environment variables;
+  entries only reach nginx and its entrypoint scripts. Beware of PORT,
+  DISABLE_IPV6 and ROBOTS_NOINDEX: all three rewrite files with "sed -i" and
+  abort the entrypoint on a read-only root filesystem, so the pod never
+  starts. Using them means also setting
+  securityContext.container.readOnlyRootFilesystem: false.
+{{- end }}

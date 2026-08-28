@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "{{ .Release.Name }}-{{ .Chart.Name }}-configmap"
+data:
+  # Mounted at /usr/share/nginx/html/config.json via subPath. The subPath is
+  # not a matter of taste here: the file sits in the middle of the web root,
+  # and a plain directory mount would hide the entire served application
+  # behind an almost empty volume.
+  #
+  # It is always rendered, even for an empty config - a file that sometimes
+  # exists and sometimes does not would mean the path through checksum, mount
+  # and subPath is normally never exercised and first fails when someone
+  # actually uses it. Empty renders as "{}", which is byte-identical to the
+  # config.json the image ships anyway.
+  config.json: |
+    {{- include "bentopdf.configJson" .Values.bentopdf.config | nindent 4 }}

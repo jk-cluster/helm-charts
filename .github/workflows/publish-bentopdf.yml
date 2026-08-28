@@ -1,0 +1,15 @@
+name: Publish BentoPDF Helm Chart
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - bentopdf/**
+jobs:
+  publish-bentopdf:
+    name: Publish BentoPDF Helm Chart
+    uses: ./.github/workflows/publish-helm-chart.yml
+    with:
+      chart-name: 'bentopdf'
+    secrets: inherit

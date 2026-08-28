@@ -1,0 +1,242 @@
+# Scale the whole chart down without uninstalling it: scaleDown: true renders
+# every Deployment/StatefulSet with replicas: 0 (and suspends CronJobs) and
+# takes precedence over any per-workload replicas value. PVCs, Secrets and
+# Services stay in place; scaleDown: false brings the workloads back up.
+scaleDown: false
+
+bentopdf:
+  # Replica count for this workload; 0 is allowed and scales it down.
+  # The chart-global scaleDown flag takes precedence.
+  replicas: 1
+
+  # The runtime configuration, rendered to JSON and mounted as
+  # /usr/share/nginx/html/config.json - a static file in the web root that the
+  # application fetches in the browser. It is passed through verbatim: the two
+  # keys documented today are not hardcoded, so a third one upstream adds is a
+  # values change here and not a chart change.
+  #
+  #   config:
+  #     disabledTools: []
+  #     editorDisabledCategories: []
+  #
+  # disabledTools takes TOOL IDS, and a tool id is its page URL without the
+  # ".html" - "merge-pdf", "encrypt-pdf", "word-to-pdf". There are roughly 130
+  # of them; the full list is deliberately NOT copied here, because a copy is
+  # wrong from the next upstream release on. It lives in docs/self-hosting/
+  # docker.md of the upstream repo.
+  #
+  # editorDisabledCategories switches off features INSIDE the PDF editor
+  # without disabling the editor itself. The categories are HIERARCHICAL:
+  # disabling a parent disables all its children, so "annotation" also takes
+  # out annotation-highlight, annotation-ink, annotation-stamp and the rest.
+  # That is the point where more disappears than expected.
+  #
+  # Two things happen silently and are worth knowing before you debug them:
+  #
+  #   - A MISSPELLED ID DISABLES NOTHING AND REPORTS NOTHING. There is no
+  #     validation, server-side or otherwise: an unknown id is simply an id
+  #     that matches no tool. The tool stays in the UI and the file is still
+  #     served with 200.
+  #   - THE MOUNT REPLACES THE IMAGE'S OWN config.json (which ships as "{}").
+  #     Whatever stands here is the complete file, not a patch on top of it.
+  #
+  # The build-time argument DISABLE_TOOLS does the same job at image build
+  # time; both lists are merged by the app, and a tool named in either one is
+  # off. Only this runtime path is reachable from a chart (see "WHAT THIS
+  # CHART CANNOT DO" below).
+  #
+  # THE CHART ROLLS THE PODS, THE BROWSER MAY STILL CACHE. A changed config
+  # here changes the checksum/config annotation on the pod template, so the
+  # pods restart and the new file is served - that part is guaranteed (and it
+  # is not optional: this is a subPath mount, which the kubelet never
+  # refreshes). What the chart cannot control is the visitor's browser: the
+  # image's nginx.conf serves .json with "expires 1w", measured as
+  # "Cache-Control: max-age=604800" on /config.json. A browser that already
+  # fetched the old file can keep using it for up to seven days. Where a
+  # change has to be visible immediately, reload hard in the browser, or
+  # override the caching for that one path in the ingress.
+  config: {}
+
+  # The image is quay.io/nginx/nginx-unprivileged based: nginx runs as its
+  # nginx user (uid/gid 101) and listens on the unprivileged port 8080, so the
+  # workload runs fully non-root without sysctl tweaks. Same situation as
+  # cyberchef.
+  #
+  # THREE IMAGE ENV SWITCHES ARE INCOMPATIBLE WITH readOnlyRootFilesystem:
+  # true, AND THEY FAIL LOUDLY. PORT, DISABLE_IPV6 and ROBOTS_NOINDEX are all
+  # implemented as "sed -i" against files in the image - the first two against
+  # /etc/nginx/nginx.conf, the third against every .html file in the web root.
+  # The scripts run under "set -e" inside /docker-entrypoint.d/, and the base
+  # image's entrypoint aborts when one of them fails. So the pod does NOT
+  # ignore the switch, it never starts at all. Measured against 2.8.7:
+  #
+  #   DISABLE_IPV6=true  ->  sed: can't create temp file
+  #                          '/etc/nginx/nginx.confXXXXXX': Read-only file
+  #                          system                            (exit 1)
+  #   PORT=9090          ->  same message, same file           (exit 1)
+  #   ROBOTS_NOINDEX=true->  sed: can't create temp file
+  #                          '/usr/share/nginx/html/50x.htmlXXXXXX':
+  #                          Read-only file system              (exit 1)
+  #
+  # In Kubernetes that is a CrashLoopBackOff without a single line from nginx.
+  # That is why none of the three is offered as a first-class value here: a
+  # value that looks like it works and instead kills the pod is worse than no
+  # value. Whoever really needs one sets it through the env block below AND
+  # securityContext.container.readOnlyRootFilesystem: false - both are already
+  # configurable, and the combination is then a deliberate, visible decision.
+  # The port stays 8080 either way; the Service maps onto it regardless.
+  securityContext:
+    pod:
+      runAsNonRoot: true
+      runAsUser: 101
+      runAsGroup: 101
+      # RuntimeDefault applies the container runtime's default seccomp filter,
+      # which blocks the syscalls a normal workload never makes. It sits in the
+      # pod context on purpose: from here it covers every container in the pod
+      # including init containers, while a container-level seccompProfile would
+      # have to be repeated for each one (and silently missed on the next one
+      # added). A container that genuinely needs a different filter can still
+      # override it under securityContext.container, which wins over this value.
+      seccompProfile:
+        type: RuntimeDefault
+    container:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      capabilities:
+        drop:
+          - ALL
+
+  # All three probes hit "/", because the image has NO health endpoint: there
+  # is no /healthz, and "/" is the only path that answers 200 without a
+  # special rule.
+  #
+  # Be honest about what that proves: it proves nginx is serving index.html.
+  # It says nothing about the tools. BentoPDF computes entirely in the
+  # visitor's browser - not one of its ~130 tools touches this pod, which only
+  # ever hands out static files. A green pod here is a delivery receipt, not a
+  # statement about whether PDF processing works.
+  livenessProbe:
+    httpGet:
+      path: /
+      port: http
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /
+      port: http
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # The startup probe gates liveness/readiness. Startup budget = 5s * 30 = 150s.
+  startupProbe:
+    httpGet:
+      path: /
+      port: http
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30
+
+  # Extra environment variables. Values are rendered through tpl; value,
+  # secretKeyRef and configMapKeyRef forms are supported.
+  #
+  # Note that the served BentoPDF bundle reads NONE of these - it is static
+  # JavaScript, configured through config above. Entries here only reach the
+  # nginx process and its entrypoint scripts, which is exactly why the three
+  # switches described above are reachable from here, together with their
+  # read-only-root-filesystem trap.
+  env: []
+
+  resources:
+    # Limits are optional: memory and ephemeral-storage limits default to
+    # limitFactor x the request, an explicitly set limit always wins, and a
+    # CPU limit is only set when configured explicitly under "limits".
+    #
+    # Static file delivery, so much smaller than cyberchef's 512Mi. Measured
+    # in k3d: 1m CPU and 2Mi working set, both while idle with probes running
+    # and right after serving the 48MB LibreOffice WASM asset - nginx sends
+    # the pre-compressed file (gzip_static) and streams it, so neither figure
+    # moved. The requests below sit deliberately far above that, because the
+    # measurement is a single-user one: gzip_comp_level 9 does compress at
+    # request time for anything without a pre-compressed twin, and that cost
+    # scales with concurrent requests, which a one-pod k3d run cannot show.
+    limitFactor: 3
+    requests:
+      cpu: 0.1
+      memory: 128Mi
+      ephemeralStorage: 16Mi
+
+ingress:
+  # Set to false to omit the Ingress entirely (the required domain and
+  # clusterIssuer values are then not needed either, because they are only
+  # read inside the Ingress template - unlike searxng, this chart has no
+  # second reader of ingress.domain: the upstream counterpart BASE_URL is a
+  # build-time argument and empty in the published image).
+  enabled: true
+  clusterIssuer: null
+  domain: null
+  className: nginx
+  # Extra annotations for the Ingress; merged with the cert-manager
+  # cluster-issuer annotation the chart always sets.
+  #
+  # TWO HEADERS MUST SURVIVE THE PROXY, OR OFFICE CONVERSION BREAKS. The image
+  # sends Cross-Origin-Opener-Policy: same-origin and
+  # Cross-Origin-Embedder-Policy: credentialless. Together they make the page
+  # crossOriginIsolated, which is the precondition for SharedArrayBuffer -
+  # and without SharedArrayBuffer the LibreOffice-backed conversions (Word,
+  # Excel, PowerPoint) do not work. An ingress controller is a reverse proxy
+  # and therefore a place where these headers can get lost or overwritten. The
+  # chart cannot enforce them; it only names the failure picture, because it
+  # points at the application while the cause sits in the ingress: Office
+  # conversion fails, everything else keeps working.
+  #
+  # The second trap of the same kind: some controllers override the MIME type
+  # for .mjs files, which leaves the app stuck on a module loading error. The
+  # image itself maps mjs to application/javascript.
+  #
+  # A PUBLICLY REACHABLE INSTANCE GETS INDEXED, and its pages carry a
+  # canonical link to the vendor's site (SITE_URL is a build-time argument and
+  # defaults to the vendor domain). There is no usable image switch for this -
+  # ROBOTS_NOINDEX exists but cannot run with a read-only root filesystem, see
+  # the block above. The ingress is the only lever left, e.g.
+  #
+  #   annotations:
+  #     nginx.ingress.kubernetes.io/configuration-snippet: |
+  #       add_header X-Robots-Tag "noindex, nofollow";
+  #
+  # Documented as an example, not set as a default. Mind that ingress-nginx
+  # disables snippet annotations by default since v1.9
+  # (allow-snippet-annotations: false); where that stands, the controller-wide
+  # add-headers ConfigMap is the alternative.
+  annotations: {}
+
+# WHAT THIS CHART CANNOT DO
+#
+# Almost everything else about BentoPDF is a BUILD-TIME argument and therefore
+# out of reach for any chart: BASE_URL (running under a sub-path),
+# SIMPLE_MODE, VITE_BRAND_NAME / VITE_BRAND_LOGO / VITE_FOOTER_TEXT
+# (branding), VITE_DEFAULT_LANGUAGE, SITE_URL (the canonical link),
+# DISABLE_GITHUB_STARS and all the WASM/OCR source URLs. Disabling tools is
+# the one exception with a runtime path, which is bentopdf.config above.
+# Changing any of the others needs a self-built image - this repository
+# publishes charts, not images, so that is a project of its own with its own
+# build chain (the air-gap route via bentopdf-airgap-bundle included).
+#
+# Two consequences that are visible in operation and deliberately accepted:
+#
+#   - "RUNS IN THE BROWSER" IS NOT "NO OUTBOUND CONNECTIONS". Several tools
+#     fetch their WASM modules from cdn.jsdelivr.net at runtime (pymupdf-wasm,
+#     gs-wasm, coherentpdf), and the navbar fetches a GitHub star count from
+#     api.github.com on page load. The image's own CSP allows exactly these
+#     sources. The PDFs themselves never leave the device - what is loaded is
+#     program code, not documents.
+#   - THE SERVED PAGES POINT AT THE VENDOR. Their canonical link is the
+#     vendor's site, per the SITE_URL default described above.
+#
+# NO SECRETS, NO VOLUMES. The application has no credentials, no session, no
+# upload and no database - it hands out static files. That is also why this
+# chart has no OnePasswordItem, and why the checksum limitation for
+# operator-filled secrets does not apply here: the only thing mounted is the
+# ConfigMap, and that one is covered by checksum/config.

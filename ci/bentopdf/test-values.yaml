@@ -1,0 +1,20 @@
+# bentopdf: stateless, no secrets, no volumes, nothing to stand up - so there
+# is no fixtures.yaml (cyberchef is the precedent for a chart with only
+# test-values.yaml). The Ingress just has to apply - there is no
+# ingress-nginx/cert-manager in the CI cluster.
+ingress:
+  domain: bentopdf.ci.local
+  clusterIssuer: ci
+
+# Deliberately NOT the chart default of {}. An empty config renders "{}",
+# which is byte-identical to the config.json the image already ships - so the
+# install-test would pass without ever proving that the ConfigMap, the subPath
+# mount into the web root and the checksum/config annotation actually work.
+# With an entry here, the served /config.json differs from the image's own
+# file, and a broken mount becomes visible instead of blending in.
+bentopdf:
+  config:
+    disabledTools:
+      - edit-pdf
+    editorDisabledCategories:
+      - redaction

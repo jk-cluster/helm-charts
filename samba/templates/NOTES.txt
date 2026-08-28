@@ -1,0 +1,247 @@
+{{- $replicas := include "samba.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.samba.replicas) -}}
+{{- $res := fromYaml (include "samba.effectiveResources" .Values.samba.resources) -}}
+{{- $eph := index ($res.limits | default dict) "ephemeral-storage" | default "the computed ephemeral-storage limit" -}}
+{{- $startup := fromYaml (include "samba.startupProbe" .Values.samba.startupProbe) -}}
+{{- $budget := "" -}}
+{{- if and (kindIs "float64" $startup.periodSeconds) (kindIs "float64" $startup.failureThreshold) -}}
+{{- $budget = printf "%.0f seconds" (mulf $startup.periodSeconds $startup.failureThreshold) -}}
+{{- end -}}
+{{- $svc := printf "%s-%s-service" .Release.Name .Chart.Name -}}
+{{- $sfs := printf "%s-%s-sfs" .Release.Name .Chart.Name -}}
+{{- $shares := .Values.samba.shares | default list -}}
+{{- $named := list -}}
+{{- $unrestricted := list -}}
+{{- range $s := $shares }}
+{{- if not (empty $s.name) }}{{- $named = append $named $s.name }}{{- end }}
+{{- if and (not (empty $s.name)) (empty $s.validUsers) }}{{- $unrestricted = append $unrestricted $s.name }}{{- end }}
+{{- end }}
+{{- $share := "SHARE" -}}
+{{- if $named }}{{- $share = first $named }}{{- end -}}
+{{- $smbPort := .Values.samba.smbNodePort -}}
+Samba {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+ACCESS — A NODEPORT, NOT AN INGRESS
+  SMB is not HTTP, so this chart renders no Ingress and no certificate; the
+  Service {{ $svc }} is of type NodePort and the ports are open
+  on EVERY node of the cluster, reachable by anyone who can reach a node.
+{{ if $smbPort }}
+    SMB      node IP : {{ $smbPort }}     (container port 445)
+    NetBIOS  node IP : {{ .Values.samba.netbiosNodePort | default "assigned by the API server" }}     (container port 139)
+
+    kubectl get nodes -o wide          # the IPs to connect to
+{{- else }}
+    samba.smbNodePort is null, so the API server assigns a free port out of
+    the cluster's node-port range instead. The same holds for
+    samba.netbiosNodePort. Read back what you actually got:
+
+    kubectl -n {{ .Release.Namespace }} get svc {{ $svc }}
+{{- end }}
+
+  A node port is NOT 445. That distinction decides which clients can reach
+  this server at all, because SMB clients differ in whether they let you name
+  a port:
+
+    macOS Finder   Cmd-K, then smb://NODE-IP{{ if $smbPort }}:{{ $smbPort }}{{ else }}:NODEPORT{{ end }}/{{ $share }}
+    Linux          mount -t cifs //NODE-IP/{{ $share }} /mnt \
+                     -o port={{ if $smbPort }}{{ $smbPort }}{{ else }}NODEPORT{{ end }},vers=3.1.1,username=USER
+    smbclient      smbclient //NODE-IP/{{ $share }} -p {{ if $smbPort }}{{ $smbPort }}{{ else }}NODEPORT{{ end }} -U USER
+
+  Windows Explorer is the exception: a UNC path \\host\share carries no port
+  and its SMB client always dials 445, so it cannot open a node port. Either
+  put a port forward in front of it on the client side, or publish 445 itself
+  through a LoadBalancer Service you manage outside this chart.
+
+  Inside the cluster none of that applies — the Service port is the normal
+  445, so a pod in this cluster addresses the server as
+
+    //{{ $svc }}.{{ .Release.Namespace }}.svc.cluster.local/{{ $share }}
+
+  Nothing UDP is published: NetBIOS name service (137/udp) and datagrams
+  (138/udp) are not in the Service, so this server never shows up by itself
+  in a client's network browser. Address it by node IP or a DNS name you
+  point at the nodes yourself.
+
+THE SERVER REFUSES OLD AND UNENCRYPTED CLIENTS
+  smb.conf is fixed by the chart, and it is strict on purpose:
+
+    server min protocol = SMB3      SMB1 and SMB2 are rejected at negotiation
+    server smb encrypt  = required  an unencrypted session is refused
+    server signing      = mandatory
+    security = user                 there is no guest access, ever
+
+  Current Windows, macOS and Linux clients satisfy all of it. What does not
+  is the long tail — smart TVs, media players, scanners, NAS-to-NAS sync and
+  old cifs kernels. Those fail at connect with a bare protocol or access
+  error and no hint that the cause is on the server side. None of the four
+  settings is exposed as a value; loosening them means editing
+  templates/samba-config.configmap.yaml.
+
+{{- if $named }}
+
+SHARES — {{ len $named }} CONFIGURED, ONE PVC EACH
+{{- range $s := $shares }}
+{{- if not (empty $s.name) }}
+    {{ $s.name }}{{ if $s.size }} ({{ $s.size }}){{ end }}
+      in the pod   /shares/{{ $s.name }}
+      claim        {{ $.Release.Name }}-{{ $s.name }}-volume-claim{{ if $.Values.samba.storageClass }}, storageClass {{ $.Values.samba.storageClass }}{{ end }}
+      valid users  {{ $s.validUsers | default "(empty — see below)" }}
+{{- end }}
+{{- end }}
+
+  Note the claim names: they are {{ .Release.Name }}-<share>-volume-claim, without the
+  chart name. That is a historical name this chart keeps deliberately —
+  renaming it would orphan the data.
+{{- if $unrestricted }}
+
+  {{ len $unrestricted }} SHARE{{ if gt (len $unrestricted) 1 }}S ARE{{ else }} IS{{ end }} OPEN TO EVERY USER IN users.conf: {{ join ", " $unrestricted }}
+    A share without samba.shares[].validUsers renders "valid users =" with an
+    empty list, and in Samba an empty valid-users list does not mean "nobody"
+    — it means the restriction does not apply and every authenticated user
+    gets in. Combined with "writable = yes", which this chart sets on every
+    share, that is full read/write for everyone in users.conf. Name the users
+    explicitly if that is not what you want.
+{{- end }}
+{{- else }}
+
+NO SHARES ARE CONFIGURED — THE SERVER EXPORTS NOTHING
+  samba.shares is empty, so smb.conf carries the [global] section and not a
+  single share, no PVC was created and the pod mounts no data volume. smbd
+  starts, the probes go green and a client can authenticate — and then sees
+  an empty list. Each entry in samba.shares needs at least a name and a size;
+  storage comes from samba.storageClass{{ if .Values.samba.storageClass }} ("{{ .Values.samba.storageClass }}"){{ end }}, which applies to all
+  shares alike.
+{{- end }}
+{{ if eq $replicas "0" }}
+SCALED TO ZERO
+  {{ if .Values.scaleDown }}scaleDown: true{{ else }}samba.replicas: 0{{ end }} — the StatefulSet runs with replicas: 0, so nothing
+  answers on the ports above until you set it back and upgrade again. The
+  share PVCs, the users Secret and the Service stay in place, so no data is
+  lost and the node ports are still reserved.
+{{ end }}
+{{- if gt (atoi $replicas) 1 }}
+MORE THAN ONE REPLICA WILL NOT WORK
+  samba.replicas is {{ $replicas }}. Every replica mounts the same
+  ReadWriteOnce claims — this chart writes plain PVCs, not a StatefulSet
+  volumeClaimTemplate, so there is no per-pod volume. Unless the storage
+  class hands those claims to several nodes at once, the extra pods never
+  start; where they do, two independent smbd instances write the same files
+  with separate lock databases, which is how SMB corrupts data. The Service
+  would hand clients to either pod at random. This chart is built for one
+  replica.
+{{ end }}
+SECRETS — WHAT THE 1PASSWORD ITEM MUST CARRY
+  {{ .Values.secrets.sambaUsersSecretRef }}
+    → Secret {{ .Release.Name }}-{{ .Chart.Name }}-users-secret
+      field "users.conf"
+
+  The operator copies an item's FIELDS into the Secret, one key per field
+  name, and this chart mounts exactly one key: users.conf. The field has to
+  be spelled that way to the letter — a differently named field yields a
+  Secret without that key, and then the pod does not start at all — it never
+  gets past volume setup, so there is no log to read. The mount failure that
+  names the missing key is in the pod's events:
+
+    kubectl -n {{ .Release.Namespace }} describe pod {{ $sfs }}-0
+
+  The field's content is the user database, one line per user:
+
+    username:uid:groupname:gid:password
+
+  with an optional sixth field for a home directory. The entrypoint creates
+  a real Unix user per line at start; the password is the SMB password, in
+  clear text in the vault. Give the users gid {{ (fromYaml (include "samba.podSecurityContext" .Values.samba.securityContext)).fsGroup | default 1000 }} — that is the pod's
+  fsGroup, and it is what the share volumes are group-owned by. A user with
+  a different gid authenticates fine and then cannot write.
+
+  Every name in a share's validUsers must exist here. One that does not is
+  not an error anywhere: the share simply refuses that login.
+
+CHANGING THE USER LIST DOES NOT RESTART ANYTHING
+  Helm never sees the content of a 1Password-backed Secret, so editing the
+  item in the vault changes no rendered object and nothing rolls. Added,
+  removed and re-passworded users stay invisible to the running smbd until
+  you restart it by hand:
+
+    kubectl -n {{ .Release.Namespace }} rollout restart statefulset/{{ $sfs }}
+
+  The operator's own auto-restart annotation is no substitute — it only ever
+  restarts Deployments, and this workload is a StatefulSet. Pointing
+  secrets.sambaUsersSecretRef at a DIFFERENT item does roll the pod, because
+  that changes the rendered CR.
+
+EVERY RESTART DROPS EVERY OPEN SMB SESSION
+  This is a single pod, and SMB sessions live in its TCP connections and in
+  lock databases under /var/lib/samba that go with the container. A restart
+  therefore disconnects every client at once: open handles die, in-flight
+  writes are lost, and a client that had a file open sees an I/O error
+  rather than a reconnect. SMB3 persistent handles do not save you here.
+
+  What triggers a restart is wider than it looks. The pod template carries a
+  checksum of the rendered smb.conf, so ANY edit to samba.shares rolls the
+  pod — including adding a share that has nothing to do with the ones in
+  use, or only fixing a share's description. So does a change to
+  samba.env, the resources, the probes, the security context or the app
+  version. Plan share changes for a window when nobody has files open, and
+  expect the disconnect even for edits that look additive.
+
+THE SHARE VOLUMES BELONG TO THIS RELEASE
+  The PVCs are ordinary resources of this release, not volumeClaimTemplates,
+  and they carry no resource-policy annotation. Two consequences:
+
+    helm uninstall {{ .Release.Name }} deletes them, and with a Delete reclaim policy
+    every file on every share goes with them. Back the volumes up first; an
+    annotation added to the live PVC afterwards does not help, because Helm
+    reads that annotation from the release manifest.
+
+    Renaming a share in samba.shares is not a rename. The claim name is
+    derived from the share name, so the next upgrade creates a new, empty
+    claim and deletes the old one — data loss dressed up as a config edit.
+    Copy the data out first, or leave the name alone.
+
+  Growing samba.shares[].size only works if the storage class allows volume
+  expansion. Shrinking is refused by Kubernetes and makes the next upgrade
+  fail on the PVC instead of touching the data.
+
+WHAT A READY POD DOES NOT PROVE
+  All three probes are bare TCP connects to port 445. Green therefore means
+  one thing only: smbd is listening. It says nothing about whether users.conf
+  parsed, whether the users were created, whether a password is right or
+  whether any share is usable. A release can be fully Ready and refuse every
+  single login. The startup probe{{ if $budget }} covers {{ $budget }} and{{ end }} keeps liveness and
+  readiness off until the port opens.
+
+  User creation happens in the entrypoint, so that is where a malformed
+  users.conf surfaces:
+
+    kubectl -n {{ .Release.Namespace }} logs statefulset/{{ $sfs }}
+
+  The real check is a login from a client — it is the only thing that
+  exercises authentication and the share list at once:
+
+    smbclient -L //NODE-IP -p {{ if $smbPort }}{{ $smbPort }}{{ else }}NODEPORT{{ end }} -U USER
+
+  Note also that the pod runs as root with a writable root filesystem and a
+  non-empty capabilities.add. That is a documented deviation from this
+  repo's hardening baseline, forced by the image: the entrypoint creates the
+  Unix users and smbd impersonates the share user per session. Do not
+  "restore" the standard here — it breaks the file server.
+
+THE ROOT FILESYSTEM IS EPHEMERAL AND ACCOUNTED FOR
+  Shares are on PVCs, but everything the entrypoint writes outside them —
+  /etc/passwd, the Samba TDB databases under /var/lib/samba — lives on the
+  container's writable layer. It is discarded on every restart, which is
+  fine because the users are rebuilt from users.conf each time, and it
+  counts against the container's ephemeral-storage limit ({{ $eph }}).
+  Exceeding that limit does not fail a request: the kubelet evicts the pod,
+  and the reason shows on the pod, not in Samba's log.
+{{- if .Values.samba.env }}
+
+samba.env IS THE CONTAINER'S WHOLE ENVIRONMENT
+  The chart sets no environment variable of its own, so the {{ len .Values.samba.env }} entr{{ if eq (len .Values.samba.env) 1 }}y{{ else }}ies{{ end }} here
+  {{ if eq (len .Values.samba.env) 1 }}is{{ else }}are{{ end }} all the container gets. They are rendered through tpl, so a value
+  may contain template expressions. Anything sensitive belongs in
+  valueFrom.secretKeyRef: a plain "value" is stored in the pod spec and
+  readable by everyone who can read pods in {{ .Release.Namespace }}. Note that smb.conf is
+  fully rendered by the chart, so image variables that would generate a
+  config do not override it.
+{{- end }}

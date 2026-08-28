@@ -1,0 +1,332 @@
+{{- $replicas := include "minecraft-server.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.server.replicas) -}}
+{{- $res := fromYaml (include "minecraft-server.serverResources" .) -}}
+{{- $req := $res.requests | default dict -}}
+{{- $lim := $res.limits | default dict -}}
+{{- $reqMem := include "minecraft-server.formatNumber" (index $req "memory") -}}
+{{- $limMem := include "minecraft-server.formatNumber" (index $lim "memory") -}}
+{{- $startup := fromYaml (include "minecraft-server.startupProbe" .Values.startupProbe) -}}
+{{- $budget := "" -}}
+{{- if and (kindIs "float64" $startup.periodSeconds) (kindIs "float64" $startup.failureThreshold) -}}
+{{- $budget = printf "%.0f seconds" (mulf $startup.periodSeconds $startup.failureThreshold) -}}
+{{- end -}}
+{{- $line := regexFind "java[0-9]+" (printf "%v" .Chart.AppVersion) -}}
+{{- $svc := printf "%s-%s-service" .Release.Name .Chart.Name -}}
+{{- $sfs := printf "%s-%s-sfs" .Release.Name .Chart.Name -}}
+{{- $pod := printf "%s-%s-sfs-0" .Release.Name .Chart.Name -}}
+{{- $pvc := printf "%s-mc-volume-claim" .Release.Name -}}
+{{- $secret := printf "%s-%s-secret" .Release.Name .Chart.Name -}}
+{{- $nodePort := .Values.server.service.type | eq "NodePort" -}}
+{{- /* Whether the operator set server.resources.requests.memory themselves;
+       an unset one is derived from the JVM heap by serverResources. */ -}}
+{{- $givenReq := dict -}}
+{{- $sr := .Values.server.resources -}}
+{{- if kindIs "map" $sr -}}
+{{- if kindIs "map" $sr.requests -}}
+{{- $givenReq = $sr.requests -}}
+{{- end -}}
+{{- end -}}
+{{- $memPinned := not (kindIs "invalid" (index $givenReq "memory")) -}}
+minecraft-server {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+ACCESS — A MINECRAFT SERVER, NOT A WEB SERVICE
+  This release has no Ingress, no certificate and no URL. Clients speak the
+  Minecraft protocol over raw TCP.
+{{- if $nodePort }}
+
+  server.service.type is NodePort, so players dial a node of this cluster
+  directly:
+
+    <any-node-ip>:{{ .Values.server.service.outwardPort }}
+
+  server.service.outwardPort ({{ .Values.server.service.outwardPort }}) is the port on the node and the one that
+  goes into the client. server.service.port ({{ .Values.server.service.port }}) is what the Service publishes
+  inside the cluster and server.port ({{ .Values.server.port }}) is what the server listens on in the
+  container; neither of those two is what a player types.
+{{- if or (lt (int .Values.server.service.outwardPort) 30000) (gt (int .Values.server.service.outwardPort) 32767) }}
+
+  {{ .Values.server.service.outwardPort }} IS OUTSIDE THE DEFAULT NODE-PORT RANGE (30000-32767)
+  Unless the API server runs with an extended --service-node-port-range it
+  rejects this Service, and the release fails on that one object while every
+  other object applies cleanly. Confirm it exists:
+
+    kubectl -n {{ .Release.Namespace }} get svc {{ $svc }}
+{{- end }}
+{{- else }}
+
+  server.service.type is ClusterIP, so nothing outside the cluster reaches this
+  server on its own. Inside the cluster it answers at
+
+    {{ $svc }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.server.service.port }}
+
+  The way in for players is the separate minecraft-router release, and that
+  router does NOT discover backends by itself: it routes on the hostname out of
+  the Minecraft handshake, using the static mappings table in its own values
+  file. Until an entry pointing at the Service name above is added THERE, this
+  server is unreachable from outside no matter how healthy it is here — and no
+  annotation on this release changes that.
+
+    mc.example.com  →  {{ $svc }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.server.service.port }}
+
+  Set server.service.type to NodePort instead to publish it on a node port
+  without the router; then server.service.outwardPort ({{ .Values.server.service.outwardPort }}) applies.
+{{- end }}
+
+  Either way you can reach it from your own machine without changing the
+  Service — forward it and connect the client to localhost:{{ .Values.server.service.port }}:
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $svc }} {{ .Values.server.service.port }}:{{ .Values.server.service.port }}
+
+THIS CHART IS PUBLISHED ONCE PER JAVA LINE — THIS IS {{ $line | default "an unrecognized line" | upper }}
+  The JVM is fixed by the image tag, which comes from the chart's appVersion
+  ({{ .Chart.AppVersion }}), not from a value. This build runs
+  minecraft.version {{ .Values.minecraft.version }}.
+
+  Java 8 runs Minecraft up to 1.16.5, 1.18-1.20.4 need Java 17 and 1.20.5+ need
+  Java 21. Nothing in this chart checks that minecraft.version fits the line:
+  a mismatch renders and installs without a word, and only the container fails
+  afterwards — CrashLoopBackOff once the startup budget{{ if $budget }} ({{ $budget }}){{ end }} is spent, with
+  the reason in the log and nowhere else:
+
+    kubectl -n {{ .Release.Namespace }} logs {{ $pod }}
+
+  So moving the server across a line boundary is a change of CHART VERSION, not
+  a change of minecraft.version: pick the published chart of the target line and
+  set minecraft.version to match it. Changing only minecraft.version leaves the
+  old JVM in place.
+{{- if eq $replicas "0" }}
+
+SCALED TO ZERO
+  {{ if .Values.scaleDown }}scaleDown: true{{ else }}server.replicas: 0{{ end }} — the StatefulSet runs with replicas: 0, so no server answers
+  until you set it back and upgrade again. The world PVC, the Service and the
+  OnePasswordItem stay in place, so nothing is lost.
+{{- end }}
+
+WHAT A GREEN ROLLOUT DOES NOT PROVE
+  All three probes run the image's mc-health, a real Minecraft server-list ping
+  against SERVER_PORT. Ready therefore means more here than "the process is
+  alive": the server is up and answering pings. It does not mean anyone can
+  play. A server-list ping is answered before any login is attempted, so every
+  reason a player is refused at login is invisible to all three probes — the
+  whitelist below is the usual one, and the rollout stays green throughout.
+
+  Two more blind spots worth knowing before you need them:
+
+    - helm returns before any of this. Without --wait, success is reported the
+      moment the objects are applied. On a fresh volume the image is then still
+      downloading the server jar{{ if or .Values.curseforge.enabled .Values.ftb.enabled .Values.curseforgeServerpack.enabled }} and the whole modpack{{ end }} before the world begins
+      to load, which is what the {{ if $budget }}{{ $budget }} {{ end }}startup budget is for. Watch the
+      rollout rather than trusting the exit code:
+
+        kubectl -n {{ .Release.Namespace }} rollout status statefulset/{{ $sfs }}
+
+    - the probes run INSIDE the pod. They say nothing about whether players can
+      get to it{{ if not $nodePort }} — with ClusterIP, a missing router mapping is a perfectly
+      healthy server that nobody can join{{ end }}.
+{{- if .Values.minecraft.whitelist.enabled }}
+{{- if not .Values.minecraft.whitelist.players }}
+
+WHITELIST IS ON AND EMPTY — NOBODY CAN JOIN THIS SERVER
+  minecraft.whitelist.enabled is true while minecraft.whitelist.players is
+  unset. The chart emits ENABLE_WHITELIST=true and no WHITELIST, which is
+  white-list=true against an empty whitelist.json: every login is refused,
+  including the operators in minecraft.management.opPlayers. This is the image's
+  own behaviour, and it is exactly the state the probes cannot see — the server
+  answers pings and the rollout is green.
+
+  Set minecraft.whitelist.players, or set minecraft.whitelist.enabled to false.
+{{- else }}
+
+WHITELIST IS ON
+  Only these players can log in: {{ .Values.minecraft.whitelist.players }}
+
+  minecraft.whitelist.overridePolicy is {{ .Values.minecraft.whitelist.overridePolicy }}, which decides what happens to a
+  whitelist.json ALREADY on the volume: SKIP leaves it untouched (players then
+  changes nothing at all), MERGE adds these names to it, SYNCHRONIZE makes the
+  file match this list exactly and removes everyone else. Anyone added in-game
+  with /whitelist add is not in this value and does not survive a SYNCHRONIZE.
+{{- end }}
+{{- else }}
+
+WHITELIST IS OFF, AND IT IS ACTIVELY OFF
+  minecraft.whitelist.enabled is false, so the chart emits ENABLE_WHITELIST=false
+  and the image rewrites white-list=false into the server.properties on the
+  volume. That matters because server.properties is persistent state: before
+  chart 2.0.0 a release that had once written white-list=true kept it forever,
+  since the chart had no way to say "off". It now does.
+{{- end }}
+{{- if .Values.minecraft.management.opPlayers }}
+
+OPERATORS ARE SYNCHRONIZED FROM VALUES, NOT FROM THE GAME
+  minecraft.management.opPlayers is {{ .Values.minecraft.management.opPlayers }}, and the chart pins
+  EXISTING_OPS_FILE=SYNCHRONIZE: the image makes ops.json on the volume match
+  that list exactly on every start. A player promoted in-game with /op is not in
+  the value, so the next restart removes them again. Promote people in the
+  values file.
+
+  These names are also resolved against the external Playerdb API during
+  startup, and a name that does not resolve aborts the start. A typo here is
+  therefore not a missing operator but a server that never comes up — and an
+  outage of that third-party lookup delays every pod start.
+{{- end }}
+
+SECRETS — WHICH FIELDS THE 1PASSWORD ITEM MUST CARRY
+  The OnePasswordItem CR {{ $secret }} is rendered unconditionally, so
+  secrets.minecraftServerRef has to be set even when nothing consumes a key from
+  it; it has no default and would otherwise render an itemPath of null.
+
+    secrets.minecraftServerRef → {{ .Values.secrets.minecraftServerRef | default "NOT SET" }}
+
+  The operator copies the item's FIELDS into the Kubernetes Secret, one key per
+  field name. This release consumes:
+{{- if .Values.server.rcon.enabled }}
+      rcon-password        → RCON_PASSWORD (server.rcon.enabled is true)
+{{- end }}
+{{- if .Values.curseforge.enabled }}
+      curseforge-api-key   → CF_API_KEY (curseforge.enabled is true)
+{{- end }}
+{{- if not (or .Values.server.rcon.enabled .Values.curseforge.enabled) }}
+      no key at all — RCON and the CurseForge downloader are both off, so the
+      item may be empty. It only needs "rcon-password" once server.rcon.enabled
+      is true and "curseforge-api-key" once curseforge.enabled is true.
+{{- end }}
+
+  A field spelled differently yields a Secret without that key. The pod then
+  sticks in CreateContainerConfigError while the Secret itself exists, so it
+  looks as though the operator had done its job. What it actually delivered:
+
+    kubectl -n {{ .Release.Namespace }} get secret {{ $secret }} -o jsonpath='{.data}'
+
+  Pointing secrets.minecraftServerRef at a DIFFERENT item rolls the pod (the
+  StatefulSet hashes the rendered CR into checksum/secret-ref). Changing the
+  value INSIDE the same item does not: Helm never sees that content, the
+  rendered spec is unchanged, and the keys are consumed as environment
+  variables, which Kubernetes never refreshes in a running container. After
+  rotating a password in the vault, restart by hand:
+
+    kubectl -n {{ .Release.Namespace }} rollout restart statefulset/{{ $sfs }}
+
+  Budget for that restart: a full server start, measured at ~124 s for
+  ftb-skies on Longhorn.
+
+THE WORLD LIVES ON ONE PVC THAT helm uninstall DELETES
+  /data and /modpacks are two subPaths of a single ReadWriteOnce claim,
+  {{ $pvc }} ({{ .Values.minecraft.resources.storage }} from storage class {{ .Values.minecraft.resources.storageClassName }}). Note the
+  name: it is deliberately NOT {{ .Release.Name }}-{{ .Chart.Name }}-..., because renaming a PVC
+  would make Kubernetes provision a new, empty volume and orphan the world.
+
+  It is an ordinary PVC in this release, not a StatefulSet volumeClaimTemplate.
+  "helm uninstall {{ .Release.Name }}" therefore deletes it, and with a Delete reclaim policy
+  the world goes with it. Back it up before uninstalling — a resource-policy
+  annotation added to the live PVC afterwards does not help, because Helm reads
+  that annotation from the release manifest.
+
+  Two more properties of that claim: minecraft.resources.storageClassName is
+  immutable once the volume is bound, so changing it does nothing to an existing
+  release; and growing minecraft.resources.storage only works if the storage
+  class allows expansion, while shrinking it is refused by Kubernetes and makes
+  the next helm upgrade fail on the PVC instead of touching the data.
+
+  server.properties lives on this volume too. That is why settings the chart
+  does not send as an environment variable persist across upgrades unchanged.
+
+TWO MEMORY NUMBERS THAT MUST NOT DRIFT APART
+  minecraft.resources.memory ({{ .Values.minecraft.resources.memory }}) is the JVM heap, passed to the image as
+  MEMORY={{ .Values.minecraft.resources.memory }}G. This release runs with
+
+    memory request {{ $reqMem }}   limit {{ $limMem | default "(none)" }}   (limitFactor {{ .Values.server.resources.limitFactor | default 3 }})
+
+{{- if not $memPinned }}
+
+  server.resources.requests.memory is unset, so the chart derives the request
+  from the heap and the two cannot drift. Keep it that way unless you have a
+  reason not to.
+{{- else }}
+
+  server.resources.requests.memory is set explicitly, which DECOUPLES it from
+  the heap: the chart no longer derives one from the other. Keep the limit above
+  the heap plus the JVM's own overhead. A heap that does not fit the limit is
+  not a Java OutOfMemoryError — the kernel kills the container, and the pod shows
+  OOMKilled with nothing in the server log explaining it.
+{{- end }}
+{{- if .Values.server.rcon.enabled }}
+
+RCON IS ENABLED BUT THE SERVICE DOES NOT PUBLISH IT
+  server.rcon.enabled is true, so the container declares port {{ .Values.server.rcon.port }} and the
+  chart wires RCON_PASSWORD from the Secret. The Service publishes only the
+  Minecraft port, so RCON is reachable from inside the pod's network and through
+  a forward — not through {{ $svc }}:
+
+    kubectl -n {{ .Release.Namespace }} port-forward {{ $pod }} {{ .Values.server.rcon.port }}:{{ .Values.server.rcon.port }}
+
+  Exposing RCON more widely is a decision to make deliberately: it is a remote
+  console with full server rights, protected by that one password.
+{{- end }}
+
+THE METRICS PORT IS DECLARED, NOT SERVED
+  The container declares port 19565 named "metrics". Declaring a containerPort
+  opens nothing: the Service does not publish it, this chart ships no
+  ServiceMonitor, and it sets no variable that would switch the image's metrics
+  on. Treat that entry as documentation, not as a scrape target.
+{{- if .Values.curseforgeServerpack.enabled }}
+
+MODPACK SOURCE: curseforgeServerpack
+  An init container downloads {{ .Values.curseforgeServerpack.downloadUrl }}
+  to /modpacks/serverpack.zip, and the server unpacks it below
+  {{ .Values.curseforgeServerpack.workingDirectory }}.
+
+  The script comes from the ConfigMap and is mounted with subPath, which the
+  kubelet never refreshes, so it is read only at pod start — the StatefulSet
+  carries checksum/config, which is what makes a changed URL take effect at all.
+  The restart is not free: expect a full server start (~124 s measured for
+  ftb-skies on Longhorn).
+
+  Its migration branch runs only when the working directory ALREADY exists; on
+  a first install the script just downloads, and the server does the unpacking.
+  When it does run, it copies banned-ips.json, banned-players.json, ops.json and
+  whitelist.json out of the backup unconditionally, under "set -e" — so an
+  existing serverpack directory that is missing any one of those four files
+  fails the init container, and the pod never starts. Check there first when a
+  serverpack upgrade hangs before the server logs anything:
+
+    kubectl -n {{ .Release.Namespace }} logs {{ $pod }} -c download-serverpack
+{{- end }}
+{{- if .Values.curseforge.enabled }}
+
+MODPACK SOURCE: curseforge (AUTO_CURSEFORGE)
+  The image resolves slug "{{ .Values.curseforge.modpack.slug }}" / file id {{ .Values.curseforge.modpack.versionId }} against the CurseForge
+  API at every start, using the curseforge-api-key field of the item above. That
+  makes each start depend on a third-party API and on that key still being
+  valid; an expired key is a server that stops coming up, not a warning.
+  {{ if .Values.curseforge.forceReload }}curseforge.forceReload is true, so CF_FORCE_SYNCHRONIZE is set and the pack is
+  re-synchronized on every single start. Turn it off again once the reload has
+  happened — it costs that time at each restart.{{ else }}curseforge.forceReload is false, so an already installed pack is reused.{{ end }}
+{{- end }}
+{{- if .Values.ftb.enabled }}
+
+MODPACK SOURCE: ftb (FTBA)
+  The image fetches modpack {{ .Values.ftb.modpackId }} version {{ .Values.ftb.versionId }} from the Feed-the-Beast API at
+  start. No API key is involved, but the start does depend on that service being
+  reachable, and the first one downloads the whole pack before the world loads.
+{{- end }}
+{{- if gt (atoi $replicas) 1 }}
+
+MORE THAN ONE REPLICA WILL NOT WORK
+  server.replicas is {{ $replicas }}, but every pod of this StatefulSet mounts the same
+  ReadWriteOnce claim {{ $pvc }} — there is no volumeClaimTemplate and no
+  per-pod volume. Further pods stay stuck before start on a node that does not
+  hold the volume, and two Minecraft servers on one world directory would
+  corrupt it in any case. This chart is built for exactly one replica.
+{{- end }}
+{{- if .Values.env }}
+
+server env IS APPENDED, NOT MERGED
+  The entries in "env" land after everything the chart sets itself and are
+  rendered through tpl, so a value may contain template expressions. Because the
+  chart's own variables come first, an entry repeating one of them is what the
+  image sees last — that is the escape hatch for anything the chart does not
+  model, and equally the way to break a setting the chart does model.
+
+  A plain "value" is stored in the pod spec in clear text and readable by
+  everyone who can read pods in {{ .Release.Namespace }}; anything sensitive belongs in
+  valueFrom.secretKeyRef.
+{{- end }}

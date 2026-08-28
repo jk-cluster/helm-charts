@@ -1,0 +1,312 @@
+{{- $replicas := include "paperless-ngx.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.paperless.replicas) -}}
+{{- $startup := fromYaml (include "paperless-ngx.startupProbe" .Values.paperless.startupProbe) -}}
+{{- $barcodes := fromYaml (include "paperless-ngx.barcodes" .Values.paperless.files.barcodes) -}}
+{{- $pod := printf "%s-%s-sfs-0" .Release.Name .Chart.Name -}}
+{{- $scripts := .Values.paperless.scripts | default dict -}}
+{{- $pre := default (list) $scripts.preConsumptionScripts -}}
+{{- $post := default (list) $scripts.postConsumptionScripts -}}
+Paperless-ngx {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+ACCESS
+  https://{{ .Values.ingress.domain }}
+
+  This chart has no ingress.enabled switch — the Ingress is always rendered.
+  The certificate is requested by cert-manager through the
+  "{{ .Values.ingress.clusterIssuer }}" cluster issuer; until it has been issued the browser
+  shows a warning. Follow it with
+
+    kubectl -n {{ .Release.Namespace }} get certificate tls-{{ .Release.Name }}-{{ .Chart.Name }}-ingress
+
+  ingress.domain is more than the Ingress host: the chart also hands it to the
+  container as PAPERLESS_URL ("https://{{ .Values.ingress.domain }}"), and that is the only
+  origin this release declares. While DNS or the certificate are still missing:
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-{{ .Chart.Name }}-service 8000:80
+
+  Pages then load over http://localhost:8000, but expect the login POST to be
+  refused as a CSRF failure — that origin is not PAPERLESS_URL. Forward the
+  port to look around, use the domain to log in, or add
+  PAPERLESS_CSRF_TRUSTED_ORIGINS through paperless.env for as long as you need
+  it. Changing ingress.domain later changes PAPERLESS_URL with it, and the
+  pods have to restart before they notice.
+{{ if eq $replicas "0" }}
+SCALED TO ZERO
+  {{ if .Values.scaleDown }}scaleDown: true{{ else }}paperless.replicas: 0{{ end }} — the StatefulSet runs with replicas: 0, so the URL above
+  does not answer until you set it back and upgrade again. PVCs, Secrets,
+  Service and Ingress stay in place, so neither the documents nor the
+  certificate are touched.
+{{- if .Values.smbConnection.enabled }}
+{{- if .Values.scaleDown }}
+  scaleDown also suspends the SMB consume CronJob, so nothing is moved off the
+  share while the release is down.
+{{- else }}
+  The SMB consume CronJob is NOT suspended by this: only scaleDown sets
+  suspend: true. It keeps moving PDFs off the share onto a consume volume that
+  nothing is reading — they are gone from the share and not yet in paperless.
+{{- end }}
+{{- end }}
+{{ end }}
+WHAT THE 1PASSWORD ITEMS MUST CONTAIN
+  The chart creates OnePasswordItem CRs that carry an item path only; the
+  operator turns each into a Kubernetes Secret whose keys are the FIELD NAMES
+  of the item. Those names are decided here and appear nowhere in 1Password,
+  so they are exactly what you would otherwise read out of the templates. A
+  missing field does not fail the install — the release goes through and the
+  pod then hangs in CreateContainerConfigError naming the key it could not
+  find (kubectl -n {{ .Release.Namespace }} describe pod {{ $pod }}).
+
+  secrets.databaseSecretRef → {{ .Values.secrets.databaseSecretRef }}
+    Secret {{ .Release.Name }}-{{ .Chart.Name }}-db-secret, fields:
+      server     database host — the field is called "server", not "host"
+      port       database port
+      database   database name
+      username   database user
+      password   database password
+    The engine is pinned to postgresql; there is no value to change it.
+
+  secrets.redisSecretRef → {{ .Values.secrets.redisSecretRef }}
+    Secret {{ .Release.Name }}-{{ .Chart.Name }}-redis-secret, fields:
+      redis-connection-url   e.g. redis://:PASSWORD@redis:6379
+      key-prefix             PAPERLESS_REDIS_PREFIX — set this per release when
+                             several releases share one Redis, or two instances
+                             will consume each other's task queue
+
+  secrets.paperlessSecretRef → {{ .Values.secrets.paperlessSecretRef }}
+    Secret {{ .Release.Name }}-{{ .Chart.Name }}-secret, fields:
+      username               used TWICE: as PAPERLESS_ADMIN_USER and as
+                             PAPERLESS_ADMIN_MAIL, so it has to work as both a
+                             login name and an address
+      password               PAPERLESS_ADMIN_PASSWORD
+      paperless-secret-key   Django's SECRET_KEY
+    PAPERLESS_ADMIN_* is only acted on while that superuser does not exist yet.
+    Editing the password field after the first start changes nothing; reset it
+    in the pod instead:
+
+      kubectl -n {{ .Release.Namespace }} exec -it {{ $pod }} -- \
+        python3 /usr/src/paperless/src/manage.py changepassword <user>
+{{- if .Values.smbConnection.enabled }}
+
+  secrets.smbConnectionSecretRef → {{ .Values.secrets.smbConnectionSecretRef }}
+    Secret {{ .Release.Name }}-{{ .Chart.Name }}-smb-secret. This one is not read by any pod: it is
+    wired into the PersistentVolume as nodeStageSecretRef, and the
+    smb.csi.k8s.io driver reads the fields itself — usually username and
+    password, plus domain where the server wants one. The chart names no key
+    here, so a wrong field name surfaces as a mount failure on the CronJob's
+    pod — a describe on that pod, never a missing variable.
+{{- end }}
+{{- if .Values.secrets.oidcSecretRef }}
+
+  secrets.oidcSecretRef IS SET AND IS READ BY NOTHING
+    "{{ .Values.secrets.oidcSecretRef }}" — no template in this chart references
+    that value. No OnePasswordItem is created for it and no Secret appears. The
+    OIDC client id travels as plain env from oidc.provider.clientId, and no
+    client secret is configured at all (see the OIDC section below). Whatever
+    you put in that item has no effect on this release.
+{{- end }}
+
+CHANGING A SECRET'S CONTENT RESTARTS NOTHING
+  Helm never sees the content of a OnePasswordItem, so it cannot hash it, and
+  this chart carries no checksum annotation at all. Pointing a *SecretRef at a
+  DIFFERENT item rolls the pods; editing a value INSIDE the same item does not
+  — the operator updates the Kubernetes Secret while the running container
+  keeps the old value in its environment. After such a rotation:
+
+    kubectl -n {{ .Release.Namespace }} rollout restart statefulset/{{ .Release.Name }}-{{ .Chart.Name }}-sfs
+
+  Rotating paperless-secret-key logs every session out. Rotating the database
+  fields points the release at whatever that new endpoint contains, empty or
+  not, and the next start migrates it.
+
+POSTGRES AND REDIS ARE NOT PART OF THIS CHART
+  Both have to exist and be reachable before the first start. They fail in
+  opposite ways, and only one of them is loud:
+
+  - Without the database paperless does not come up at all. All three probes
+    ask for "/" on port 8000, so you get no useful error: the pod never turns
+    Ready and the startup probe kills it after
+    {{ $startup.periodSeconds }}s x {{ $startup.failureThreshold }} = {{ mul $startup.periodSeconds $startup.failureThreshold }}s. Read the container log, not the pod events.
+  - Without Redis the web UI comes up and looks healthy. Redis is the Celery
+    broker: consumption, OCR, the scheduled tasks and the index updates simply
+    never run, and documents dropped into the consume directory stay there.
+    A wrong redis-connection-url costs you the whole processing side and
+    nothing turns red.
+
+THE FIRST START MIGRATES, AND THE STARTUP PROBE IS THE CLOCK
+  Every start runs the database migrations before the server answers, and the
+  first start after an upgrade to 3.x also rebuilds the search index from
+  scratch (Whoosh → Tantivy). The startup probe grants
+  {{ $startup.failureThreshold }} x {{ $startup.periodSeconds }}s = {{ mul $startup.periodSeconds $startup.failureThreshold }}s before the kubelet restarts the container — and a
+  restart lands in the middle of a migration. On a large archive, raise
+  paperless.startupProbe.failureThreshold BEFORE the app-version jump, not
+  after the crash loop has started.
+
+  Migrations are one-way. "helm rollback" puts the old image back on a database
+  the new one has already rewritten. Back up before bumping the app version,
+  and back up both halves — the metadata lives in Postgres, the documents on
+  the PVC.
+
+HOW DOCUMENTS GET IN
+  Everything in /usr/src/paperless/consume is picked up by the consumer. That
+  directory is its own volume, {{ .Release.Name }}-{{ .Chart.Name }}-consume-volume-claim, and its size is
+  NOT paperless.files.storage: the claim is hardcoded to 1Gi (ReadWriteMany)
+  in the template, and both PVCs are hardcoded to storage class "longhorn".
+  paperless.files.storage ({{ .Values.paperless.files.storage }}) sizes only the main volume, which holds
+  data/, media/ and export/ as subPaths.
+
+  Uploads through the web UI take the second route and pass the Ingress, where
+  the chart sets a body-size cap of {{ .Values.paperless.files.maxUploadFileSize }} (paperless.files.maxUploadFileSize,
+  rendered into both the nginx.ingress and nginx.org annotations). A larger
+  file is rejected by the ingress controller with a 413 before paperless ever
+  sees it — the consume directory has no such limit.
+{{- if .Values.smbConnection.enabled }}
+
+  SMB CONSUME IS ON — AND IT MOVES ONLY TOP-LEVEL PDFs
+    CronJob {{ .Release.Name }}-{{ .Chart.Name }}-consume-cronjob, schedule "{{ .Values.smbConnection.cronJob }}", mounts
+    //{{ .Values.smbConnection.server }} and runs, once per firing:
+
+      find /mnt/smb -maxdepth 1 -name "*.pdf"  →  mv into the consume volume
+
+    Read that literally. Anything in a SUBDIRECTORY of the share is never
+    touched, and anything that is not *.pdf — an image, an .eml, a .PDF in
+    capitals — stays on the share forever with nothing reporting it. It is a
+    move, not a copy: once the job has run, the share no longer holds the file
+    and the only copy is on the consume volume.
+
+    One thing to know before you edit that schedule: it is rendered into the
+    manifest unquoted, so a schedule that STARTS with "*" ("*/15 * * * *")
+    aborts the render with a YAML parse error on this template — YAML reads the
+    leading * as an alias. Quoting it in your values file does not help, the
+    quotes are gone by then. Use an equivalent that starts with a digit
+    ("5,20,35,50 * * * *"); a "*" anywhere but in first position is fine.
+
+    The job has NO probes (the documented exception to the chart conventions),
+    and it cannot fail usefully either: with nothing to move it exits 0, which
+    is indistinguishable from a successful run. Judge it by what arrives, not
+    by the Job's status:
+
+      kubectl -n {{ .Release.Namespace }} get jobs --sort-by=.metadata.creationTimestamp
+      kubectl -n {{ .Release.Namespace }} logs job/<name-of-the-last-one>
+
+    The share is reached through the smb.csi.k8s.io driver, which this chart
+    does not install. The PersistentVolume {{ .Release.Name }}-{{ .Chart.Name }}-smb-pv is CLUSTER-scoped
+    with reclaim policy Retain and its volumeHandle is derived from
+    smbConnection.server alone — two releases pointing at the same server
+    collide on that handle, and a Retained PV outlives helm uninstall and
+    blocks the next install of the same name until it is deleted by hand.
+{{- else }}
+
+  smbConnection.enabled is false, so nothing fills that directory on its own —
+  the web UI is the only way in. To hand a file over directly:
+
+    kubectl -n {{ .Release.Namespace }} cp <file.pdf> {{ $pod }}:/usr/src/paperless/consume/
+{{- end }}
+
+WHAT A GREEN POD DOES NOT PROVE
+  One container runs the web server and the Celery worker and scheduler side
+  by side under s6-overlay, and all three probes only ask the web server for
+  "/". A worker that died, a consumer that is not watching and a broken Redis
+  connection all leave the pod Ready and the rollout green. The honest check is
+  a document going in and coming out the other side, plus:
+
+    kubectl -n {{ .Release.Namespace }} logs {{ $pod }} | grep -i -e error -e celery
+
+  A read-only root filesystem is part of that picture too: only /tmp and /run
+  are writable. Anything the app would install at runtime — an extra tesseract
+  language pack, for instance — cannot be written, no matter which variable
+  asks for it.
+
+OCR AND BARCODES AS THIS RELEASE HAS THEM
+  language "{{ .Values.paperless.ocr.languages }}" · mode {{ .Values.paperless.ocr.mode }} · archive {{ .Values.paperless.ocr.archiveFileGeneration }} · output {{ .Values.paperless.ocr.output_type }} · rotate {{ .Values.paperless.ocr.rotate_pages }}
+
+  paperless.ocr.languages sets PAPERLESS_OCR_LANGUAGE — which language to use.
+  The chart does not set the plural PAPERLESS_OCR_LANGUAGES that makes the
+  image fetch further packages at start, and with the read-only rootfs above it
+  could not work anyway: a language the image does not already carry needs a
+  different image, not a different value.
+
+  In 3.x the OCR mode values "skip" and "skip_noarchive" no longer exist —
+  "auto" replaces them, and archive generation is a separate setting.
+
+  barcodes: {{ if $barcodes.enabled }}enabled, separator "{{ $barcodes.barcodeString }}", split pages {{ if $barcodes.retainBarcodePage }}retained{{ else }}discarded{{ end }}, ASN {{ if $barcodes.asn.enabled }}on{{ else }}off{{ end }}{{ else }}disabled{{ end }}
+  A childless "barcodes:" key in a values file is YAML null and means "chart
+  defaults apply" here (issue #61) — it does NOT switch barcodes off. Deleting
+  the sub-keys gets you the defaults back; only barcodes.enabled: false
+  disables it.
+{{- if .Values.paperless.files.deleteDuplicates }}
+
+  paperless.files.deleteDuplicates is on: a document that matches one already
+  in the archive is DELETED on consume instead of being kept. That is the 2.x
+  behaviour, which 3.0 dropped as a default.
+{{- end }}
+{{- if .Values.paperless.files.tikaGotenberg.enabled }}
+
+TIKA AND GOTENBERG — THE ENDPOINTS CARRY NO SCHEME
+  tika        http://{{ .Values.paperless.files.tikaGotenberg.tikaEndpoint }}
+  gotenberg   http://{{ .Values.paperless.files.tikaGotenberg.gotenbergEndpoint }}
+
+  The chart prefixes "http://" itself, so these two values are bare host:port.
+  A value written with a scheme renders as http://http://… and every Office
+  document fails to convert while everything else keeps working. Neither
+  service is part of this chart or checked at startup.
+{{- end }}
+{{- if .Values.oidc.enabled }}
+
+OIDC IS ON, AND IT IS PKCE-ONLY
+  Register this redirect URI at the provider:
+
+    https://{{ .Values.ingress.domain }}/accounts/oidc/{{ .Values.oidc.provider.id }}/login/callback/
+
+  The chart enables PKCE and configures NO client secret — the client has to be
+  registered as one that can complete the flow without one. Nothing about OIDC
+  is exercised before someone actually signs in, so a wrong discovery URL,
+  client id or redirect URI surfaces as a failed login on a perfectly healthy
+  pod.
+{{- if not .Values.oidc.provider.tokenAuthMethod }}
+
+  oidc.provider.tokenAuthMethod is unset. Since the allauth update in 3.0 some
+  providers need it spelled out (client_secret_basic); the symptom is a login
+  that dies at the callback with invalid_client.
+{{- end }}
+{{- if or .Values.oidc.autoLoginWithProvider .Values.oidc.disableRegularLogin }}
+
+  {{ if .Values.oidc.autoLoginWithProvider }}autoLoginWithProvider{{ end }}{{ if and .Values.oidc.autoLoginWithProvider .Values.oidc.disableRegularLogin }} and {{ end }}{{ if .Values.oidc.disableRegularLogin }}disableRegularLogin{{ end }} — the app's own login form is
+  bypassed or gone. Before you rely on that, make sure at least one local
+  superuser still has a usable password and check that Django's admin login at
+  /admin/ still lets that account in; it is the only way back when the provider
+  is unreachable.
+{{- end }}
+{{- end }}
+{{- if or $pre $post }}
+
+paperless.scripts IS SET AND DOES NOTHING
+  {{ len $pre }} pre- and {{ len $post }} post-consumption script(s) are configured. The
+  ConfigMap that would carry them is disabled in this chart ({{ "{{- if false }}" }} at the
+  top of the template), no volume mounts it, and neither
+  PAPERLESS_PRE_CONSUME_SCRIPT nor PAPERLESS_POST_CONSUME_SCRIPT is set on the
+  container. These values render no object and change no behaviour.
+{{- end }}
+{{- if gt (int $replicas) 1 }}
+
+paperless.replicas IS {{ $replicas }} — EXPECT ONE POD TO WORK AND THE REST TO WAIT
+  The main volume is a plain ReadWriteOnce PVC shared by the whole
+  StatefulSet, not a volumeClaimTemplate, so the second pod stays Pending on
+  "Multi-Attach error for volume" unless the storage class is genuinely RWX —
+  and where it does start, two consumers watch the same directory and two
+  schedulers run the same periodic tasks.
+{{- end }}
+
+BACKUP IS TWO THINGS AT THE SAME TIME
+  Postgres holds the metadata, the tags and one row per document; the PVC
+  {{ .Release.Name }}-{{ .Chart.Name }}-volume-claim holds the files under data/, media/ and export/.
+  Restoring one without the other gives you an archive full of references to
+  documents that are not there. Snapshot them together.
+
+  Both PVCs are rendered by this chart, so helm uninstall deletes them and the
+  documents with them unless the storage class reclaim policy says otherwise.
+  The external database survives that — which makes an accidental uninstall
+  look recoverable while the files are already gone.
+{{- if .Values.paperless.env }}
+
+  paperless.env adds {{ len .Values.paperless.env }} variable(s), rendered after the ones the chart
+  sets itself, so they win on a name the chart also sets.
+{{- end }}

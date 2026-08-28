@@ -89,6 +89,29 @@ jobs:
             echo "Version bump OK: $BASE_VERSION -> $NEW_VERSION"
           fi
 
+  quantity-render:
+    name: "Resource quantities"
+    runs-on: ubuntu-latest
+    # The one job in this workflow that deliberately ignores the changed-chart
+    # matrix and runs over *every* chart (issue #157). The bug it guards
+    # against - resource quantities formatted with printf "%v", where float64
+    # flips to exponential notation above ~1e6 - lives in the resources helper,
+    # and that helper is copied into every chart's templates/_helpers.tpl,
+    # because charts here have no dependencies. So it comes back by copy: a new
+    # chart started from an older one, or from template-chart before the fix.
+    # In that PR the chart is new and its copy of the bug is in no diff anyone
+    # reads. Running over everything also means there is no list to maintain -
+    # adding a chart enrolls it. Two renders per chart, no cluster, a few
+    # seconds in total; it depends on no other job and finishes long before
+    # build-chart, so it adds no wall-clock time to the pipeline.
+    steps:
+      - name: "Checkout Repository"
+        uses: actions/checkout@v7
+      - name: "Install Helm"
+        uses: azure/setup-helm@v5
+      - name: "Render every chart with bare integer quantities"
+        run: ci/run-quantity-render-test.sh
+
   trivy-config:
     name: "Trivy config ${{ matrix.chart }}"
     needs: detect-changed-charts

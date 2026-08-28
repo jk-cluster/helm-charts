@@ -36,6 +36,7 @@ on:
           - minecraft-server
           - rss-bridge
           - searxng
+          - bentopdf
           # freesailarr is deliberately absent: none of its nine images takes
           # its tag from appVersion (they are all pinned in its values.yaml),
           # so this workflow would rewrite appVersion and republish the chart

@@ -200,6 +200,19 @@
       versioningTemplate: "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)\\.(?<build>\\d+)-(?<compatibility>full)$",
     },
     {
+      description: [
+        "bentopdf: the registry carries three tag families side by side - 2.8.7, v2.8.7 and",
+        "v2.8.7-amd64/-arm64, plus latest/edge/sha-<short>. The chart pins the suffix-free",
+        "form, which is the one appVersion can carry unchanged.",
+      ],
+      customType: "regex",
+      managerFilePatterns: ["bentopdf/Chart.yaml"],
+      matchStrings: ["(?m)^appVersion:\\s*\"?(?<currentValue>[^\"\\s]+)\"?"],
+      depNameTemplate: "ghcr.io/alam00000/bentopdf-simple",
+      datasourceTemplate: "docker",
+      depTypeTemplate: "app-version",
+    },
+    {
       customType: "regex",
       managerFilePatterns: ["calibre-web-automated/Chart.yaml"],
       matchStrings: ["(?m)^appVersion:\\s*\"?(?<currentValue>[^\"\\s]+)\"?"],

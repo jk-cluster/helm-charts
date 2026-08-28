@@ -1,0 +1,12 @@
+apiVersion: v2
+name: bentopdf
+description: A Helm chart to deploy BentoPDF on Kubernetes
+icon: https://raw.githubusercontent.com/alam00000/bentopdf/main/public/images/favicon-192x192.png
+
+type: application
+
+version: 1.0.0+up2.8.7
+appVersion: "2.8.7"
+
+maintainers:
+  - name: jklein

@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+  labels:
+    app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+spec:
+  replicas: {{ include "bentopdf.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.bentopdf.replicas) }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+  template:
+    metadata:
+      name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+      labels:
+        app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+      annotations:
+        # Hash of the rendered ConfigMap: a changed config.json changes the pod
+        # template and thus rolls the pods. Mandatory here rather than nice to
+        # have - config.json is a subPath mount, which the kubelet never
+        # refreshes, so without this annotation a changed tool list would stay
+        # invisible until someone restarted the pods for an unrelated reason.
+        checksum/config: {{ include (print $.Template.BasePath "/bentopdf.configmap.yaml") . | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "bentopdf.podSecurityContext" .Values.bentopdf.securityContext | nindent 8 }}
+      containers:
+        - name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+          # The "-simple" variant on purpose: it is built from the same
+          # Dockerfile as ghcr.io/alam00000/bentopdf, the difference being the
+          # SIMPLE_MODE build argument, which strips the marketing surface of
+          # the commercial site. That has no place on an internal instance.
+          image: "ghcr.io/alam00000/bentopdf-simple:{{ .Chart.AppVersion }}"
+          imagePullPolicy: IfNotPresent
+          {{- if .Values.bentopdf.env }}
+          env:
+            {{- range $value := .Values.bentopdf.env }}
+            {{- if $value.value }}
+            - name: {{ $value.name | quote }}
+              value: {{ tpl $value.value $ | quote }}
+            {{- else if $value.valueFrom }}
+            {{- if $value.valueFrom.secretKeyRef }}
+            - name: {{ $value.name | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ tpl $value.valueFrom.secretKeyRef.name $ | quote }}
+                  key: {{ tpl $value.valueFrom.secretKeyRef.key $ | quote }}
+            {{- else if $value.valueFrom.configMapKeyRef }}
+            - name: {{ $value.name | quote }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ tpl $value.valueFrom.configMapKeyRef.name $ | quote }}
+                  key: {{ tpl $value.valueFrom.configMapKeyRef.key $ | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+          {{- end }}
+          securityContext:
+            {{- include "bentopdf.containerSecurityContext" .Values.bentopdf.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /usr/share/nginx/html/config.json
+              subPath: config.json
+              readOnly: true
+            # The two writable paths below are what keeps
+            # readOnlyRootFilesystem: true possible. Both are image facts, not
+            # user configuration, so neither is a value - and both are here
+            # because a run without them failed, not because the upstream
+            # chart mounts them.
+            - name: nginx-tmp
+              # The nginx.conf puts its pid file at /etc/nginx/tmp/nginx.pid.
+              mountPath: /etc/nginx/tmp
+            - name: nginx-cache
+              # NOT optional: nginx creates its temp directories at startup and
+              # the image ships /var/cache/nginx without them. Missing this
+              # mount, the master process aborts before serving anything, with
+              #   [emerg] mkdir() "/var/cache/nginx/client_temp" failed
+              #   (30: Read-only file system)
+              mountPath: /var/cache/nginx
+            # /var/run is deliberately NOT mounted. The upstream chart mounts
+            # it, but this image keeps its pid file under /etc/nginx/tmp, and a
+            # run with only the two mounts above serves / and /config.json with
+            # 200. An emptyDir nobody writes to is a claim the chart cannot
+            # back up.
+          ports:
+            # 8080 is the image's EXPOSE and the port its nginx.conf listens
+            # on. It is not a value, because a value here would lie: the image
+            # switch that moves the port (PORT) rewrites nginx.conf with sed
+            # and therefore cannot run with a read-only root filesystem at all
+            # - see the comment in values.yaml. Moving the port means changing
+            # the chart, on purpose.
+            #
+            # The port NAME is load-bearing and must not be renamed: the
+            # Service selects it by name and so do all three probes.
+            - containerPort: 8080
+              protocol: TCP
+              name: http
+          # Probes, resources and both security contexts go through the
+          # null-safe helpers (#99): an erased block means "chart defaults
+          # apply" instead of a vanished probe or an unhardened container.
+          # Never wrap these in an "if" - a guard hides the erased case
+          # completely instead of rendering a visible null.
+          livenessProbe:
+            {{- include "bentopdf.livenessProbe" .Values.bentopdf.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- include "bentopdf.readinessProbe" .Values.bentopdf.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- include "bentopdf.startupProbe" .Values.bentopdf.startupProbe | nindent 12 }}
+          resources:
+            {{- include "bentopdf.effectiveResources" .Values.bentopdf.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: "{{ .Release.Name }}-{{ .Chart.Name }}-configmap"
+        - name: nginx-tmp
+          emptyDir: {}
+        - name: nginx-cache
+          emptyDir: {}
+      restartPolicy: Always

@@ -1,0 +1,271 @@
+{{- $replicas := include "urlaubsverwaltung.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.urlaubsverwaltung.replicas) -}}
+{{- $res := fromYaml (include "urlaubsverwaltung.effectiveResources" .Values.urlaubsverwaltung.resources) -}}
+{{/*
+Both figures go through formatNumber for the reason issue #157 documents: they
+come back from fromYaml as float64, and a bare byte count would print as
+"1e+06" here just as it did in the rendered manifest.
+*/}}
+{{- $memLimitRaw := index ($res.limits | default dict) "memory" -}}
+{{- $memLimit := "the computed memory limit" -}}
+{{- if not (kindIs "invalid" $memLimitRaw) -}}
+{{- $memLimit = include "urlaubsverwaltung.formatNumber" $memLimitRaw -}}
+{{- end -}}
+{{- $memRequestRaw := index ($res.requests | default dict) "memory" -}}
+{{- $memRequest := "the memory request" -}}
+{{- if not (kindIs "invalid" $memRequestRaw) -}}
+{{- $memRequest = include "urlaubsverwaltung.formatNumber" $memRequestRaw -}}
+{{- end -}}
+{{/*
+The effective limitFactor. It cannot be read back out of $res: that dict is the
+RENDERED resources block (requests / limits only), so $res.limitFactor is always
+empty and would silently print the default even where another factor is in
+force. Mirror the defaulting of the resources helper on the raw value instead.
+*/}}
+{{- $resIn := .Values.urlaubsverwaltung.resources -}}
+{{- if kindIs "invalid" $resIn -}}
+{{- $resIn = dict -}}
+{{- end -}}
+{{- $factor := 3 -}}
+{{- if not (kindIs "invalid" (index $resIn "limitFactor")) -}}
+{{- $factor = index $resIn "limitFactor" -}}
+{{- end -}}
+{{/* An explicitly set memory limit wins over the computed one - say which. */}}
+{{- $limitsIn := index $resIn "limits" -}}
+{{- if kindIs "invalid" $limitsIn -}}
+{{- $limitsIn = dict -}}
+{{- end -}}
+{{- $memLimitExplicit := not (kindIs "invalid" (index $limitsIn "memory")) -}}
+{{- $startup := fromYaml (include "urlaubsverwaltung.startupProbe" .Values.urlaubsverwaltung.startupProbe) -}}
+{{- $budget := "" -}}
+{{- if and (kindIs "float64" $startup.periodSeconds) (kindIs "float64" $startup.failureThreshold) -}}
+{{- $budget = printf "%.0f seconds" (mulf $startup.periodSeconds $startup.failureThreshold) -}}
+{{- end -}}
+{{- $envNames := list -}}
+{{- range $entry := .Values.urlaubsverwaltung.env }}
+{{- $envNames = append $envNames $entry.name }}
+{{- end }}
+Urlaubsverwaltung {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+{{- if .Values.ingress.enabled }}
+
+ACCESS
+  https://{{ .Values.ingress.domain }}
+
+  The certificate is requested by cert-manager through the "{{ .Values.ingress.clusterIssuer }}"
+  cluster issuer. Until it has been issued the browser shows a warning; follow it with
+
+    kubectl -n {{ .Release.Namespace }} get certificate tls-{{ .Release.Name }}-{{ .Chart.Name }}-ingress
+
+  The Ingress publishes the application at "/" with no path restriction, so
+  everything the app serves is served under this host — including
+  /swagger-ui.html and /v3/api-docs, which this app version enables by default
+  and this chart does not turn off. Both are behind the login (they answer 302
+  to the identity provider like every other path), so this is exposure of an
+  API description, not of data. Turning them off is a
+  springdoc.api-docs.enabled / springdoc.swagger-ui.enabled property; the chart
+  sets neither, so it can be added through urlaubsverwaltung.env.
+{{- else }}
+
+ACCESS — NO INGRESS
+  ingress.enabled is false, so this release has no Ingress and no certificate;
+  ingress.clusterIssuer is not needed. Unlike other charts in this repo,
+  ingress.domain is read by NOTHING else here — no environment variable of the
+  container derives from it. The address the application considers its own is
+  the OIDC redirect URI, and that comes out of the 1Password item below, not
+  out of this value. The two can drift apart without any complaint.
+
+  Reach the release inside the cluster with
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-{{ .Chart.Name }}-service 8080:80
+
+  and open http://localhost:8080. The login redirects to your identity
+  provider, which will refuse to come back to a localhost callback unless that
+  exact URL is registered there as well.
+{{- end }}
+{{ if eq $replicas "0" }}
+SCALED TO ZERO
+  {{ if .Values.scaleDown }}scaleDown: true{{ else }}urlaubsverwaltung.replicas: 0{{ end }} — the Deployment runs with replicas: 0, so the endpoint
+  above does not answer until you set it back and upgrade again. Both
+  OnePasswordItem CRs and the Service{{ if .Values.ingress.enabled }} and Ingress stay in place, so the
+  certificate is not re-issued.{{ else }} stay in place.{{ end }} This chart owns no volume: all
+  state lives in the external database, so scaling to zero loses nothing.
+{{ end }}
+SECRETS — THE FIELDS EACH 1PASSWORD ITEM MUST CARRY
+  The operator copies an item's FIELDS into the Kubernetes Secret, one key per
+  field name, and this chart reads each key by name into an environment
+  variable. The field names are decided here and appear nowhere in 1Password,
+  so they are exactly what you would otherwise have to read out of the
+  deployment template. They must match to the letter.
+
+    secrets.databaseSecretRef → {{ .Values.secrets.databaseSecretRef }}
+      → Secret {{ .Release.Name }}-{{ .Chart.Name }}-db-secret
+        jdbc-url   a full JDBC URL, e.g.
+                   jdbc:postgresql://postgres.example.com:5432/urlaubsverwaltung
+        username
+        password
+
+    secrets.oidcSecretRef → {{ .Values.secrets.oidcSecretRef }}
+      → Secret {{ .Release.Name }}-{{ .Chart.Name }}-oidc-secret
+        client-id
+        client-secret
+        issuer-name      the provider's display name on the login button
+        issuer-uri       the OIDC issuer, WITHOUT /.well-known/openid-configuration
+        jwt-issuer-uri   the same issuer for the resource-server side
+        redirect-uri     the full callback URL. This chart registers the client
+                         under the id "default", so the path is
+                         /login/oauth2/code/default — for example
+                         https://{{ if .Values.ingress.enabled }}{{ .Values.ingress.domain }}{{ else }}example.com{{ end }}/login/oauth2/code/default
+                         and the same URL has to be registered at the provider.
+
+  This chart deploys NO database and NO identity provider. Both have to exist
+  already and be reachable from this namespace.
+
+  A field spelled differently yields a Secret without that key. The pod then
+  hangs in CreateContainerConfigError while the Secret itself exists, so it
+  looks as if the operator had done its job. What it actually delivered:
+
+    kubectl -n {{ .Release.Namespace }} get secret {{ .Release.Name }}-{{ .Chart.Name }}-db-secret -o jsonpath='{.data}'
+
+  Pointing a ref at a DIFFERENT item rolls the pod; changing a value INSIDE the
+  same item does not. Helm never sees that content, so the rendered Deployment
+  is unchanged and this chart stamps no checksum over the secrets — nothing
+  restarts, and the pod keeps running with the old values:
+
+    kubectl -n {{ .Release.Namespace }} rollout restart deployment/{{ .Release.Name }}-{{ .Chart.Name }}-deployment
+
+THE IDENTITY PROVIDER IS REQUIRED AT BOOT, NOT AT LOGIN
+  On start the application resolves the provider's configuration itself, with a
+  GET on
+
+    <issuer-uri>/.well-known/openid-configuration
+
+  and it does this while building its security beans — before the HTTP port
+  opens. An issuer-uri that does not resolve, is unreachable from this
+  namespace, or answers something other than a discovery document therefore
+  does not produce a broken login page: the process exits with
+
+    Application run failed ... Unable to resolve Configuration with the
+    provided Issuer of "<issuer-uri>"
+
+  and the pod goes into CrashLoopBackOff having never served a request. So a
+  provider that is down at rollout time keeps this release from starting at
+  all. The reason is only in the log:
+
+    kubectl -n {{ .Release.Namespace }} logs deployment/{{ .Release.Name }}-{{ .Chart.Name }}-deployment
+
+  Note the order: the database migration runs BEFORE this step. A rollout that
+  dies on the identity provider has already migrated the schema.
+
+STARTUP MIGRATES THE DATABASE, AND ROLLBACK DOES NOT UNMIGRATE
+  Liquibase brings the schema up to date on every start, before anything is
+  served; against an empty database it creates it from scratch and the app then
+  seeds its initial settings, vacation types and sick-note types. The startup
+  probe covers that whole window{{ if $budget }} ({{ $budget }}){{ end }} and holds liveness and readiness off
+  until it is through. A measured cold start against an empty database — JVM,
+  full migration, seeding — took about 30 seconds; an upgrade that carries a
+  long migration takes longer, and if it outruns the budget the kubelet kills
+  the container mid-migration and the next attempt starts over.
+
+  helm rollback puts the previous app version back; the schema does not come
+  back with it, because it was migrated in place. Take a database backup BEFORE
+  an app-version upgrade. There is no volume in this release to back up — the
+  database is the whole of the state.
+
+  A failed rollout does not take the release down: the previous pod keeps
+  serving until the new one becomes Ready. "helm upgrade" without --wait
+  therefore reports success while the new pod crashloops behind it. Check:
+
+    kubectl -n {{ .Release.Namespace }} rollout status deployment/{{ .Release.Name }}-{{ .Chart.Name }}-deployment
+
+THE MEMORY LIMIT SIZES THE JAVA HEAP — IT IS NOT JUST A CEILING
+  The image is built with Cloud Native Buildpacks, and its memory calculator
+  reads the container's memory LIMIT at every start and derives -Xmx and the
+  metaspace from it. In this release that limit is {{ $memLimit }}.
+{{- if $memLimitExplicit }}
+  It is set explicitly under urlaubsverwaltung.resources.limits.memory, which
+  wins over the factor the chart would otherwise apply.
+{{- else }}
+  The chart does not set it directly: it is computed as
+  urlaubsverwaltung.resources.limitFactor ({{ include "urlaubsverwaltung.formatNumber" $factor }})
+  x the memory request ({{ $memRequest }}).
+{{- end }}
+
+  So the memory limit is not an operational safety margin here, it is a JVM
+  tuning knob. Lowering it shrinks the heap; raising it raises the heap.
+  A limit chosen too tightly does not merely risk an OOMKill under load —
+  the calculator refuses to start at all when what is left after metaspace,
+  code cache and the thread stacks is negative, and that failure appears before
+  any application log line. The sizing it chose is the first line of the log:
+
+    kubectl -n {{ .Release.Namespace }} logs deployment/{{ .Release.Name }}-{{ .Chart.Name }}-deployment | head -1
+
+DO NOT HEALTH-CHECK THIS RELEASE ON /actuator/health
+  That endpoint aggregates every health indicator, and one of them is the mail
+  sender pointed at localhost:1025 by this chart (see below). Nothing listens
+  there, so the aggregate answers 503 DOWN on a completely healthy release,
+  for the lifetime of that release:
+
+    {"components":{ ... "mail":{"status":"DOWN"} ... },"status":"DOWN"}
+
+  Everything else in it — db, ping, diskSpace, ssl — is UP. The probes this
+  chart configures deliberately use the /actuator/health/liveness and
+  /actuator/health/readiness GROUPS instead, which contain only the
+  application's lifecycle state and answer 200. Any external monitor you point
+  at this release has to use the same two paths, or it will page you forever
+  about a mail server you never configured.
+
+WHAT A READY POD DOES NOT PROVE
+  Those two groups report lifecycle state and nothing else — the datasource is
+  not in them. Measured here: with the database scaled away underneath a
+  running pod, both groups kept answering 200, the pod stayed 1/1 Ready and was
+  never restarted. The database is verified exactly once, at boot, by the
+  migration.
+
+  Know the resulting picture in advance: during a database outage the pod stays
+  Ready, its endpoint keeps receiving traffic{{ if .Values.ingress.enabled }}, the Ingress keeps routing to
+  it{{ end }}, and users get application errors while Kubernetes reports everything
+  healthy. Nothing in the pod's status or restart count points at the database.
+  Look there first anyway.
+
+  Note also that there is no shell in this image: "kubectl exec" cannot open
+  one, and neither can a debug sidecar sharing the process namespace run the
+  app's own tooling. Everything you can learn from a running pod, you learn
+  from its log and its HTTP endpoints.
+
+MAIL AND THE APPLICATION URL ARE PLACEHOLDERS UNTIL YOU SET THEM
+  The chart hardcodes the mail wiring to values that work nowhere:
+
+    SPRING_MAIL_HOST=localhost, SPRING_MAIL_PORT=1025
+    UV_MAIL_FROM / UV_MAIL_REPLYTO = urlaubsverwaltung@example.org
+    UV_CALENDAR_ORGANIZER = organizer@example.org
+    UV_MAIL_APPLICATIONURL = http://localhost:8080
+
+  Nothing in this pod listens on localhost:1025, so no notification mail leaves
+  the release and the mail health indicator stays DOWN. UV_MAIL_APPLICATIONURL
+  is what the app puts into the links inside those mails — it is NOT derived
+  from ingress.domain. Left as it is, every link points at the reader's own
+  machine.
+
+urlaubsverwaltung.env IS ADDITIVE ONLY, AND A COLLISION BREAKS THE UPGRADE
+  The entries are appended AFTER the chart's own list{{ if $envNames }} (this release appends:
+  {{ join ", " $envNames }}){{ end }}. An entry that repeats a name the
+  chart already sets does not replace it — it renders the variable twice, and
+  that has a sharp edge: adding such a name to an ALREADY INSTALLED release
+  makes the next upgrade fail in the API server, before anything changes, with
+
+    UPGRADE FAILED: cannot patch "{{ .Release.Name }}-{{ .Chart.Name }}-deployment" ...
+    The order in patch list ... doesn't match $setElementOrder list
+
+  because env entries are merged by name and a duplicate name breaks that
+  ordering. A fresh install with the same values goes through, so the failure
+  looks arbitrary until you know it. Treat the variables above as fixed for the
+  life of a release: to really change one, reinstall.
+
+  Anything sensitive belongs in valueFrom.secretKeyRef rather than a plain
+  value: a value is stored in the pod spec and readable by anyone who can read
+  pods in {{ .Release.Namespace }}.
+{{- if not $envNames }}
+
+  urlaubsverwaltung.env is empty in this release, so the placeholders above are
+  live exactly as printed.
+{{- end }}

@@ -1,0 +1,152 @@
+{{- $replicas := include "zipline.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.zipline.replicas) -}}
+{{- $res := fromYaml (include "zipline.effectiveResources" .Values.zipline.resources) -}}
+{{- $eph := index ($res.limits | default dict) "ephemeral-storage" | default "the computed ephemeral-storage limit" -}}
+{{- $startup := fromYaml (include "zipline.startupProbe" .Values.zipline.startupProbe) -}}
+{{- $budget := "" -}}
+{{- if and (kindIs "float64" $startup.periodSeconds) (kindIs "float64" $startup.failureThreshold) -}}
+{{- $budget = printf "%.0f seconds" (mulf $startup.periodSeconds $startup.failureThreshold) -}}
+{{- end -}}
+Zipline {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+{{- if .Values.ingress.enabled }}
+
+ACCESS
+  https://{{ .Values.ingress.domain }}
+
+  The certificate is requested by cert-manager through the "{{ .Values.ingress.clusterIssuer }}"
+  cluster issuer. Until it has been issued the browser shows a warning; follow it with
+
+    kubectl -n {{ .Release.Namespace }} get certificate tls-{{ .Release.Name }}-{{ .Chart.Name }}-ingress
+{{- else }}
+
+ACCESS — NO INGRESS
+  ingress.enabled is false, so this release has no Ingress and no certificate;
+  ingress.clusterIssuer is not needed. ingress.domain still is: it is also
+  CORE_DEFAULT_DOMAIN, the host Zipline puts into every share link it hands
+  out. Reach the instance inside the cluster with
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-{{ .Chart.Name }}-service 8080:80
+
+  and open http://localhost:8080 — but every link the app generates will still
+  point at https://{{ .Values.ingress.domain }}/, which nothing in this release serves.
+{{- end }}
+{{ if eq $replicas "0" }}
+SCALED TO ZERO
+  {{ if .Values.scaleDown }}scaleDown: true{{ else }}zipline.replicas: 0{{ end }} — the StatefulSet runs with replicas: 0, so the endpoint
+  above does not answer until you set it back and upgrade again. The uploads
+  PVC, both Secrets and the Service{{ if .Values.ingress.enabled }} and Ingress stay in place, so no data is
+  lost and the certificate is not re-issued.{{ else }} stay in place, so no data is lost.{{ end }}
+{{ end }}
+THE FIRST VISITOR CHOOSES THE ADMINISTRATOR
+  Against an empty database Zipline has no users, and it sends every visitor
+  to its setup page to name the super administrator and its password; the
+  endpoint behind that page refuses to run a second time once an account
+  exists. Whoever reaches the URL first therefore owns this instance. Do the
+  setup right after the first rollout, not the next morning. Against a
+  database that already carries a Zipline schema the step is skipped and the
+  normal login appears.
+
+SECRETS — WHAT THE TWO 1PASSWORD ITEMS MUST CONTAIN
+  The operator copies an item's FIELDS into the Kubernetes Secret, one key per
+  field name, and this chart reads exactly one key from each. The field names
+  therefore have to match to the letter:
+
+    secrets.databaseSecretRef → {{ .Values.secrets.databaseSecretRef }}
+      field "connection-url" → DATABASE_URL, a full PostgreSQL URL such as
+      postgresql://zipline:password@postgres.example.com:5432/zipline
+      The chart deploys no database — that server has to exist already and be
+      reachable from this namespace.
+
+    secrets.ziplineSecretRef → {{ .Values.secrets.ziplineSecretRef }}
+      field "server-secret" → CORE_SECRET, which signs sessions and tokens.
+      Generate one with: openssl rand -base64 32
+
+  A field spelled differently yields a Secret without that key. The pod then
+  hangs in CreateContainerConfigError while the Secret itself exists, so it
+  looks as if the operator had done its job. What it actually delivered:
+
+    kubectl -n {{ .Release.Namespace }} get secret {{ .Release.Name }}-{{ .Chart.Name }}-db-secret -o jsonpath='{.data}'
+
+  Pointing a ref at a DIFFERENT item rolls the pod; changing the value INSIDE
+  the same item does not — Helm never sees that content, so the rendered
+  StatefulSet is unchanged and nothing restarts:
+
+    kubectl -n {{ .Release.Namespace }} rollout restart statefulset/{{ .Release.Name }}-{{ .Chart.Name }}-sfs
+
+  Note that a new CORE_SECRET logs every user out.
+
+STARTUP RUNS THE DATABASE MIGRATIONS
+  Zipline migrates its schema on start, before it serves anything. The startup
+  probe covers that window{{ if $budget }} ({{ $budget }}){{ end }} and keeps liveness and readiness off
+  until it is through; if a migration needs longer, the kubelet kills the
+  container and the next attempt begins the migration again. A migration that
+  fails looks like CrashLoopBackOff and only the log says why:
+
+    kubectl -n {{ .Release.Namespace }} logs statefulset/{{ .Release.Name }}-{{ .Chart.Name }}-sfs
+
+  helm rollback returns the chart to the previous app version; the database
+  does not come back with it, because the schema was migrated in place. Take a
+  database backup before an app-version upgrade, not after.
+
+WHAT A READY POD PROVES — AND WHAT AN OUTAGE LOOKS LIKE
+  Readiness and startup use /api/healthcheck, which also checks the database,
+  so Ready here does mean "server up, database answering". Liveness
+  deliberately uses "/" instead, so a database outage cannot restart the pod.
+  Know the resulting picture in advance: during such an outage the container
+  keeps running and stays quiet, the pod goes NotReady, its endpoint is
+  dropped{{ if .Values.ingress.enabled }} and the Ingress answers 503{{ end }} — and nothing in the pod's log or
+  restart count points at the database. Look there first.
+
+TWO DIFFERENT CEILINGS APPLY TO AN UPLOAD
+  The app-side limit is pinned by the chart at UPLOADER_ADMIN_LIMIT=500mb and
+  is not exposed as a value.
+  {{- if .Values.ingress.enabled }}
+  In front of it the Ingress caps the request body at config.maxUploadFileSize
+  ({{ .Values.config.maxUploadFileSize }}), so that is the ceiling that actually bites: anything larger is
+  rejected by ingress-nginx with 413 before Zipline sees a byte of it. Raise
+  config.maxUploadFileSize to move it.
+  {{- else }}
+  config.maxUploadFileSize ({{ .Values.config.maxUploadFileSize }}) is rendered nowhere in this release: it exists
+  only as an ingress-nginx annotation, and the Ingress is switched off.
+  Whatever proxy you put in front needs its own body-size limit.
+  {{- end }}
+
+CHUNKS GO THROUGH /tmp, AND /tmp IS ACCOUNTED FOR
+  The root filesystem is read-only, so /tmp is an emptyDir — and an emptyDir
+  counts against the container's ephemeral-storage limit ({{ $eph }}).
+  An upload that pushes it over does not fail as a request: the kubelet evicts
+  the whole pod, and the reason is on the pod, not in Zipline's log. Where
+  uploads approach the 500mb the app allows, raise
+  zipline.resources.requests.ephemeralStorage — the limit follows it through
+  zipline.resources.limitFactor.
+
+THE UPLOADS VOLUME BELONGS TO THIS RELEASE
+  uploads, public and themes share one PersistentVolumeClaim,
+  {{ .Release.Name }}-{{ .Chart.Name }}-vc ({{ .Values.config.storage }} from storageClass {{ .Values.config.storageClass }}), each on its own
+  subPath. It is an ordinary PVC in this release, not a StatefulSet
+  volumeClaimTemplate: "helm uninstall {{ .Release.Name }}" deletes it, and with a Delete
+  reclaim policy every uploaded file goes with it. Back the volume up before
+  uninstalling; a resource-policy annotation added to the live PVC afterwards
+  does not help, because Helm reads that annotation from the release manifest.
+
+  Growing config.storage only takes effect if the StorageClass allows volume
+  expansion. Shrinking it is refused by Kubernetes and makes the next
+  helm upgrade fail on the PVC instead of touching the data.
+{{- if gt (atoi $replicas) 1 }}
+
+MORE THAN ONE REPLICA WILL NOT COME UP
+  zipline.replicas is {{ $replicas }}, but every replica mounts the same
+  ReadWriteOnce claim {{ .Release.Name }}-{{ .Chart.Name }}-vc — there is no volumeClaimTemplate and no
+  per-pod volume. Unless the storage class hands that claim to several nodes,
+  the additional pods stay stuck before start. This chart is built for one
+  replica.
+{{- end }}
+{{- if .Values.zipline.env }}
+
+zipline.env IS APPENDED, NOT MERGED
+  The entries land after the variables the chart sets itself — DATABASE_URL,
+  CORE_DEFAULT_DOMAIN, CORE_SECRET and UPLOADER_ADMIN_LIMIT — and are rendered
+  through tpl, so a value may contain template expressions. Anything sensitive
+  belongs in valueFrom.secretKeyRef: a plain "value" is stored in the pod spec
+  and readable by everyone who can read pods in {{ .Release.Namespace }}.
+{{- end }}

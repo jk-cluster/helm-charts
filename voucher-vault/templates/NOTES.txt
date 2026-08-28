@@ -1,0 +1,174 @@
+{{- $replicas := include "voucher-vault.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.voucherVault.replicas) -}}
+{{- $startup := fromYaml (include "voucher-vault.startupProbe" .Values.voucherVault.startupProbe) -}}
+{{- $pod := printf "%s-%s-sfs-0" .Release.Name .Chart.Name -}}
+{{- $env := dict -}}
+{{- $names := list -}}
+{{- range $entry := .Values.voucherVault.env }}
+{{- $names = append $names $entry.name }}
+{{- if not (kindIs "invalid" $entry.value) }}{{- $_ := set $env $entry.name $entry.value }}{{- end }}
+{{- end }}
+{{- $missing := list -}}
+{{- range $required := list "DOMAIN" "SECRET_KEY" "REDIS_URL" "DB_ENGINE" "POSTGRES_HOST" "POSTGRES_DB" }}
+{{- if not (has $required $names) }}{{- $missing = append $missing $required }}{{- end }}
+{{- end }}
+VoucherVault {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+{{- if .Values.ingress.enabled }}
+
+ACCESS
+  https://{{ .Values.ingress.domain }}
+
+  The certificate is requested by cert-manager through the "{{ .Values.ingress.clusterIssuer }}"
+  cluster issuer. Until it has been issued the browser shows a warning; follow it with
+
+    kubectl -n {{ .Release.Namespace }} get certificate tls-{{ .Release.Name }}-{{ .Chart.Name }}-ingress
+
+  ingress.domain is more than the Ingress host: it is the only entry Django adds
+  to ALLOWED_HOSTS besides 127.0.0.1, and it builds CSRF_TRUSTED_ORIGINS. Under
+  any other name the app answers 400 before a single view runs.
+{{- else }}
+
+ACCESS — NO INGRESS
+  ingress.enabled is false, so this release has no Ingress and no certificate;
+  ingress.clusterIssuer is not needed. ingress.domain still is — it is Django's
+  ALLOWED_HOSTS entry ("{{ .Values.ingress.domain }}"), not just an Ingress host.
+
+  Forward the service, and keep 8000 as the LOCAL port:
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-{{ .Chart.Name }}-service 8000:80
+
+  Then open http://127.0.0.1:8000/ — not http://localhost:8000/. Only 127.0.0.1
+  and the domain above are in ALLOWED_HOSTS, so "localhost" answers 400; and
+  CSRF_TRUSTED_ORIGINS holds exactly http://127.0.0.1:8000, so any other local
+  port fails every POST including the login form.
+{{- end }}
+
+{{- if eq (lower (printf "%v" (index $env "SECURE_COOKIES" | default ""))) "true" }}
+
+  SECURE_COOKIES is True in voucherVault.env, so the session and CSRF cookies
+  carry the Secure flag. Browsers accept those from 127.0.0.1, but from no other
+  plain-http host: a login that silently bounces back to the form when the app
+  is reached over http is this, not a wrong password.
+{{- end }}
+
+  Sessions expire after {{ index $env "SESSION_COOKIE_AGE" | default 30 }} minutes and at browser close: the app
+  multiplies SESSION_COOKIE_AGE by 60, so that value is minutes, not seconds.
+{{ if eq $replicas "0" }}
+SCALED TO ZERO
+  {{ if .Values.scaleDown }}scaleDown: true{{ else }}voucherVault.replicas: 0{{ end }} — the StatefulSet runs with replicas: 0, so the endpoint
+  above does not answer until you set it back and upgrade again. PVC, Secrets
+  and Service{{ if .Values.ingress.enabled }} and Ingress stay in place, so the certificate is not
+  re-issued.{{ else }} stay in place.{{ end }}
+{{ end }}
+SECRETS — THE FIELDS EACH 1PASSWORD ITEM MUST CARRY
+  All three OnePasswordItem CRs are created unconditionally and carry an item
+  path only. The field names below are decided here and appear nowhere in
+  1Password, so they are what you would otherwise read out of the templates. A
+  field missing from the item does not fail this install: the operator writes a
+  Secret without that key, and the pod stays in CreateContainerConfigError.
+
+  {{ .Values.secrets.voucherVaultSecretRef }}
+    → Secret {{ .Release.Name }}-{{ .Chart.Name }}-secret
+      secretKey   Django's SECRET_KEY. Changing it logs everyone out.
+      redis-url   Celery broker, e.g. redis://:PASSWORD@redis:6379/0
+
+  {{ .Values.secrets.databaseSecretRef }}
+    → Secret {{ .Release.Name }}-{{ .Chart.Name }}-db-secret
+      host   port   user   password   database
+
+  {{ .Values.secrets.oidcSecretRef }}
+    → Secret {{ .Release.Name }}-{{ .Chart.Name }}-oidc-secret
+      client-id   client-secret
+      authorization-endpoint   token-endpoint   user-endpoint
+      oidc-jwks-endpoint
+
+  The OIDC item is required even if you turn OIDC_ENABLED off in voucherVault.env,
+  because the CR is not gated. Sign algorithm is RS256, which is why the JWKS
+  endpoint is a field and not an optional extra. The redirect URI to register at
+  the provider is
+
+    https://{{ if .Values.ingress.enabled }}{{ .Values.ingress.domain }}{{ else }}example.com{{ end }}/oidc/callback/
+
+  and it carries no language prefix, unlike every other path of the app.
+{{- if $missing }}
+
+voucherVault.env HAS REPLACED THE CHART'S LIST — {{ len $missing }} REQUIRED ENTRIES ARE GONE
+  For this chart voucherVault.env is the container's COMPLETE environment, not
+  an additive block: a values file that sets it overwrites the whole list,
+  including the entries that wire up the secrets. Missing right now:
+  {{ join ", " $missing }}.
+  Copy the full list out of the chart's values.yaml and edit that copy.
+{{- end }}
+
+THE FIRST START PRINTS THE ONLY ADMIN PASSWORD IT WILL EVER PRINT
+  Against an empty database the entrypoint creates the superuser "admin" with a
+  randomly generated password and writes it to stdout — once, never again, and
+  into no Secret:
+
+    kubectl -n {{ .Release.Namespace }} logs {{ $pod }} | grep -A3 "Creating superuser"
+
+  If that line has already scrolled out of the log, reset it in place:
+
+    kubectl -n {{ .Release.Namespace }} exec -it {{ $pod }} -- python manage.py changepassword admin
+
+  With OIDC enabled the app drops its password-change pages and the login form
+  redirects to the provider on its own (OIDC_AUTOLOGIN). Django's own admin
+  login at /admin/ is not covered by that redirect — that is the way back in
+  when the provider is down or its item is wrong.
+
+A POD THAT NEVER STARTS IS USUALLY WAITING FOR POSTGRES
+  Before it opens the HTTP port, the entrypoint loops on
+  "nc -z $POSTGRES_HOST $POSTGRES_PORT" with no timeout. A wrong host or port in
+  the database item therefore produces no error at all — the log simply stops at
+
+    [TASK] Waiting for PostgreSQL db...
+
+  until the startup probe kills the container. That budget is
+  {{ $startup.periodSeconds }}s x {{ $startup.failureThreshold }} failures = {{ mul $startup.periodSeconds $startup.failureThreshold }}s, and it surfaces as CrashLoopBackOff.
+
+  The other candidate is one line earlier: the entrypoint exits 1 with "[FAIL]
+  Insufficient permissions on bind mount volume" when /opt/app/database is not
+  writable for uid/gid 33. fsGroup 33 covers that on
+  {{ if .Values.storage.storageClass }}storage class "{{ .Values.storage.storageClass }}"{{ else }}the cluster's default storage class{{ end }}, as long as it honours fsGroup.
+
+WHAT A READY POD DOES NOT PROVE
+  The probes send "Host: 127.0.0.1" on purpose: that host is always in
+  ALLOWED_HOSTS, so probing survives every domain change. The price is that a
+  wrong ingress.domain is invisible to Kubernetes — all three probes pass, the
+  rollout goes green, and every real request gets 400. Check it against the
+  domain instead:
+{{ if .Values.ingress.enabled }}
+    curl -sI https://{{ .Values.ingress.domain }}/ | head -1
+{{- else }}
+    curl -sI http://127.0.0.1:8000/ | head -1     # through the port-forward above
+{{- end }}
+
+  A 302 to a language-prefixed path is the healthy answer; 400 means the Host
+  does not match. Celery is the second blind spot: worker and beat are started
+  detached from the same entrypoint, so uwsgi answers whether or not they came
+  up. A wrong redis-url costs the expiry notifications and shows nothing else.
+
+THIS RELEASE IS SINGLE-INSTANCE BY CONSTRUCTION
+  Uploaded files land in /opt/app/database, on the one ReadWriteOnce PVC
+  {{ .Release.Name }}-{{ .Chart.Name }}-pvc ({{ .Values.storage.amount }}),
+  which every pod of the StatefulSet mounts at the same path — and each pod runs
+  its own Celery beat. Raising voucherVault.replicas above 1 therefore buys
+  nothing: further pods stay Pending on a node that does not hold the volume,
+  and where they do start they send every expiry notification a second time.
+
+UPGRADES MIGRATE, ROLLBACKS DO NOT UNMIGRATE
+  Every single start runs makemigrations and migrate before the server comes up,
+  so an app-version bump changes the schema the moment the new pod boots.
+  "helm rollback" puts the old image back but leaves the migrated schema in
+  place, and the old code then meets columns it does not know. Back up before
+  bumping the app version, and back up both halves: the rows live in Postgres,
+  the uploads on the PVC.
+
+EXPIRY NOTIFICATIONS STAY SILENT UNTIL A USER ADDS AN APPRISE URL
+  EXPIRY_THRESHOLD_DAYS ({{ index $env "EXPIRY_THRESHOLD_DAYS" | default 30 }}) and EXPIRY_LAST_NOTIFICATION_DAYS ({{ index $env "EXPIRY_LAST_NOTIFICATION_DAYS" | default 7 }})
+  decide when an item counts as expiring, not whether anyone hears about it:
+  delivery runs over the Apprise URLs each user stores in their own profile, and
+  a profile without one is skipped without a word. The "Periodic Expiry Check"
+  schedule runs daily at 09:00 in the container's time zone
+  (TZ={{ index $env "TZ" | default "Europe/Berlin" }}) and is created ONLY while an empty database is initialized —
+  delete it in the admin and no later start brings it back.

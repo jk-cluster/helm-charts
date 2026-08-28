@@ -67,7 +67,7 @@ Handles plain numbers ("2", "0.5", 1073741824), decimal ("1.5Gi"), binary
 results are printed without a decimal point.
 */}}
 {{- define "urlaubsverwaltung.multiplyQuantity" -}}
-{{- $quantity := printf "%v" .quantity -}}
+{{- $quantity := include "urlaubsverwaltung.formatNumber" .quantity -}}
 {{- $number := regexFind "^[0-9]+(\\.[0-9]+)?" $quantity -}}
 {{- if not $number -}}
 {{- fail (printf "cannot parse resource quantity %q" $quantity) -}}
@@ -80,7 +80,24 @@ results are printed without a decimal point.
 {{- if eq $product (floor $product) -}}
 {{- printf "%d%s" (int64 $product) $suffix -}}
 {{- else -}}
-{{- printf "%v%s" $product $suffix -}}
+{{- printf "%s%s" (include "urlaubsverwaltung.formatNumber" $product) $suffix -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Render a number as a plain decimal string, never in exponential notation.
+
+Why this exists (issue #157): the null-safe fallback helpers pass values
+through fromYaml, which parses every number as float64. Go's "%v" switches
+float64 to exponential notation from about 1e6 upwards, so a bare byte count
+like 1048576 became "1.048576e+06" - not a valid Kubernetes quantity, and the
+render aborted. Strings ("512Mi") are passed through untouched.
+*/}}
+{{- define "urlaubsverwaltung.formatNumber" -}}
+{{- if kindIs "float64" . -}}
+{{- regexReplaceAll "\\.?0+$" (printf "%.10f" .) "" -}}
+{{- else -}}
+{{- printf "%v" . -}}
 {{- end -}}
 {{- end -}}
 

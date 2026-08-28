@@ -1,0 +1,146 @@
+{{/*
+NOTES.txt — the reference implementation for issue #43.
+
+Copy this file with the rest of template-chart and replace every xxx: the
+values paths (.Values.xxx.*), the helper prefix ("xxx.replicas") and the app
+name in the headline, exactly as in the other template files. This comment
+block renders nothing and is meant to be deleted along the way.
+
+THE STANDARD THIS FILE IS MEASURED AGAINST. A NOTES.txt that repeats the
+values is worthless - it is skimmed once after the first install and never
+read again. Print what an operator would otherwise have to look up in the
+templates: the rendered access URL, WHICH FIELDS the 1Password item has to
+carry, the options that are actually active in THIS release, and the traps of
+this chart. Keep it conditional on the values that are really set, so the
+output describes the installation at hand instead of every possible one.
+
+NEVER PUT A REAL DOMAIN IN HERE. The URL is rendered from
+.Values.ingress.domain, so it comes from the operator's values and not from
+the chart; where an example is unavoidable, use example.com.
+
+Note for the copier: a NOTES.txt renders no Kubernetes object, so adding one
+is purely additive - a MINOR bump, and safe to roll out at any time.
+*/}}
+{{- $replicas := include "xxx.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.xxx.replicas) -}}
+xxx {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+{{- if .Values.ingress.enabled }}
+
+ACCESS
+  https://{{ .Values.ingress.domain }}
+
+  The certificate is requested by cert-manager through the "{{ .Values.ingress.clusterIssuer }}"
+  cluster issuer. Until it has been issued the browser shows a warning; follow it with
+
+    kubectl -n {{ .Release.Namespace }} get certificate tls-{{ .Release.Name }}-{{ .Chart.Name }}-ingress
+{{- else }}
+
+ACCESS — NO INGRESS
+  ingress.enabled is false, so this release has no Ingress and no certificate,
+  and ingress.clusterIssuer is not needed. ingress.domain STAYS REQUIRED even
+  so: the env block in values.yaml reads it for NORMAL_ENV, which is why that
+  read carries a required() of its own. Without it the workload would start
+  with an empty address and nothing would point at the mistake.
+
+  Reach the release inside the cluster with
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-{{ .Chart.Name }}-service 8080:80
+
+  and open http://localhost:8080.
+{{- end }}
+{{ if eq $replicas "0" }}
+SCALED TO ZERO
+  {{ if .Values.scaleDown }}scaleDown: true{{ else }}xxx.replicas: 0{{ end }} — the workload runs with replicas: 0, so the endpoint
+  above does not answer until you set it back and upgrade again. PVC, Secret{{ if .Values.ingress.enabled }},
+  Service and Ingress stay in place, so the certificate is not re-issued.{{ else }} and
+  Service stay in place.{{ end }}
+{{ end }}
+THE 1PASSWORD ITEM MUST CARRY THE FIELDS THE CHART READS
+  secrets.xxxSecretRef points at
+    {{ .Values.secrets.xxxSecretRef }}
+  The 1Password operator materializes that item as the Kubernetes Secret
+  {{ .Release.Name }}-{{ .Chart.Name }}-secret, with one Secret key per field of the item. So the
+  fields are not free-form: this chart reads the field
+
+    secretKey        (values.yaml, env entry ENV_FROM_SECRET)
+
+  and an item without it leaves the container stuck in
+  CreateContainerConfigError. Watch the materialization with
+
+    kubectl -n {{ .Release.Namespace }} get onepassworditem {{ .Release.Name }}-{{ .Chart.Name }}-secret
+    kubectl -n {{ .Release.Namespace }} get secret {{ .Release.Name }}-{{ .Chart.Name }}-secret
+
+  When you copy this chart, list YOUR chart's fields here. This is the one
+  piece of information that is otherwise only findable by reading the
+  templates, and it is the reason this section exists.
+
+CHANGING THE SECRET DOES NOT RESTART ANYTHING HERE
+  Neither editing the values inside the 1Password item nor repointing
+  secrets.xxxSecretRef at a different item rolls the pods: this chart stamps
+  checksum/config over the ConfigMap, but no checksum/secret-ref over the
+  rendered OnePasswordItem. Helm never sees a secret's content, so the content
+  case cannot be closed at all — but the ref case can, and a chart that needs
+  it adds the second annotation (README, "Config changes must restart the
+  workload"). Until then, after any secret change:
+
+    kubectl -n {{ .Release.Namespace }} rollout restart deployment/{{ .Release.Name }}-{{ .Chart.Name }}-deployment
+
+CONFIGURATION
+  {{ .Release.Name }}-{{ .Chart.Name }}-configmap is mounted into the workload, and the pod template
+  carries checksum/config over it — so a changed ConfigMap really does roll the
+  pods. That annotation is not decoration: a subPath mount is never refreshed
+  by the kubelet, and most apps read their config only at start, so without it
+  a config change would apply to nothing while everything stayed green.
+
+  The hash is taken over the rendered ConfigMap, not over a timestamp: an
+  unchanged config yields an identical hash and the upgrade stays a no-op.
+
+STORAGE
+  {{ .Release.Name }}-{{ .Chart.Name }}-pvc, {{ .Values.storage.amount }}, {{ if .Values.storage.storageClass }}storage class "{{ .Values.storage.storageClass }}"{{ else }}on the cluster's default storage class
+  (storage.storageClass is unset){{ end }}.
+
+  helm uninstall does NOT delete this PVC, which is deliberate — the data
+  survives a reinstall of the same release name. It also means a release
+  removed and recreated under a DIFFERENT name starts on an empty volume while
+  the old one keeps occupying space.
+
+WHAT A GREEN POD PROVES
+  All three probes are HTTP GETs against "/" on the port named http. They
+  prove that something answers on that port — not that the application is
+  functional, and not that anything behind the Ingress works, because probes
+  go straight to the pod and never pass through it.
+
+  When you copy this chart, point the probes at a real health endpoint and
+  carry the probe's CONTEXT into the fallback defaults in _helpers.tpl, not
+  just its timings: a default that loses a port name, a Host header or an exec
+  command leaves the workload with a probe that cannot succeed.
+
+THIS CHART IS A SCAFFOLD — IT IS NOT MEANT TO RUN
+  If you are reading this from an actual install of template-chart, three
+  things will keep it from becoming Ready, all of them on purpose:
+
+  - The image is the placeholder "ghcr.io/ORG/IMAGE:{{ .Chart.AppVersion }}" and does not
+    exist, so the pods stay in ImagePullBackOff. This is also why the chart
+    sits in ci/excluded-charts.txt and is never published.
+  - The chart renders BOTH a Deployment and a StatefulSet, as the two shapes
+    to choose between. Delete the one your app does not need; the Service
+    selects the Deployment's pods, so a stateful app has to move that selector
+    along with it.
+  - The env block in values.yaml demonstrates the three supported forms
+    (value, secretKeyRef, configMapKeyRef) — it is an example, not a working
+    configuration. Note in particular that ENV_FROM_CONFIGMAP names
+    "{{ .Release.Name }}-{{ .Chart.Name }}-config-map" while the ConfigMap this chart creates is
+    "{{ .Release.Name }}-{{ .Chart.Name }}-configmap": replace the whole block with your app's real
+    variables rather than repairing the example.
+{{- if .Values.ingress.enabled }}
+{{- with .Values.ingress.annotations }}
+
+EXTRA INGRESS ANNOTATIONS ARE ACTIVE
+{{- range $key, $value := . }}
+  {{ $key }}: {{ $value }}
+{{- end }}
+  These are merged with the cert-manager cluster-issuer annotation the chart
+  always sets. Annotations are interpreted by the ingress controller, so a
+  misspelled key is silently ignored — it does not fail the render.
+{{- end }}
+{{- end }}

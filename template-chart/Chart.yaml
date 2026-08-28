@@ -5,7 +5,7 @@ icon: https://helm.sh/img/helm.svg
 
 type: application
 
-version: 4.0.0+upxxx
+version: 4.1.0+upxxx
 appVersion: "xxx"
 
 maintainers:

@@ -4,7 +4,7 @@ description: A Helm chart to deploy Home Assistant on Kubernetes
 icon: https://www.home-assistant.io/images/home-assistant-logo.svg
 type: application
 
-version: 6.0.0+up2026.8.3
+version: 6.1.0+up2026.8.3
 
 appVersion: "2026.8.3"
 

@@ -1,0 +1,299 @@
+{{- $replicas := include "satisfactory.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.server.replicas) -}}
+{{- $gamePort := int .Values.server.gamePort -}}
+{{- $msgPort := int .Values.server.messagingPort -}}
+{{- $svc := printf "%s-%s-service" .Release.Name .Chart.Name -}}
+{{- $sfs := printf "%s-%s-sfs" .Release.Name .Chart.Name -}}
+{{- $pod := printf "%s-%s-sfs-0" .Release.Name .Chart.Name -}}
+{{- $pvc := printf "%s-%s-vc" .Release.Name .Chart.Name -}}
+{{- $storage := .Values.server.storage | default "unset" -}}
+{{- $res := fromYaml (include "satisfactory.effectiveResources" .Values.server.resources) -}}
+{{- $lim := $res.limits | default dict -}}
+{{- $req := $res.requests | default dict -}}
+{{- $eph := index $lim "ephemeral-storage" | default "the computed ephemeral-storage limit" -}}
+{{- $mem := index $lim "memory" | default "the computed memory limit" -}}
+{{- $factor := (.Values.server.resources | default dict).limitFactor | default 2 -}}
+{{- $startup := fromYaml (include "satisfactory.startupProbe" .Values.startupProbe) -}}
+{{- $budget := "" -}}
+{{- if and (kindIs "float64" $startup.periodSeconds) (kindIs "float64" $startup.failureThreshold) -}}
+{{- $budget = printf "%.0fs x %.0f = %.0f minutes" $startup.periodSeconds $startup.failureThreshold (divf (mulf $startup.periodSeconds $startup.failureThreshold) 60.0) -}}
+{{- end -}}
+{{- $seasonalRaw := printf "%v" .Values.game.seasonalEvents -}}
+{{- $seasonalOff := eq (lower $seasonalRaw) "true" -}}
+{{- $beta := eq (lower (printf "%v" .Values.game.experimental)) "true" -}}
+{{- $debug := eq (lower (printf "%v" .Values.dev.debug)) "true" -}}
+{{- $outOfRange := or (lt $gamePort 30000) (gt $gamePort 32767) (lt $msgPort 30000) (gt $msgPort 32767) -}}
+{{- $skipRaw := "" -}}
+{{- range $entry := .Values.env -}}
+{{- if and (eq $entry.name "SKIPUPDATE") (not (kindIs "invalid" $entry.value)) -}}
+{{- $skipRaw = printf "%v" $entry.value -}}
+{{- end -}}
+{{- end -}}
+{{- $skipUpdate := eq (lower $skipRaw) "true" -}}
+Satisfactory dedicated server {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+ACCESS — A NODEPORT, NOT A URL
+  This release has no Ingress, no certificate and no hostname. Players reach
+  the server by dialling a node of this cluster directly. In the game client:
+  Server Manager → Add Server →
+
+    <node-ip>:{{ $gamePort }}
+
+  The node addresses are not rendered here because the chart does not know
+  them:
+
+    kubectl get nodes -o wide
+    kubectl -n {{ .Release.Namespace }} get svc {{ $svc }}
+
+  The Service {{ $svc }}
+  publishes three ports, and every nodePort is PINNED to the same number as
+  the container port — so the port a player types is the port the server
+  believes it runs on:
+
+    {{ $gamePort }}/UDP   game traffic — this is what the client actually plays over
+    {{ $gamePort }}/TCP   the server's HTTPS API — also what the probes talk to
+    {{ $msgPort }}/TCP   messaging port (server.messagingPort)
+
+  Only the game port goes into the client. Both must be reachable from the
+  outside; a firewall that forwards TCP but not UDP produces a server that
+  answers every health check and accepts no player.
+
+  Because the nodePorts are fixed rather than allocated, a SECOND release of
+  this chart in the same cluster collides with this one: the API server
+  rejects its Service with "provided port is already allocated" and that
+  release fails on the Service alone while the rest of it applies. Give a
+  second server its own server.gamePort and server.messagingPort.
+{{- if $outOfRange }}
+
+  {{ $gamePort }}/{{ $msgPort }} ARE OUTSIDE THE DEFAULT NODE-PORT RANGE (30000-32767)
+  This install needs a cluster whose API server runs with an extended
+  --service-node-port-range; without it the Service is rejected and no one can
+  connect, while the StatefulSet still comes up green. The chart's defaults
+  (30777/30888) sit inside the range on purpose — they echo the game's usual
+  7777/8888 in the digits without needing a cluster-level change. Confirm the
+  Service actually exists before blaming the game:
+
+    kubectl -n {{ .Release.Namespace }} get svc {{ $svc }}
+{{- end }}
+{{ if eq $replicas "0" }}
+SCALED TO ZERO
+  {{ if .Values.scaleDown }}scaleDown: true{{ else }}server.replicas: 0{{ end }} — the StatefulSet runs with replicas: 0, so the node port
+  above refuses every connection until you set it back and upgrade again. The
+  Service and the data volume {{ $pvc }}
+  stay in place, so no save is lost and the game files do not have to be
+  downloaded again.
+{{ end }}
+THE FIRST START DOWNLOADS THE GAME, AND IT IS NOT QUICK
+  The image does not carry the game. On start it fetches the server files
+  through Steam onto the volume, which is well over 10 GB. Until that is done
+  the pod is not Ready and the node port refuses connections — the endpoint
+  only joins the Service once readiness passes.
+
+  The startup probe is what protects this window{{ if $budget }} ({{ $budget }}){{ end }} and it holds
+  liveness and readiness off while it runs. If the download needs longer than
+  that budget, the kubelet kills the container; the next attempt continues
+  against whatever already lies on the volume, so a slow link can still
+  converge over several restarts — but it presents as CrashLoopBackOff, and
+  nothing in that word says "still downloading". Look at the log, not at the
+  restart count:
+
+    kubectl -n {{ .Release.Namespace }} logs -f {{ $pod }}
+
+{{- if $skipUpdate }}
+  SKIPUPDATE IS OVERRIDDEN TO "{{ $skipRaw }}" IN YOUR env LIST
+  The chart itself pins SKIPUPDATE to "false", but your env entry repeats the
+  name and the later occurrence wins. Starts therefore skip the Steam update
+  check: restarts are fast, and the price is that a new game version is never
+  picked up while this override stands — including the one an app-version bump
+  of this chart expects. Remove it for one start after an upgrade.
+{{- else }}
+  SKIPUPDATE is pinned to "false" by the chart and is not exposed as a value
+  (only an env entry repeating the name can override it). So this is not a
+  first-boot cost: EVERY start asks Steam for an update first, including every
+  restart and every helm upgrade. Plan a rollout as minutes of downtime, not
+  seconds.
+{{- end }}
+
+WHAT A GREEN POD PROVES — AND WHAT IT DOES NOT
+  Two of the three probes run the image's own /home/steam/healthcheck.sh,
+  which queries the server's HTTPS API on the game port; that is why they keep
+  working when server.gamePort is changed. Readiness is different: it is a
+  bare TCP connect on the "api" port and proves only that something accepts a
+  connection there.
+
+  So a Ready pod does mean the API answered at least once. What no probe in
+  this release ever touches is the UDP game port — the one the players
+  actually use. A node firewall, a NetworkPolicy or anything upstream that
+  forwards TCP only leaves all three probes green, the rollout green and the
+  restart count at zero, while not one client can join. That failure has to be
+  tested from outside the cluster; kubectl will never show it.
+
+  Note also that this chart runs a game server, and the install-test pipeline
+  skips it (ci/excluded-charts.txt: the image is multiple GB and Steam pulls
+  10 GB+ on first start). No CI job has ever started this workload — treat the
+  first rollout in a new cluster as the real test.
+
+NO SECRETS — AND WHERE THE ADMIN PASSWORD ACTUALLY LIVES
+  This chart creates no OnePasswordItem, no Secret and no ConfigMap, and reads
+  none. There is nothing to prepare in 1Password for this release, and no
+  field-name mismatch that could bite you here.
+
+  The consequence is worth knowing: the server is claimed and its admin
+  password set from the game client on first connect, and that state lives in
+  the save data on the volume below — not in any Kubernetes object. Restoring
+  the volume restores the password with it; losing the volume loses it, and
+  nothing in this release can hand it back.
+
+SAVE GAMES AND GAME FILES SHARE ONE VOLUME — AND uninstall DELETES IT
+  {{ $pvc }} ({{ $storage }}, storageClassName "longhorn")
+  is mounted twice from the SAME claim, on two subPaths:
+
+    config/      → /config             saves and server settings
+    gameFiles/   → /config/gamefiles   the Steam download
+
+  So server.storage has to hold both. The game files alone are north of 10 GB,
+  so a large part of the {{ $storage }} on this claim is spoken for before the first
+  save is written — and a volume that fills up during a Steam update fails the
+  update, not the save.
+
+  The storage class is hardcoded in the template and is NOT a value. On a
+  cluster without a "longhorn" class the claim stays Pending forever and the
+  pod never starts — with no error anywhere in the game server's log:
+
+    kubectl -n {{ .Release.Namespace }} get pvc {{ $pvc }}
+
+  This is an ordinary PVC belonging to the release, not a StatefulSet
+  volumeClaimTemplate: "helm uninstall {{ .Release.Name }}" deletes it, and under a
+  Delete reclaim policy every save goes with it. Back the volume up BEFORE
+  uninstalling — a helm.sh/resource-policy annotation added to the live PVC
+  afterwards does not save you, because Helm reads that annotation from the
+  release manifest, not from the cluster.
+
+  Growing server.storage only takes effect if the storage class allows volume
+  expansion. Shrinking it is refused by Kubernetes and makes the next
+  helm upgrade fail on the PVC instead of touching the data. (The claim is
+  named -vc, not -pvc: a documented exception, because renaming it would
+  provision a new empty volume and orphan the world.)
+
+THE emptyDirs COUNT AGAINST THE EPHEMERAL-STORAGE LIMIT
+  The root filesystem is read-only, so /tmp and the steam user's ~/.steam,
+  ~/.config and ~/.local are emptyDirs — steamcmd bootstraps itself into
+  ~/.local/share/Steam. An emptyDir is ephemeral storage, and it counts
+  against this container's limit ({{ $eph }}).
+
+  An overrun does not fail as an error message: the kubelet evicts the whole
+  pod, and the reason sits on the pod, not in the server's log.
+
+    kubectl -n {{ .Release.Namespace }} describe pod {{ $pod }} | grep -A3 Evicted
+
+  Raise server.resources.requests.ephemeral-storage if you hit it; the limit
+  follows through server.resources.limitFactor.
+
+RESOURCE LIMITS ARE COMPUTED FROM limitFactor ({{ $factor }})
+  Effective for this release:
+
+    requests   memory {{ index $req "memory" | default "-" }}   cpu {{ index $req "cpu" | default "-" }}   ephemeral-storage {{ index $req "ephemeral-storage" | default "-" }}
+    limits     memory {{ $mem }}   ephemeral-storage {{ $eph }}
+
+  Memory and ephemeral-storage limits are not written anywhere — they are
+  computed as limitFactor x the request, so raising a request raises its limit
+  with it. An explicitly set limit always wins.
+{{- if eq (printf "%v" $factor) "2" }}
+  The factor is deliberately 2 here and not the repo-wide 3: that is what
+  holds the memory limit at the 8Gi this chart has always published.
+{{- else }}
+  You have moved the factor off this chart's default of 2 — which is the value
+  that held the memory limit at the 8Gi this chart has always published. At
+  {{ $factor }} the limit is {{ $mem }}. That is a legitimate choice, not a mistake, but it
+  is a deviation worth remembering when the pod is next OOMKilled or when a
+  node cannot fit it.
+{{- end }}
+
+  No CPU limit is set at all unless you write one under
+  server.resources.limits.cpu. That is on purpose: CPU is compressible, so an
+  unlimited container gets throttled rather than killed — a memory limit can
+  end a session, a missing CPU limit only slows it down.
+
+game.seasonalEvents IS PASSED THROUGH, NOT INVERTED
+  The chart hands game.seasonalEvents to the container as
+  DISABLESEASONALEVENTS unchanged. It is currently {{ $seasonalRaw }}, so the container
+  runs with DISABLESEASONALEVENTS={{ $seasonalRaw }} — seasonal events are {{ if $seasonalOff }}OFF{{ else }}ON{{ end }}.
+  {{ if $seasonalOff }}To turn them ON, set game.seasonalEvents: false.{{ else }}To turn them OFF, set game.seasonalEvents: true.{{ end }}
+  Read that twice: the value behaves as the opposite of what its name suggests
+  and of what values.schema.json claims. Believe this paragraph and the
+  rendered env var, not the key name.
+
+THE USER ID IS PINNED, AND PUID/PGID DO NOTHING
+  The pod runs as 1000:1000 because the image supports rootless operation only
+  as its own "steam" user and its entrypoint rejects any other non-root
+  uid/gid. PUID and PGID are set to 1000 in the pod spec but only ever apply
+  to the image's ROOT entrypoint path, which this chart never takes — they are
+  inert here. Changing securityContext.pod.runAsUser is how you stop the
+  container from starting, not how you change the uid.
+
+  fsGroupChangePolicy is OnRootMismatch, also deliberate: it skips the
+  recursive chown of the multi-GB game files on every single pod start. The
+  price is worth knowing in advance — Kubernetes looks only at the volume's
+  TOP-LEVEL ownership. If that already reads 1000:1000, it does not descend,
+  so a subtree with wrong ownership (a restored backup, files written by
+  another uid) is never repaired and the server fails to write there. Fix such
+  a case by hand once; do not switch the policy to Always unless you want the
+  chown back on every start.
+{{- if gt (atoi $replicas) 1 }}
+
+MORE THAN ONE REPLICA WILL NOT WORK
+  server.replicas is {{ $replicas }}. Every pod of this StatefulSet mounts the same
+  ReadWriteOnce claim {{ $pvc }} at the same paths — there
+  is no volumeClaimTemplate — so the extra pods stay stuck before start unless
+  the storage class hands that claim to several nodes, and where they do start
+  they write the same save from two processes. The pinned nodePort makes the
+  point moot anyway: one port on a node routes to whichever pod is Ready. This
+  chart is built for exactly one replica.
+{{- end }}
+{{- if $beta }}
+
+game.experimental IS ON — THE EXPERIMENTAL STEAM BRANCH
+  STEAMBETA=true, so the server is meant to run the experimental branch
+  instead of the stable one.
+{{- if $skipUpdate }}
+  But SKIPUPDATE is overridden to "{{ $skipRaw }}" above, so no start fetches anything
+  from Steam — the branch switch does NOT take effect and the volume keeps
+  whatever build it already holds. These two settings contradict each other;
+  drop the SKIPUPDATE override for at least one start, or this flag does
+  nothing at all.
+{{- else }}
+  Since SKIPUPDATE is false, that switch happens on the very next pod start,
+  not at some later opt-in.
+{{- end }}
+
+  Back up /config before flipping this. A save opened by an experimental build
+  may not open on the stable build again, and setting game.experimental back
+  to false re-downloads the stable files but does not undo what happened to
+  the save.
+{{- end }}
+{{- if $debug }}
+
+dev.debug IS ON
+  DEBUG=true, so the image logs verbosely. It changes what you read, not what
+  the server serves — but it makes the log noticeably larger, which matters
+  while the pod is downloading 10 GB and you are tailing it.
+{{- end }}
+{{- if .Values.env }}
+
+env IS APPENDED, NOT MERGED
+  Your {{ len .Values.env }} entr{{ if eq (len .Values.env) 1 }}y lands{{ else }}ies land{{ end }} AFTER the nine variables the chart always sets
+  (DEBUG, MAXPLAYERS, PGID, PUID, SKIPUPDATE, STEAMBETA,
+  DISABLESEASONALEVENTS, SERVERGAMEPORT, SERVERMESSAGINGPORT) and are rendered
+  through tpl, so a value may contain template expressions.
+
+  A name repeated from that list is then present twice in the pod spec, and
+  Kubernetes keeps the last occurrence — which is the only way to override one
+  of them, SKIPUPDATE in particular. Verify what the container really got
+  rather than assuming:
+
+    kubectl -n {{ .Release.Namespace }} get statefulset {{ $sfs }} \
+      -o jsonpath='{.spec.template.spec.containers[0].env}'
+
+  Anything sensitive belongs in valueFrom.secretKeyRef. A plain "value" is
+  stored in the pod spec and readable by everyone who can read pods in
+  {{ .Release.Namespace }}.
+{{- end }}

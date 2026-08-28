@@ -1,0 +1,164 @@
+{{- $replicas := include "outline.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.outline.replicas) -}}
+{{- $startup := fromYaml (include "outline.startupProbe" .Values.outline.startupProbe) -}}
+{{- $upload := .Values.outline.maxUploadSize | toString -}}
+Outline {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+{{- if .Values.ingress.enabled }}
+
+ACCESS
+  https://{{ .Values.ingress.domain }}
+
+  The certificate is requested by cert-manager through the "{{ .Values.ingress.clusterIssuer }}"
+  cluster issuer. Until it has been issued the browser shows a warning; follow it with
+
+    kubectl -n {{ .Release.Namespace }} get certificate tls-{{ .Release.Name }}-{{ .Chart.Name }}-ingress
+{{- else }}
+
+ACCESS — NO INGRESS
+  ingress.enabled is false, so this release has no Ingress and no certificate.
+  ingress.domain is still required: it becomes Outline's URL variable, which
+  builds every generated link, every share URL and the OIDC redirect URI.
+  Reach the instance inside the cluster with
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-{{ .Chart.Name }}-service 8080:80
+
+  and open http://localhost:8080. Links on the page will still point at
+  https://{{ .Values.ingress.domain }}/, and an OIDC login will only complete if
+  that host actually resolves for the browser.
+{{- end }}
+{{ if eq $replicas "0" }}
+SCALED TO ZERO
+  {{ if .Values.scaleDown }}scaleDown: true{{ else }}outline.replicas: 0{{ end }} — the StatefulSet runs with replicas: 0, so the endpoint
+  above does not answer until you set it back and upgrade again. PVC, Secrets,
+  Service{{ if .Values.ingress.enabled }} and Ingress stay in place, so neither the uploads nor the
+  certificate are touched.{{ else }} and the uploads on the PVC stay in place.{{ end }}
+{{ end }}
+WHAT THE THREE 1PASSWORD ITEMS MUST CONTAIN
+  The chart creates OnePasswordItem CRs; the operator turns each into a
+  Kubernetes Secret whose keys are the FIELD NAMES of the 1Password item. A
+  missing field does not fail the install — the release goes through and the
+  pod then hangs in CreateContainerConfigError naming the key it could not
+  find (kubectl -n {{ .Release.Namespace }} describe pod).
+
+  secrets.configSecretRef → {{ .Values.secrets.configSecretRef }}
+    Secret {{ .Release.Name }}-{{ .Chart.Name }}-secret, fields:
+      outline-secret-key      SECRET_KEY, 32 random bytes hex (openssl rand -hex 32)
+      outline-utils-secret    UTILS_SECRET, a second, independent value
+      discovery-url           OIDC issuer URL (the .well-known discovery endpoint)
+      client-id               OIDC client id
+      client-secret           OIDC client secret
+
+  secrets.dbSecretRef → {{ .Values.secrets.dbSecretRef }}
+    Secret {{ .Release.Name }}-{{ .Chart.Name }}-db-secret, field:
+      connection-url          postgres://user:password@host:5432/database
+
+  secrets.redisSecretRef → {{ .Values.secrets.redisSecretRef }}
+    Secret {{ .Release.Name }}-{{ .Chart.Name }}-redis-secret, field:
+      connection-url          redis://host:6379
+
+  On the identity provider's side the client needs this redirect URI:
+
+    https://{{ .Values.ingress.domain }}/auth/oidc.callback
+
+  The login button is labelled "{{ .Values.outline.oidc.displayName }}" (outline.oidc.displayName).
+  Nothing about OIDC is exercised before someone actually signs in, so a wrong
+  issuer, secret or redirect URI surfaces as a failed login on a healthy pod.
+  The first account to sign in creates the workspace and becomes its admin —
+  on a fresh install, sign in yourself before handing the URL to anyone.
+
+CHANGING A SECRET'S CONTENT RESTARTS NOTHING
+  Helm never sees the content of a OnePasswordItem, so it cannot hash it, and
+  this chart carries no checksum annotation for secrets (it has no ConfigMap
+  either). Pointing a *SecretRef at a DIFFERENT item rolls the pods; editing a
+  value INSIDE the same item does not — the operator updates the Kubernetes
+  Secret while the running container keeps the old value in its environment.
+  After such a rotation:
+
+    kubectl -n {{ .Release.Namespace }} rollout restart statefulset/{{ .Release.Name }}-{{ .Chart.Name }}-sfs
+
+  Rotating outline-secret-key invalidates existing sessions; rotating it
+  without keeping the old value also makes previously encrypted data
+  unreadable. Rotate the database or Redis URL and the pod restarts into
+  whatever that new endpoint contains, empty or not.
+
+POSTGRES AND REDIS ARE NOT PART OF THIS CHART
+  Both have to exist and be reachable before the first start. /_health checks
+  them, and all three probes use it, so a missing database does not produce a
+  useful error: the pod simply never turns Ready and the startup probe kills
+  it after about {{ mul $startup.failureThreshold $startup.periodSeconds }}s. Read the container log, not the pod events.
+
+  The chart pins PGSSLMODE=disable next to the connection URL. That fits a
+  Postgres reached over the cluster network; a database anywhere less trusted
+  needs TLS asked for explicitly, and this chart has no value for it — the
+  outline.env block below is the place to set it.
+
+THE FIRST START MIGRATES, AND THE STARTUP PROBE IS THE CLOCK
+  Outline runs its database migrations when the container starts. The startup
+  probe grants {{ $startup.failureThreshold }} × {{ $startup.periodSeconds }}s = {{ mul $startup.failureThreshold $startup.periodSeconds }}s before the kubelet restarts the
+  container — and a restart lands in the middle of a migration. Raise
+  outline.startupProbe.failureThreshold BEFORE a large app-version jump or a
+  first import, not after the crash loop has started.
+
+  Back up the database before any app-version bump. Migrations are one-way; a
+  helm rollback returns the old image to a database the new one has already
+  rewritten.
+
+ONE REPLICA, ONE VOLUME
+  Uploads are stored locally (FILE_STORAGE=local), on the ReadWriteOnce PVC
+  {{ .Release.Name }}-{{ .Chart.Name }}-pvc under /outline-data/data — there is no object storage in
+  this chart. That PVC is a plain chart object, not a StatefulSet
+  volumeClaimTemplate, so all replicas would share the single RWO volume and
+  the second pod usually never schedules.
+{{- if gt (int $replicas) 1 }}
+
+  outline.replicas is {{ $replicas }}. Expect the extra pods to stay Pending on
+  "Multi-Attach error for volume" unless the storage class is genuinely RWX.
+{{- end }}
+
+BACKUP IS TWO THINGS AT THE SAME TIME
+  The database holds the documents and one row per attachment; the PVC holds
+  the attachment bytes. Restoring one without the other gives a wiki with
+  broken images or files nobody references. Snapshot them together.
+
+  Because the PVC is rendered by the chart, helm uninstall deletes it and the
+  uploads with it, unless the storage class reclaim policy says otherwise. The
+  external database survives that — which makes an accidental uninstall look
+  recoverable while the attachments are already gone.
+{{- if .Values.ingress.enabled }}
+
+TWO UPLOAD CEILINGS, THE SMALLER ONE WINS
+  outline.maxUploadSize   {{ $upload }}{{ if regexMatch "^[0-9]+$" $upload }} bytes (~{{ div (int64 $upload) 1048576 }} MiB){{ else }} — Outline reads this as a plain byte count{{ end }}
+  ingress.maxUploadFileSize   {{ .Values.ingress.maxUploadFileSize }}
+
+  The smaller of the two decides, and the Ingress limit fails the more
+  confusingly: a file above it never reaches Outline, so the user gets the
+  ingress controller's 413 page instead of a message from the app. With the
+  chart defaults the Ingress is the tighter of the two by a factor of ten.
+  Raise both, or neither.
+{{- else }}
+
+UPLOAD CEILING
+  outline.maxUploadSize   {{ $upload }}{{ if regexMatch "^[0-9]+$" $upload }} bytes (~{{ div (int64 $upload) 1048576 }} MiB){{ else }} — Outline reads this as a plain byte count{{ end }}
+
+  Without an Ingress this is the only limit the chart sets — whatever proxy
+  you put in front adds its own, usually much smaller, body-size cap.
+{{- end }}
+
+THE CHART CONFIGURES NO MAIL
+  Outline sends invitations, document notifications and digest mails over
+  SMTP. This chart sets no SMTP_* variable at all, so those mails are quietly
+  never sent and nothing in the UI says so. The place to add them is
+  outline.env, which also supports the secretKeyRef form for the password.
+{{- if .Values.outline.env }}
+
+  outline.env currently adds {{ len .Values.outline.env }} variable(s), rendered after the ones the chart
+  sets itself.
+{{- end }}
+{{- if has (.Values.outline.forceHttps | toString) (list "true" "1") }}
+
+FORCE_HTTPS IS ON
+  outline.forceHttps is set. The chart defaults it to "false" because the
+  Ingress already terminates TLS and Outline trusts the forwarded protocol
+  header. Turned on, Outline redirects to https itself — which loops
+  endlessly if that header does not reach the pod.
+{{- end }}

@@ -1,0 +1,195 @@
+{{- $replicas := include "rallly.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.rallly.replicas) -}}
+{{- $startup := fromYaml (include "rallly.startupProbe" .Values.rallly.startupProbe) -}}
+{{- $limits := (fromYaml (include "rallly.effectiveResources" .Values.rallly.resources)).limits | default dict -}}
+{{- $ephLimit := index $limits "ephemeral-storage" -}}
+{{- $deployment := printf "%s-%s-deployment" .Release.Name .Chart.Name -}}
+{{- $service := printf "%s-%s-service" .Release.Name .Chart.Name -}}
+{{- $envNames := list -}}
+{{- range $entry := .Values.rallly.env }}{{- $envNames = append $envNames $entry.name }}{{- end }}
+Rallly {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+{{- if .Values.ingress.enabled }}
+
+ACCESS
+  https://{{ .Values.ingress.domain }}
+
+  The certificate is requested by cert-manager through the "{{ .Values.ingress.clusterIssuer }}"
+  cluster issuer. Until it has been issued the browser shows a warning; follow
+  it with
+
+    kubectl -n {{ .Release.Namespace }} get certificate tls-{{ .Release.Name }}-{{ .Chart.Name }}-ingress
+{{- else }}
+
+ACCESS — NO INGRESS
+  ingress.enabled is false, so this release has no Ingress and no certificate;
+  ingress.clusterIssuer is not needed. ingress.domain still is — see below.
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $service }} 3000:80
+
+  Then open http://127.0.0.1:3000/. That is a health check, not a working
+  instance: the app still builds every link and the OIDC redirect from
+  NEXT_PUBLIC_BASE_URL, which is "https://{{ .Values.ingress.domain }}" regardless of how
+  you reached the port. A sign-in started over the forward leaves for that host.
+{{- end }}
+
+  ingress.domain is not only the Ingress host. The chart passes it to the app as
+  NEXT_PUBLIC_BASE_URL — upstream's "fully qualified public URL of your
+  instance" — which is why it stays required with the Ingress switched off.
+
+SIGN-IN GOES THROUGH THE PROVIDER, AND ONLY THROUGH THE PROVIDER
+  This chart sets EMAIL_LOGIN_ENABLED and REGISTRATION_ENABLED to "false" in the
+  template, not through a value: there is no magic-link login and no
+  self-registration to fall back on. Every account arrives through the OIDC
+  provider, shown on the login page as "{{ .Values.rallly.oidc.name }}".
+  A wrong OIDC item therefore does not degrade the login, it removes it —
+  including your own way back in.
+
+  The redirect URI to register at the provider is
+
+    https://{{ .Values.ingress.domain }}/api/auth/callback/oidc
+
+  and the claim paths the app reads out of the token are
+  name="{{ .Values.rallly.oidc.nameClaimPath }}", email="{{ .Values.rallly.oidc.emailClaimPath }}", picture="{{ .Values.rallly.oidc.pictureClaimPath }}".
+  A provider that nests them somewhere else answers with a user who has no name
+  or no address; that is these three values, not the provider.
+{{ if eq (printf "%v" .Values.rallly.allowedEmails) "*" }}
+  ALLOWED_EMAILS is "*", so every account the provider authenticates may sign in
+  and the only gate in front of this instance is the provider's own audience.
+  With a broad IdP that is an open door. Narrow it with a comma-separated list
+  in rallly.allowedEmails; wildcards are supported (e.g. *@example.com).
+{{- else }}
+  ALLOWED_EMAILS is "{{ .Values.rallly.allowedEmails }}".
+  An address outside that list is rejected after a successful login at the
+  provider, so the symptom arrives one step away from its cause: the provider
+  reports success and Rallly still refuses. Comma-separated, wildcards
+  supported.
+{{- end }}
+
+  Admin rights are claimed by INITIAL_ADMIN_EMAIL from the secret below. It has
+  to match the address the provider returns in the email claim exactly — nothing
+  reconciles the two, and a mismatch simply leaves the instance without an admin.
+
+SECRETS — THE FIELDS EACH 1PASSWORD ITEM MUST CARRY
+  The CRs carry an item path only; the field names below are decided in this
+  chart and appear nowhere in 1Password, so they are what you would otherwise
+  read out of the templates. Every one of them is wired as a plain secretKeyRef
+  without "optional: true": a field missing from the item does not fail this
+  install — the operator writes a Secret without that key and the pod stays in
+  CreateContainerConfigError. The key has to exist; an empty value is accepted,
+  but the app then sees an empty string rather than its own default.
+
+  {{ .Values.secrets.ralllySecretRef }}
+    → Secret {{ .Release.Name }}-{{ .Chart.Name }}-secret
+      secret-key             SECRET_PASSWORD. Upstream requires at least 32
+                             characters. It encrypts the sessions, so changing
+                             it signs everyone out.
+      initial-admin-email    INITIAL_ADMIN_EMAIL, see above.
+
+  {{ .Values.secrets.databaseSecretRef }}
+    → Secret {{ .Release.Name }}-{{ .Chart.Name }}-database-secret
+      database-url           postgres://USER:PASSWORD@HOST:5432/DATABASE
+
+    The chart brings no database. Postgres has to exist and be reachable from
+    this namespace before the release is of any use.
+
+  {{ .Values.secrets.oidcSecretRef }}
+    → Secret {{ .Release.Name }}-{{ .Chart.Name }}-oidc-secret
+      discovery-url          the provider's .well-known/openid-configuration
+      client-id
+      client-secret
+
+    The discovery URL is fetched by the pod, not by your browser: an IdP that
+    only resolves outside the cluster, or one behind a policy this namespace
+    cannot pass, fails here while looking perfectly reachable from your desk.
+{{- if .Values.rallly.smtp.enabled }}
+
+  {{ .Values.secrets.smtpSecretRef }}
+    → Secret {{ .Release.Name }}-{{ .Chart.Name }}-smtp-secret
+      host   port   secure   user   password
+      no-reply-email   no-reply-email-name   tls-servername
+
+    All eight are required keys here, including the three that are optional
+    upstream (port, secure, tls-servername) and no-reply-email, which upstream
+    would default to SUPPORT_EMAIL. An item carrying only host, user and
+    password wedges the pod before it starts.
+{{- if not .Values.rallly.smtp.rejectUnauthorized }}
+
+    rallly.smtp.rejectUnauthorized is false: the mail server's TLS certificate
+    is not verified and the SMTP session is open to a man-in-the-middle. That is
+    the setting for a self-signed certificate only — prefer trusting the CA, and
+    set it back to true once the server has a certificate that chains.
+{{- end }}
+{{- else }}
+
+  MAIL IS OFF
+    rallly.smtp.enabled is false, so no SMTP item is created and the container
+    receives none of the SMTP_* variables — upstream lists SMTP_HOST among the
+    required ones. Nothing the app tries to send leaves this pod: invitations
+    and notification mails fail where they are sent, with a green rollout and a
+    healthy pod either way. Sign-in is unaffected, because email login is off.
+{{- end }}
+
+ROTATING AN ITEM IN 1PASSWORD RESTARTS NOTHING
+  Helm never sees the content of a OnePasswordItem, so no checksum annotation
+  can cover these Secrets and this chart carries none. Change a field in
+  1Password and the operator updates the Kubernetes Secret, while the running
+  pod keeps what it read at start — environment variables are read once. Roll it
+  yourself:
+
+    kubectl -n {{ .Release.Namespace }} rollout restart deployment/{{ $deployment }}
+
+  This bites hardest on database-url and the SMTP password: the app goes on
+  using the old credentials, and nothing in the cluster says so.
+
+WHAT A GREEN ROLLOUT DOES NOT PROVE
+  All three probes are the same plain HTTP GET "/" against the container. They
+  establish that the web process answers, and nothing beyond it: the OIDC
+  provider, the mail server and the addresses in ALLOWED_EMAILS are exercised by
+  the first real sign-in and the first real mail, never by a probe.
+  The startup budget before the container is restarted is
+  {{ $startup.periodSeconds }}s x {{ $startup.failureThreshold }} failures = {{ mul $startup.periodSeconds $startup.failureThreshold }}s, and every misconfiguration listed
+  above outlives it untouched.
+
+THE CACHE VOLUME COUNTS AGAINST THE EPHEMERAL-STORAGE LIMIT
+  Next.js writes prerendered pages and the optimized images of /_next/image to
+  {{ .Values.rallly.cache.path }}.
+  /app belongs to the image's own user while the container runs as uid 20000
+  under a read-only root filesystem, so the chart mounts a writable emptyDir
+  over that path.
+{{ if .Values.rallly.cache.sizeLimit }}
+  The volume is capped at {{ .Values.rallly.cache.sizeLimit }}{{ if $ephLimit }}, and its usage counts a second time against
+  the container's ephemeral-storage limit of {{ $ephLimit }}{{ end }}. Whichever bound is reached
+  first, the kubelet evicts the pod — which reads as a restart with no
+  application error anywhere in the log.
+{{- else }}
+  The volume has no size limit of its own{{ if $ephLimit }}, so it is bounded only by the
+  container's ephemeral-storage limit of {{ $ephLimit }} — emptyDir usage counts against
+  that limit, and exceeding it evicts the pod, which reads as a restart with no
+  application error anywhere in the log{{ end }}. rallly.cache.sizeLimit sets an
+  explicit bound.
+{{- end }}
+  The cache is volatile on purpose: after every restart it starts out empty and
+  is rebuilt on demand, at the cost of a slower first request.
+
+CHANGING THE DOMAIN LATER IS A CHANGE ON TWO SIDES
+  ingress.domain is the Ingress host, the app's NEXT_PUBLIC_BASE_URL and
+  therefore the OIDC redirect URI in one value. Editing it here alone breaks the
+  login: the provider refuses a callback it was never told about, and it is the
+  provider that reports it — Kubernetes reports a healthy pod{{ if .Values.ingress.enabled }} and a valid
+  certificate for the new name{{ end }}. Register the new redirect URI first, then
+  upgrade.
+{{- if $envNames }}
+
+rallly.env ADDS {{ len $envNames }} VARIABLE(S): {{ join ", " $envNames }}
+  The block is additive — it is appended after the variables the chart sets
+  itself, and it cannot remove any of them. A name the chart already sets ends
+  up in the container spec twice; do not settle that by ordering, use the
+  chart's own value for it instead ({{ .Chart.Name }}.smtp, {{ .Chart.Name }}.oidc, {{ .Chart.Name }}.allowedEmails).
+{{- end }}
+{{- if eq $replicas "0" }}
+
+SCALED TO ZERO
+  {{ if .Values.scaleDown }}scaleDown: true{{ else }}rallly.replicas: 0{{ end }} — the Deployment runs with replicas: 0, so nothing answers
+  until you set it back and upgrade again. Secrets and Service{{ if .Values.ingress.enabled }}, and the Ingress
+  with its certificate,{{ end }} stay in place.
+{{- end }}

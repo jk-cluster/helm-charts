@@ -1,0 +1,168 @@
+{{- $replicas := include "calibre-web-automated.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.cwa.replicas) -}}
+{{- $startup := fromYaml (include "calibre-web-automated.startupProbe" .Values.cwa.startupProbe) -}}
+{{- $sfs := printf "%s-%s-sfs" .Release.Name .Chart.Name -}}
+{{- $pod := printf "%s-0" $sfs -}}
+Calibre-Web Automated {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+{{- if .Values.ingress.enabled }}
+
+ACCESS
+  https://{{ .Values.ingress.domain }}
+
+  The certificate is requested by cert-manager through the "{{ .Values.ingress.clusterIssuer }}"
+  cluster issuer. Until it has been issued the browser shows a warning; follow it with
+
+    kubectl -n {{ .Release.Namespace }} get certificate tls-{{ .Release.Name }}-{{ .Chart.Name }}-ingress
+
+  Uploads are capped at {{ .Values.cwa.maxUploadFileSize }} by the Ingress, not by the application: the
+  chart renders that value into nginx.ingress.kubernetes.io/proxy-body-size and
+  nginx.org/client-max-body-size. A bigger book is rejected with 413 by the
+  controller before CWA ever sees it, so nothing about it reaches the app log.
+  Both annotations are understood by the nginx-family controllers only, and this
+  release uses ingressClassName "{{ .Values.ingress.className }}".
+{{- else }}
+
+ACCESS — NO INGRESS
+  ingress.enabled is false, so this release has no Ingress and no certificate.
+  Neither ingress.domain nor ingress.clusterIssuer is needed: this chart reads
+  ingress.domain in the Ingress template and nowhere else. The app is reachable
+  inside the cluster as {{ .Release.Name }}-{{ .Chart.Name }}-service:80. To open it locally:
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-{{ .Chart.Name }}-service 8083:80
+
+  Then browse to http://localhost:8083. cwa.maxUploadFileSize ({{ .Values.cwa.maxUploadFileSize }}) does
+  nothing in this mode — it exists only as an Ingress annotation, so an upload
+  through the port-forward is limited by the volume and by nothing else.
+{{- end }}
+{{ if eq $replicas "0" }}
+SCALED TO ZERO
+  {{ if .Values.scaleDown }}scaleDown: true{{ else }}cwa.replicas: 0{{ end }} — the StatefulSet runs with replicas: 0, so nothing
+  answers until you set it back and upgrade again. Both PVCs, the Secret and the
+  Service{{ if .Values.ingress.enabled }} and Ingress stay in place, so no data is lost and the certificate
+  is not re-issued.{{ else }} stay in place, so no data is lost.{{ end }}
+{{ end }}
+FIRST LOGIN — THE DEFAULT PASSWORD IS PUBLIC
+  Username "admin", password "admin123". Those are the upstream defaults, they
+  stand in CWA's README, and this chart does not change them — the 1Password item
+  below carries no admin credentials. Until you change it under Admin -> Users,
+  everyone who reaches the address above is one guess away from being
+  administrator.
+
+THE FIRST START BUILDS A LIBRARY, AND THE STARTUP PROBE IS TIMING IT
+  Against an empty volume CWA notices that there is no Calibre library under
+  /calibre-library and creates one itself, while the s6 init fixes ownership of
+  /config. That first boot takes minutes where every later one takes seconds.
+
+  The startup probe grants it {{ $startup.periodSeconds }}s x {{ $startup.failureThreshold }} failures = {{ mul $startup.periodSeconds $startup.failureThreshold }}s. On a slow volume
+  the container is killed and restarted before it is finished, which presents as
+  CrashLoopBackOff and is really a budget that is too small: raise
+  cwa.startupProbe.failureThreshold, and watch the boot instead of guessing.
+
+    kubectl -n {{ .Release.Namespace }} logs {{ $pod }} -f
+
+SECRETS — THE FIELDS THE 1PASSWORD ITEM MUST CARRY
+  {{ if .Values.secrets.cwaSecretRef }}{{ .Values.secrets.cwaSecretRef }}{{ else }}(secrets.cwaSecretRef is unset — see below){{ end }}
+    → Secret {{ .Release.Name }}-{{ .Chart.Name }}-secret
+      hardcover-api-token   becomes the HARDCOVER_TOKEN environment variable
+      calibre-plugins       mounted as /config/.config/calibre/customize.py.json,
+                            Calibre's plugin registry; "{}" is a valid empty value
+
+  These field names are decided by this chart and appear nowhere in 1Password, so
+  they are exactly what you would otherwise go and read in the templates. Both
+  are required even if you never use Hardcover: the OnePasswordItem is created
+  unconditionally, and so are the environment reference and the volume. A missing
+  hardcover-api-token parks the pod in CreateContainerConfigError; a missing
+  calibre-plugins fails the mount instead ("couldn't find key calibre-plugins"),
+  and the container is never created at all.
+{{- if not .Values.secrets.cwaSecretRef }}
+
+  secrets.cwaSecretRef IS UNSET. The OnePasswordItem has been created with an
+  empty itemPath, the operator has nothing to resolve, and the Secret above will
+  never appear — the pod cannot start. Set it to the item's op:// path and
+  upgrade.
+{{- end }}
+
+CHANGING THE ITEM'S CONTENT RESTARTS NOTHING
+  Helm never sees what is inside a OnePasswordItem, so it cannot hash it into the
+  pod template: after you edit the item, "helm upgrade" finds no change and the
+  running pod keeps the old values. Pointing secrets.cwaSecretRef at a DIFFERENT
+  item does not help either — the Secret's name is built from the release and
+  chart name, so the pod spec stays byte-identical. Roll it by hand:
+
+    kubectl -n {{ .Release.Namespace }} rollout restart statefulset/{{ $sfs }}
+
+  For the plugin file that is the only way: it is mounted with subPath, and a
+  subPath mount is never refreshed by the kubelet, not even when the Secret
+  itself has been updated. HARDCOVER_TOKEN is an environment variable and is
+  likewise read once, at start.
+
+THE INGEST FOLDER DELETES WHAT YOU PUT INTO IT
+  Books copied into /cwa-book-ingest are imported, converted, and then removed.
+  Upstream is blunt about it: "All files within this folder will be DELETED after
+  being processed." It is a drop box, never a second copy of the library — put
+  nothing there that does not exist somewhere else.
+
+  Downloading straight into it is unsupported for the same reason it sounds
+  convenient: a half-written file gets picked up, which upstream warns "can cause
+  duplicate imports and potentially a corrupt database". Copy finished files in.
+
+  The folder is the ReadWriteMany claim {{ .Chart.Name }}-{{ .Release.Name }}-cwa-consume-pvc,
+  and its size is fixed at 1Gi inside the chart — there is no value for it. An
+  import batch larger than that fills the volume, and raising it means changing
+  the chart, not the values file.
+
+EVERYTHING ELSE SHARES ONE CLAIM
+  {{ .Chart.Name }}-{{ .Release.Name }}-cwa-pvc ({{ .Values.cwa.storage }} on {{ if .Values.cwa.storageClass }}storage class "{{ .Values.cwa.storageClass }}"{{ else }}the cluster's default storage class{{ end }})
+  is mounted three times by subPath: config/ holds the application state,
+  calibre-library/ the books and metadata.db, calibre-plugins/ the Calibre
+  plugins. A growing library and the application's own database therefore draw on
+  one quota, and a full volume does not merely stop imports — it takes the app
+  down. That claim is also the entire backup: metadata.db without the book files
+  is an index of nothing.
+
+THIS RELEASE IS SINGLE-INSTANCE BY CONSTRUCTION
+  The StatefulSet mounts both claims by fixed name instead of using
+  volumeClaimTemplates, so every replica would mount the same volumes — and the
+  library claim is ReadWriteOnce. A second pod stays Pending unless it happens to
+  land on the node holding the volume, and where it does start, two CWA processes
+  write one SQLite metadata.db. Raising cwa.replicas above 1 buys nothing.
+
+THE HARDENING HERE IS DELIBERATELY NOT THE REPO STANDARD
+  The image boots through the s6 init as root and only then drops the application
+  to PUID/PGID 1000. Hence no runAsNonRoot/runAsUser, a writable root filesystem,
+  and a capabilities.add that is not empty. Two of those look like oversights:
+
+    readOnlyRootFilesystem: true switches the image's PUID/PGID remapping off.
+    The application then runs as the built-in uid 911 and no longer has access to
+    what uid 1000 wrote, so an existing library goes quietly unreadable.
+
+    Without KILL the root supervisor cannot signal its own uid-1000 services. The
+    pod stops shutting down cleanly and is SIGKILLed when the grace period ends.
+
+  PUID and PGID are pinned to 1000 in the template, not in the values, and the
+  pod's fsGroup default of 1000 is what matches them. Changing
+  securityContext.pod.fsGroup on its own takes write access away from the app.
+
+WHAT A READY POD DOES NOT PROVE
+  All three probes GET "/", and CWA answers that with its login page no matter
+  what else is wrong. Ready therefore says the web server is up — not that the
+  library was found, not that one import has ever succeeded, and not that the
+  Hardcover token is accepted. Those show in the log, and only there.
+
+TIME, AND THE ENVIRONMENT THE CHART ALREADY OCCUPIES
+  TZ is "{{ .Values.cwa.timezone }}", which decides the log timestamps and when CWA's scheduled
+  tasks run. Besides TZ the chart sets PUID, PGID, HARDCOVER_TOKEN,
+  CALIBRE_CONFIG_DIR and NETWORK_SHARE_MODE itself, and anything in cwa.env is
+  appended after those.
+{{- if .Values.cwa.env }}
+  There {{ if eq (len .Values.cwa.env) 1 }}is 1 such entry{{ else }}are {{ len .Values.cwa.env }} such entries{{ end }} in this release, and the chart does not check
+  whether one of them repeats a name it has already used — nor does Kubernetes
+  reject the repetition.
+{{- end }}
+
+  NETWORK_SHARE_MODE is pinned to "false", which leaves SQLite write-ahead
+  logging switched on. Upstream's instruction for the other case is explicit —
+  "If you are deploying on a network share, set the following environment
+  variable to disable WAL: NETWORK_SHARE_MODE=true" — so a library claim backed
+  by NFS or SMB, which is what cwa.storageClass decides, runs into exactly the
+  locking problems that setting exists to avoid.

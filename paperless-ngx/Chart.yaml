@@ -5,9 +5,9 @@ icon: https://raw.githubusercontent.com/paperless-ngx/paperless-ngx/dev/src-ui/s
 
 type: application
 
-version: 12.1.0+up3.0.5
+version: 12.1.1+up3.1.0
 
-appVersion: 3.0.5
+appVersion: 3.1.0
 
 maintainers:
   - name: jklein

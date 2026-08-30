@@ -43,6 +43,17 @@ jobs:
         uses: 1password/load-secrets-action/configure@v5
         with:
           connect-host: https://op-connect.jk-dev.de
+      # helm package exits 1 with "found in Chart.yaml, but missing in charts/
+      # directory" while a declared dependency has not been fetched, so this
+      # comes first. It is a no-op for every chart without a dependencies:
+      # block; ci/helm-dependencies.sh explains why it resolves from Chart.yaml
+      # instead of a committed Chart.lock. Note the consequence for the
+      # published artifact: the subchart .tgz is packaged INTO ours, so the
+      # version pinned in Chart.yaml is the version operators get, and nothing
+      # downstream ever sees the dependency again.
+      - name: "Fetch chart dependencies"
+        run: ${{ github.workspace }}/ci/helm-dependencies.sh "${{ inputs.chart-name }}"
+        working-directory: ${{ inputs.chart-location }}
       - name: "Package Helm Chart"
         run: helm package ${{ inputs.chart-name }}
         working-directory: ${{ inputs.chart-location }}

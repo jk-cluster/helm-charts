@@ -92,6 +92,10 @@ if bad:
 PY
 
 # --- 3. Render ---------------------------------------------------------------
+# helm template refuses to run at all while a declared dependency is missing
+# from charts/, so this has to happen before the render. No-op for a chart
+# without dependencies; see ci/helm-dependencies.sh.
+"$ROOT/ci/helm-dependencies.sh" "$ROOT/$CHART"
 echo "::group::helm template $CHART ($VALUES_LABEL)"
 # ${a[@]+"${a[@]}"} - an empty array under `set -u` is an error on bash 3.2
 # (the macOS default), where this script also runs locally.

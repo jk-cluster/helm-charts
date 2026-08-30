@@ -1,0 +1,243 @@
+{{- $replicas := include "ytdlp-web-player.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.ytdlpWebPlayer.replicas) -}}
+{{- $res := fromYaml (include "ytdlp-web-player.effectiveResources" .Values.ytdlpWebPlayer.resources) -}}
+{{- $eph := index ($res.limits | default dict) "ephemeral-storage" | default "the computed ephemeral-storage limit" -}}
+{{- $startup := fromYaml (include "ytdlp-web-player.startupProbe" .Values.ytdlpWebPlayer.startupProbe) -}}
+{{- $proxy := (index .Values "oauth2-proxy") | default dict -}}
+{{- $proxyIngress := $proxy.ingress | default dict -}}
+{{- $proxyHost := first ($proxyIngress.hosts | default list) -}}
+{{- $env := dict -}}
+{{- range $entry := .Values.ytdlpWebPlayer.env }}
+{{- if not (kindIs "invalid" $entry.value) }}{{- $_ := set $env $entry.name $entry.value }}{{- end }}
+{{- end }}
+ytdlp_web_player {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+{{- if $proxy.enabled }} With the oauth2-proxy subchart enabled.{{ end }}
+
+{{- if and $proxy.enabled $proxyIngress.enabled }}
+
+ACCESS — THROUGH THE PROXY
+  https://{{ $proxyHost | default "<oauth2-proxy.ingress.hosts is empty>" }}
+
+  The Ingress belongs to the proxy, the proxy forwards to
+  {{ include "ytdlp-web-player.appServiceAddress" . }}, and that Service is the only
+  way into the application. Certificate and TLS secret are the subchart's too —
+  this chart's ingress.clusterIssuer does not reach it; set the cert-manager
+  annotation under oauth2-proxy.ingress.annotations.
+{{- else if .Values.ingress.enabled }}
+
+ACCESS
+  https://{{ .Values.ingress.domain }}
+
+  The certificate is requested by cert-manager through the "{{ .Values.ingress.clusterIssuer }}"
+  cluster issuer. Until it has been issued the browser shows a warning; follow it with
+
+    kubectl -n {{ .Release.Namespace }} get certificate tls-{{ .Release.Name }}-{{ .Chart.Name }}-ingress
+{{- else }}
+
+ACCESS — NO INGRESS
+  ingress.enabled is false, so this release has no Ingress and no certificate.
+  Both ingress.domain and ingress.clusterIssuer are unnecessary here — unlike
+  in some other charts in this repo, nothing outside the Ingress template reads
+  the domain: this application builds no absolute URLs and has no base-URL
+  setting. Reach it inside the cluster:
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-{{ .Chart.Name }}-service 8080:80
+
+  Then open http://localhost:8080.
+{{- end }}
+{{ if eq $replicas "0" }}
+SCALED TO ZERO
+  {{ if .Values.scaleDown }}scaleDown: true{{ else }}ytdlpWebPlayer.replicas: 0{{ end }} — the Deployment runs with replicas: 0, so nothing answers
+  until you set it back and upgrade again. Service{{ if .Values.ingress.enabled }} and Ingress stay in place,
+  so the certificate is not re-issued.{{ else }} stays in place.{{ end }} Nothing is lost that was not
+  going to be lost anyway: the video cache is an emptyDir (see below).
+  {{- if $proxy.enabled }}
+  Note that scaleDown does NOT reach the subchart — the proxy keeps running and
+  will answer with a gateway error. Set oauth2-proxy.replicaCount: 0 as well.
+  {{- end }}
+{{ end }}
+{{- if and .Values.ingress.enabled (not $proxy.enabled) }}
+THIS RELEASE IS OPEN TO EVERYONE WHO KNOWS THE URL
+  The application has NO authentication of any kind, and this chart adds none
+  while oauth2-proxy.enabled is false. What an anonymous visitor can do here is
+  not "read a page": they can make this pod fetch and transcode arbitrary
+  videos from the internet — your egress, your CPU, your IP address in the
+  logs of whatever site is being pulled from, and your ephemeral storage.
+
+  Assume it is found. Hosts get scanned, and certificate transparency logs
+  publish every name cert-manager requests, so "nobody knows the URL" has a
+  half-life of hours.
+
+  The intended fix is in this chart:
+
+    oauth2-proxy:
+      enabled: true
+      ingress:
+        enabled: true
+        hosts: ["{{ .Values.ingress.domain }}"]
+    ingress:
+      enabled: false          # the proxy owns the host from then on
+
+  Anything else in front of it — an ingress-nginx auth annotation, a network
+  policy, a VPN-only ingress class — has to come from ingress.annotations or
+  from outside this chart.
+{{- end }}
+{{- if and $proxy.enabled .Values.ingress.enabled }}
+
+WARNING — THE APP'S OWN INGRESS IS A WAY PAST THE PROXY
+  Both oauth2-proxy.enabled and ingress.enabled are true. The chart only
+  refuses this when both claim the SAME host; here they do not, so it renders —
+  but https://{{ .Values.ingress.domain }} reaches the application directly, with no
+  authentication in front of it, whatever the proxy does on its own host.
+  Unless that is deliberate, set ingress.enabled=false.
+{{- end }}
+{{- if $proxy.enabled }}
+
+THE PROXY IS A SUBCHART, AND THAT HAS TWO CONSEQUENCES
+  1. Its version comes from THIS chart's Chart.yaml (oauth2-proxy {{ (first .Chart.Dependencies).Version | default "" }}) and is
+     baked into the packaged chart. Nothing that watches Helm release versions
+     can see it, so a new proxy release — a security fix included — arrives
+     only when a new ytdlp-web-player version is released. There is no second
+     place that would notice; do not wait for one.
+  2. Its templates are upstream's. It does not follow this repo's hardening,
+     probe and resource conventions, and we deliberately do not patch it. Give
+     it values (oauth2-proxy.resources, .securityContext, …) if you want that
+     shape.
+
+SECRETS — WHAT THE 1PASSWORD ITEM MUST CARRY
+  {{ if .Values.secrets.oauth2ProxySecretRef }}{{ .Values.secrets.oauth2ProxySecretRef }}{{ else }}(secrets.oauth2ProxySecretRef is not set){{ end }}
+    → Secret {{ .Release.Name }}-{{ .Chart.Name }}-oauth2-proxy-secret
+      client-id       the OIDC client id
+      client-secret   its secret
+      cookie-secret   16, 24 or 32 bytes, URL-SAFE base64
+
+  The operator copies the item's FIELD NAMES into the Secret's keys, so those
+  three spellings are exact. A field named differently does not fail this
+  install — the Secret is written without that key and the proxy pod sits in
+  CreateContainerConfigError, which looks like a broken chart.
+
+  Generate the cookie secret as
+
+    openssl rand -base64 32 | tr '+/' '-_'
+
+  The tr is not cosmetic: oauth2-proxy decodes the value as URL-safe base64
+  first, so a standard-base64 value containing + or / fails to decode and the
+  pod exits with "cookie_secret must be 16, 24, or 32 bytes".
+
+  Repointing secrets.oauth2ProxySecretRef at a different item does NOT restart
+  the proxy — the subchart's pod template is unchanged by it, and Helm never
+  sees a Secret's content anyway:
+
+    kubectl -n {{ .Release.Namespace }} rollout restart deployment/{{ .Release.Name }}-oauth2-proxy
+
+THE PROVIDER IS THE ONLY GATE, AND IT IS WIDER THAN IT LOOKS
+  The proxy is configured with email_domains = ["*"], so it admits every
+  identity the provider hands it. Which people that is, is decided ENTIRELY by
+  the group or policy binding on the provider application — and this app has no
+  second login behind the proxy, unlike the other instances in the cluster. A
+  forgotten or too-wide binding therefore does not mean "one more user", it
+  means every account the provider knows. Check that binding when you set this
+  up, not later.
+
+  Two settings in the default configFile are load-bearing; do not remove them
+  while trimming:
+    reverse_proxy = true             else every redirect is built on http://
+                                     behind the TLS ingress — a loop
+    session_cookie_minimal = true    else id_token and access_token go into the
+                                     session cookie, a longer group list pushes
+                                     it past 4kB, and the browser drops it: the
+                                     symptom is HTTP 502 AFTER a successful
+                                     login, with [AuthSuccess] in the log
+  Its companion belongs on the proxy's Ingress:
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
+
+  And leave alphaConfig.enabled false. With it on, the subchart generates a
+  config WITHOUT upstreams and ignores config.configFile silently — the login
+  succeeds and the app answers 404.
+
+NOT MEASURED: HLS PLAYBACK THROUGH THE PROXY
+  Rendering and wiring are verified; a long HLS stream through proxy and
+  ingress is not. Three places to look first if playback stalls where a direct
+  ingress works: proxy-buffering in ingress-nginx, its 60-second
+  proxy-read/send timeouts, and the proxy's own upstream timeout. Browser
+  extension and PWA are unverified too — an expired session answers with a
+  redirect to the provider, not a 401, and a fetch() sees only an opaque
+  redirect.
+{{- end }}
+
+A READY POD DOES NOT MEAN A VIDEO WILL PLAY
+  All three probes request "/", which renders the player page and touches
+  neither the network nor ffmpeg. That is on purpose — it is the only cheap
+  path the app has, and it keeps a slow upstream site from restarting the pod.
+  The price is that egress problems are invisible to Kubernetes: with DNS
+  broken or outbound traffic blocked, "/" still answers 200, the rollout goes
+  green, and every playback fails. Check it from the outside instead:
+
+    kubectl -n {{ .Release.Namespace }} logs deployment/{{ .Release.Name }}-{{ .Chart.Name }}-deployment
+
+  A failing fetch shows up there as a yt-dlp error line, never as a probe
+  failure. The startup budget is {{ $startup.periodSeconds }}s x {{ $startup.failureThreshold }} = {{ mul $startup.periodSeconds $startup.failureThreshold }}s, which only has to
+  cover the first process start.
+
+THE VIDEO CACHE IS AN emptyDir — AND IT IS AN EVICTION RISK, NOT A DISK
+  DATA_PATH is /data, backed by an emptyDir. Two things follow:
+
+  Nothing survives. A restart, a node drain, an eviction or a helm upgrade
+  empties it, and every cached video is fetched again on demand. That is the
+  intended shape — the app expires files by itself after MAX_VIDEO_AGE — but do
+  not treat it as storage.
+
+  An emptyDir counts against the container's ephemeral-storage limit
+  ({{ $eph }}){{ if (.Values.storage).dataSizeLimit }}, and storage.dataSizeLimit ({{ (.Values.storage).dataSizeLimit }}) caps it a second time{{ end }}. Going over it is not an
+  application error: the kubelet evicts the whole pod, the reason sits on the
+  pod rather than in any log, and everything in flight goes with it. Raising
+  the limit is the wrong first move — the knobs that decide how much lands
+  there are in ytdlpWebPlayer.env:
+
+    MAX_VIDEO_DURATION   upstream default 36000 (ten hours, one enormous file)
+    MAX_VIDEO_AGE        upstream default 3600 (seconds after last access)
+    MAX_PROCESSES        upstream default 5 (concurrent ffmpeg/yt-dlp)
+
+  Currently set here: {{ if $env }}{{ range $k, $v := $env }}{{ $k }}={{ $v }} {{ end }}{{ else }}none — all upstream defaults apply{{ end }}
+
+yt-dlp DOES NOT UPDATE ITSELF IN THIS CHART
+  On start and periodically the app runs "pip install --upgrade yt-dlp" into
+  its own site-packages. With readOnlyRootFilesystem: true that write cannot
+  happen; the app catches the failure and carries on with the version baked
+  into the image (verified — the container starts, serves and transcodes
+  normally, the update attempt just does nothing).
+
+  This is the right trade in a cluster — a pod that pulls unpinned code off the
+  network on every restart is not something to want — but know the
+  consequence: when a video site changes its extraction and playback breaks,
+  waiting does not fix it. The fix arrives as a new app image, i.e. a new
+  appVersion of this chart. There is no in-place update path.
+
+  The tools' CACHE is a separate matter and is writable on purpose: /cache is
+  an emptyDir, with HOME and XDG_CACHE_HOME pointed at it, holding deno's
+  module cache and yt-dlp's JavaScript challenge-solver library. Without it
+  the pod still works, but re-fetches that library from github.com on every
+  extraction — so if egress is restricted, github.com belongs on the allow
+  list either way, and doubly so if this volume is ever removed.
+
+ytdlpWebPlayer.env IS APPENDED, NOT MERGED
+  The entries land after DATA_PATH and PORT, which the chart sets itself. Do
+  not set those two here: Kubernetes applies the LAST entry of the list, so a
+  duplicate silently wins and points the app away from its writable volume or
+  off the port that the Service and all three probes use. Everything else the
+  upstream understands is fair game; src/example.env in the upstream repository
+  is the authoritative list.
+{{- if gt (atoi $replicas) 1 }}
+
+MORE THAN ONE REPLICA SHARES NOTHING
+  ytdlpWebPlayer.replicas is {{ $replicas }}. Each pod has its own /data emptyDir, so a
+  video fetched by one is invisible to the other, and without session affinity
+  the segment requests of a single playback are spread across both — which
+  looks like a stuttering or failing stream rather than an error. Pin clients
+  to a pod at the ingress, or stay at one replica.
+{{- end }}
+
+WHAT THIS CHART DELIBERATELY DOES NOT DO
+  No cookies.txt: videos that require a login on the source site do not work,
+  and there is no value to make them work. No PersistentVolume. No mirror of
+  the upstream's twenty environment switches as chart values — they live in
+  ytdlpWebPlayer.env, so an upstream release cannot make this chart lie.

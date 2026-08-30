@@ -99,6 +99,27 @@
     },
     {
       description: [
+        "Helm subchart dependencies (the `dependencies:` block of a Chart.yaml). Handled by",
+        "the BUILT-IN helmv3 manager - no customManager needed, and none would help: the",
+        "repository URL and the version sit next to each other in one file, which is the",
+        "case the built-in manager exists for. It is enabled by config:recommended and this",
+        "config sets no enabledManagers, so nothing has to switch it on. Verified by dry-run",
+        "for #214: with ytdlp-web-player pinned one release back, the lookup returns",
+        "oauth2-proxy 10.6.2 -> 10.7.0 as a manager=helmv3 minor update.",
+        "",
+        "This rule adds only a label. It exists because the update matters more here than",
+        "its size suggests: a subchart is invisible to everything downstream that watches",
+        "Helm release versions, so this PR is the ONLY way a new proxy version - a security",
+        "fix included - ever reaches a cluster. Under the automerge rule above, patch and",
+        "minor updates do that on their own once the pipeline is green, and",
+        "ci/renovate-bump-chart.sh bumps the chart patch that publishes it (appVersion is",
+        "unchanged, so it takes the patch branch). A major arrives as a PR to merge by hand.",
+      ],
+      matchManagers: ["helmv3"],
+      addLabels: ["subchart"],
+    },
+    {
+      description: [
         "nginx numbers its release branches by minor: even is the stable branch, odd is",
         "mainline. The Synapse delegation nginx belongs on stable, so only even minors are",
         "allowed — that is what PR #139 (1.30.4 -> 1.31.4) would otherwise have done,",
@@ -395,6 +416,32 @@
       depNameTemplate: "l4rm4nd/vouchervault",
       datasourceTemplate: "docker",
       depTypeTemplate: "app-version",
+    },
+    {
+      description: [
+        "ytdlp-web-player: the registry carries exactly two kinds of tag - four versioned",
+        "ones (v1.0.0, v1.0.1, v1.1.0, v1.2.0) and the two floating ones, 'latest' and",
+        "'stable'. Both floating tags MOVE: 'stable' was republished at the same minute as",
+        "v1.2.0 and 'latest' days later, so either of them as an appVersion would pin",
+        "nothing and change the running image without a single commit.",
+        "The anchored regex versioning below is what keeps them out - it requires the v",
+        "prefix and three numeric parts, which neither 'latest' nor 'stable' can satisfy.",
+        "docker versioning alone would probably have dropped them too, but 'probably' is",
+        "the wrong basis for the value that selects the image.",
+      ],
+      customType: "regex",
+      managerFilePatterns: ["ytdlp-web-player/Chart.yaml"],
+      matchStrings: ["(?m)^appVersion:\\s*\"?(?<currentValue>[^\"\\s]+)\"?"],
+      depNameTemplate: "docker.io/matszwe02/ytdlp_web_player",
+      datasourceTemplate: "docker",
+      depTypeTemplate: "app-version",
+      // The "v" stays outside every capture group: it is part of the tag and
+      // carries no ordering, and the same rule the searxng block documents
+      // applies - a group is a claim about how the value is compared. The
+      // anchors are what exclude latest/stable. Precedent for keeping the v in
+      // appVersion at all: calibre-web-automated (+upv4.0.6) and matrix-synapse
+      // (+upv1.159.0) - it is part of the tag, so it is part of appVersion.
+      versioningTemplate: "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$",
     },
     {
       customType: "regex",

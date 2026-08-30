@@ -26,9 +26,9 @@
 # case is not - it needs the rendered text to be searched for a quantity in
 # exponential notation. Both are checked here, per chart.
 #
-# Why over *all* charts instead of the changed ones: charts in this repo have
-# no dependencies, so the helper is copied into every chart's
-# templates/_helpers.tpl. The regression this guards against arrives by copy -
+# Why over *all* charts instead of the changed ones: the helper is copied into
+# every chart's templates/_helpers.tpl rather than shared through a library
+# chart. The regression this guards against arrives by copy -
 # a new chart started from an older chart, or from template-chart before the
 # fix. That chart is new to the repo, but its copy of the bug is not something
 # any diff of *this* PR would point at. The test is cheap enough (two renders
@@ -111,6 +111,15 @@ for CHART in "${CHARTS[@]}"; do
     echo "ERROR: '$CHART' is not a chart directory" >&2
     exit 1
   fi
+
+  # A chart with a declared dependency cannot be rendered at all while its
+  # charts/ directory is empty - helm template exits 1 before it reaches a
+  # single template. This job is the one that would notice first, because it
+  # runs over EVERY chart on EVERY pull request: without this line, a PR
+  # touching nothing but a README would go red on ytdlp-web-player. The script
+  # skips charts that declare none, which is still all but one of them.
+  "$ROOT/ci/helm-dependencies.sh" "$ROOT/$CHART"
+
   SCHEMA="$ROOT/$CHART/values.schema.json"
   if [ ! -f "$SCHEMA" ]; then
     echo "::error title=quantity-render $CHART::$CHART has no values.schema.json - every chart in this repo ships one (README, \"Values that must not lie\"), and this test reads the resources paths from it."

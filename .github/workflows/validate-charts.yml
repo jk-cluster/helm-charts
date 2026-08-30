@@ -70,6 +70,15 @@ jobs:
           fetch-depth: 0
       - name: "Install Helm"
         uses: azure/setup-helm@v5
+      # Both steps below refuse to run while a chart declares a dependency that
+      # is not in its charts/ directory - lint with "[WARNING] chart directory
+      # is missing these dependencies", package with "found in Chart.yaml, but
+      # missing in charts/ directory", both exiting 1. Charts without a
+      # dependencies: block are skipped without a word, so this costs nothing
+      # for the rest of the repo. See ci/helm-dependencies.sh for why it is
+      # "update" and not "build".
+      - name: "Fetch chart dependencies"
+        run: ci/helm-dependencies.sh "${{ matrix.chart }}"
       - name: "Lint Helm Chart"
         run: helm lint --strict "${{ matrix.chart }}"
       - name: "Package Helm Chart"

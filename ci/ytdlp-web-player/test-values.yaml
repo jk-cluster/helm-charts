@@ -1,0 +1,31 @@
+# Install-test values for ytdlp-web-player.
+#
+# The chart needs exactly these two values for a default install: the app
+# itself has no secrets, no PVC and no external dependency to fake, so there is
+# no fixtures.yaml next to this file. example.com is a placeholder - nothing in
+# this repo may carry a production domain.
+ingress:
+  domain: ytdlp-web-player.example.com
+  clusterIssuer: letsencrypt
+
+# THE PROXY STAYS OFF HERE. DO NOT "FIX" THIS BY ENABLING IT.
+#
+# Two independent reasons, either one sufficient:
+#
+#   1. It would test somebody else's chart. That the oauth2-proxy chart works
+#      is a precondition of using it, and providing it is the upstream's job.
+#      What this repo owns is the WIRING - the upstreams line that has to carry
+#      the rendered Service name of this release - and wiring is a render-time
+#      property, checked by rendering, not by installing. See the PR for #214
+#      for that check.
+#
+#   2. It could not pass even if we wanted it to. oauth2-proxy fetches the OIDC
+#      discovery document of its provider at startup and never becomes Ready
+#      without one. There is no Authentik in the CI cluster, and standing one
+#      up to watch a third-party chart start is a test of the fixture, not of
+#      the chart.
+#
+# Switching it on therefore does not produce a stricter test - it produces a
+# permanently red install-test whose cause is outside this repository.
+oauth2-proxy:
+  enabled: false

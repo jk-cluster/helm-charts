@@ -652,7 +652,7 @@ recyclarr:
   enabled: true
   image:
     repository: ghcr.io/recyclarr/recyclarr
-    tag: 8.6.0
+    tag: 8.7.1
   # No ingress: recyclarr has no web UI, it syncs TRaSH guides to radarr and
   # sonarr on a schedule (daemon mode).
   storage:

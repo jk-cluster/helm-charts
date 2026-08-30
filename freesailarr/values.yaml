@@ -594,7 +594,7 @@ radarr:
   enabled: true
   image:
     repository: docker.io/linuxserver/radarr
-    tag: 6.1.1
+    tag: 6.3.0
   # See the qbittorrent ingress comment.
   ingress:
     enabled: true

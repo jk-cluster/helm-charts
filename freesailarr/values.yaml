@@ -480,7 +480,7 @@ prowlarr:
   enabled: true
   image:
     repository: docker.io/linuxserver/prowlarr
-    tag: 2.3.5
+    tag: 2.5.2
   # See the qbittorrent ingress comment.
   ingress:
     enabled: true

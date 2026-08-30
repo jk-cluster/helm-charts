@@ -763,7 +763,7 @@ seerr:
   enabled: true
   image:
     repository: ghcr.io/seerr-team/seerr
-    tag: v3.3.0
+    tag: v3.4.1
   # See the qbittorrent ingress comment.
   ingress:
     enabled: true

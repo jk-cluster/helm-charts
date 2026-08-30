@@ -1,6 +1,29 @@
 ### Example user template template
 ### Example user template
 
+# Fetched Helm subchart archives and the lock file that records them (#214).
+#
+# Neither is committed, on purpose. The .tgz is a third-party binary that would
+# land in every diff of a dependency update and be reviewed by nobody; CI
+# fetches it with ci/helm-dependencies.sh before every lint, package, render
+# and install.
+#
+# The lock is left out for a concrete reason rather than by omission: Renovate
+# rewrites the version in Chart.yaml and cannot regenerate Chart.lock, so a
+# committed lock would be stale on arrival - and `helm dependency build`, the
+# only command that would benefit from it, fails outright when lock and
+# Chart.yaml disagree. Every dependency PR would come in red. `helm dependency
+# update` resolves from Chart.yaml instead and writes the lock itself.
+#
+# What is given up with it: the digest pinning a committed lock would provide.
+# The version range in Chart.yaml is an exact version, so what moves is only
+# what the upstream repo serves under that version.
+*/charts/*.tgz
+*/Chart.lock
+
+# Local helm package output.
+*.tgz
+
 # IntelliJ project files
 .idea
 *.iml

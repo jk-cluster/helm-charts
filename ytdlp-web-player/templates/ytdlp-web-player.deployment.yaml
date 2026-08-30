@@ -1,0 +1,135 @@
+{{- include "ytdlp-web-player.validate" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+  labels:
+    app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+spec:
+  replicas: {{ include "ytdlp-web-player.replicas" (dict "scaleDown" .Values.scaleDown "replicas" .Values.ytdlpWebPlayer.replicas) }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+  template:
+    metadata:
+      name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+      labels:
+        app: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+      # NO checksum/config ANNOTATION HERE, AND NOTHING IS MISSING (#82).
+      #
+      # The rule is "every pod template consuming a ConfigMap carries a hash of
+      # it". This workload consumes none: the application is configured purely
+      # through environment variables, which are part of the pod template
+      # already, so a changed value rolls the pods by itself. The chart renders
+      # no ConfigMap and no Secret for the app - it has no credentials of its
+      # own - so there is nothing to hash and no silent-stale-config gap to
+      # close. Written down because an absent annotation otherwise looks like
+      # an oversight on the next review round.
+      #
+      # The one Secret this chart can render, the oauth2-proxy OnePasswordItem,
+      # is consumed by the SUBCHART's pod template, which this chart cannot
+      # annotate. See values.yaml for the manual rollout restart that replaces
+      # it.
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "ytdlp-web-player.podSecurityContext" .Values.ytdlpWebPlayer.securityContext | nindent 8 }}
+      containers:
+        - name: {{ .Release.Name }}-{{ .Chart.Name }}-deployment
+          # Fully qualified on purpose: an unqualified "matszwe02/ytdlp_web_player"
+          # resolves to Docker Hub implicitly, which is how the repo accumulated
+          # its unqualified images.
+          image: "docker.io/matszwe02/ytdlp_web_player:{{ .Chart.AppVersion }}"
+          imagePullPolicy: IfNotPresent
+          env:
+            # The four variables the chart owns.
+            #
+            # DATA_PATH is absolute, which the application explicitly allows (it
+            # runs the value through os.path.abspath), so nothing has to be
+            # writable below /app and the root filesystem stays read-only.
+            #
+            # PORT follows the container port named "http", so the Service, the
+            # probes and the application cannot drift apart.
+            #
+            # HOME and XDG_CACHE_HOME point the cache of the two bundled tools
+            # at the writable volume below. They are set rather than relying on
+            # a mount at /.cache so that the path does not depend on which uid
+            # the pod ends up running as - see values.yaml under storage.
+            - name: DATA_PATH
+              value: "/data"
+            - name: PORT
+              value: {{ include "ytdlp-web-player.port" . | quote }}
+            - name: HOME
+              value: "/cache"
+            - name: XDG_CACHE_HOME
+              value: "/cache"
+            {{- range $value := .Values.ytdlpWebPlayer.env }}
+            {{- if $value.value }}
+            - name: {{ $value.name | quote }}
+              # quote is required, not cosmetic: a value like "5000" or "true"
+              # renders unquoted as a YAML number/bool, and the API server then
+              # rejects the whole manifest with "cannot unmarshal number into
+              # Go struct field EnvVar.value of type string".
+              value: {{ tpl $value.value $ | quote }}
+            {{- else if $value.valueFrom }}
+            {{- if $value.valueFrom.secretKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ tpl $value.valueFrom.secretKeyRef.name $ | quote }}
+                  key: {{ tpl $value.valueFrom.secretKeyRef.key $ | quote }}
+            {{- else if $value.valueFrom.configMapKeyRef }}
+            - name: {{ $value.name }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ tpl $value.valueFrom.configMapKeyRef.name $ | quote }}
+                  key: {{ tpl $value.valueFrom.configMapKeyRef.key $ | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+          ports:
+            {{- toYaml .Values.ytdlpWebPlayer.ports | nindent 12 }}
+          volumeMounts:
+            # Exactly two, and each was measured on its own rather than added
+            # as a precaution - see values.yaml under storage. Note in
+            # particular that /tmp is NOT here: the usual reflex for a
+            # read-only root filesystem, and this image does not need it.
+            - name: data
+              mountPath: /data
+            - name: cache
+              mountPath: /cache
+          # Probes, resources and both security contexts go through the
+          # null-safe helpers (#99): an erased block means "chart defaults
+          # apply" instead of a vanished probe or an unhardened container.
+          # Never wrap these in an "if" - a guard hides the erased case
+          # completely instead of rendering a visible null.
+          livenessProbe:
+            {{- include "ytdlp-web-player.livenessProbe" .Values.ytdlpWebPlayer.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- include "ytdlp-web-player.readinessProbe" .Values.ytdlpWebPlayer.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- include "ytdlp-web-player.startupProbe" .Values.ytdlpWebPlayer.startupProbe | nindent 12 }}
+          resources:
+            {{- include "ytdlp-web-player.effectiveResources" .Values.ytdlpWebPlayer.resources | nindent 12 }}
+          securityContext:
+            {{- include "ytdlp-web-player.containerSecurityContext" .Values.ytdlpWebPlayer.securityContext | nindent 12 }}
+      volumes:
+        # The "emptyDir: {}" branches are written out rather than folded into
+        # one block with an optional key: an emptyDir whose body renders empty
+        # is YAML null, and a volume without a source is rejected by the API
+        # server with "must specify a volume type" - after a green render.
+        - name: data
+          {{- if (.Values.storage).dataSizeLimit }}
+          emptyDir:
+            sizeLimit: {{ (.Values.storage).dataSizeLimit }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: cache
+          {{- if (.Values.storage).cacheSizeLimit }}
+          emptyDir:
+            sizeLimit: {{ (.Values.storage).cacheSizeLimit }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      restartPolicy: Always

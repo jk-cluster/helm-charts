@@ -1,0 +1,15 @@
+name: Publish YTDLP Web Player Helm Chart
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ytdlp-web-player/**
+jobs:
+  publish-ytdlp-web-player:
+    name: Publish YTDLP Web Player Helm Chart
+    uses: ./.github/workflows/publish-helm-chart.yml
+    with:
+      chart-name: 'ytdlp-web-player'
+    secrets: inherit

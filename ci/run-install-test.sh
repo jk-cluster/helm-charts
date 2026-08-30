@@ -151,6 +151,10 @@ done
 echo "::endgroup::"
 
 # --- 3. Install the chart ---------------------------------------------------
+# Same reason as in the lint and package steps: helm install refuses to touch a
+# chart whose declared dependencies are not in charts/. No-op for a chart
+# without dependencies; see ci/helm-dependencies.sh.
+"$ROOT/ci/helm-dependencies.sh" "$ROOT/$CHART"
 echo "::group::helm install"
 helm install "$RELEASE" "$ROOT/$CHART" \
   --namespace "$NAMESPACE" \

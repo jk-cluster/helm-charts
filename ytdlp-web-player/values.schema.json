@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "ytdlp-web-player values",
+  "description": "additionalProperties is false on every level this chart owns, so a key the chart does not read is rejected at render time instead of being silently ignored (#68). Two kinds of object stay open: the ones passed verbatim into the pod spec (probes, security contexts, ports, free-form annotations), because Kubernetes owns their schema - and the whole oauth2-proxy block, because that schema belongs to the subchart. Closing the latter would mean re-declaring somebody else's values and rejecting every key they add next release.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "global": {
+      "description": "Helm's conventional cross-chart values. Unused by this chart, kept open so an umbrella install cannot break on it - and note that with a subchart present this is no longer hypothetical: whatever is set here reaches oauth2-proxy too.",
+      "type": "object"
+    },
+    "scaleDown": {
+      "type": "boolean"
+    },
+    "secrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "oauth2ProxySecretRef": {
+          "description": "op:// item path for the proxy credentials; the item must carry the fields client-id, client-secret and cookie-secret. Read only while the proxy is enabled and still points at the Secret this chart renders.",
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "ytdlpWebPlayer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "livenessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "readinessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "startupProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "securityContext": {
+          "$ref": "#/definitions/securityContext"
+        },
+        "ports": {
+          "description": "Rendered verbatim as the container's ports list; kept open because the chart does not interpret the entries. It does read one thing out of them: the entry named \"http\" carries the port that becomes PORT, the Service target and every probe target. A list without it fails the render with that message.",
+          "type": ["array", "null"]
+        },
+        "env": {
+          "$ref": "#/definitions/env"
+        }
+      }
+    },
+    "storage": {
+      "description": "The two emptyDirs. Deliberately not null-safe: an erased block means both size caps are unset, which is also the default, so nothing silent can happen here.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "dataSizeLimit": {
+          "type": ["string", "null"]
+        },
+        "cacheSizeLimit": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "Gates this chart's whole Ingress template (#93). Here it frees BOTH domain and clusterIssuer: nothing outside the Ingress template reads either of them - the application needs no hostname of its own, so the searxng/matrix-synapse case of a domain read from an env block does not arise (guideline 1, checked in templates/ and in values.yaml).",
+          "type": "boolean"
+        },
+        "clusterIssuer": {
+          "type": ["string", "null"]
+        },
+        "domain": {
+          "type": ["string", "null"]
+        },
+        "className": {
+          "type": ["string", "null"]
+        },
+        "annotations": {
+          "description": "Extra Ingress annotations, merged with the cert-manager annotation the chart always sets. Free-form keys by nature, so this object stays open.",
+          "type": "object"
+        }
+      }
+    },
+    "oauth2-proxy": {
+      "description": "Values of the oauth2-proxy subchart, passed straight through. Open on purpose and at every level: this chart owns neither the keys nor their meaning, and a closed copy would reject whatever the subchart adds in its next release - the exact failure mode a schema is supposed to prevent, only pointed at the wrong chart. This chart reads exactly three of them: enabled (the dependency condition), ingress.enabled and ingress.hosts (the two-Ingress guard).",
+      "type": "object"
+    }
+  },
+  "definitions": {
+    "resources": {
+      "description": "May be null / empty: the chart then falls back to its default requests and computed limits (#99) instead of rendering a container without resource accounting.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "limitFactor": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "requests": {
+          "$ref": "#/definitions/resourceList"
+        },
+        "limits": {
+          "$ref": "#/definitions/resourceList"
+        }
+      }
+    },
+    "resourceList": {
+      "description": "Both spellings of the ephemeral-storage key are accepted because the resources helper normalizes camelCase to the Kubernetes key.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "cpu": {
+          "type": ["string", "number", "null"]
+        },
+        "memory": {
+          "type": ["string", "number", "null"]
+        },
+        "ephemeral-storage": {
+          "type": ["string", "number", "null"]
+        },
+        "ephemeralStorage": {
+          "type": ["string", "number", "null"]
+        }
+      }
+    },
+    "env": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "valueFrom": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "secretKeyRef": {
+                "$ref": "#/definitions/keyRef"
+              },
+              "configMapKeyRef": {
+                "$ref": "#/definitions/keyRef"
+              }
+            }
+          }
+        }
+      }
+    },
+    "keyRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "key"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        }
+      }
+    },
+    "securityContext": {
+      "description": "May be null / empty at any level: the chart then falls back to its hardening defaults (#99) instead of rendering an unhardened workload. The fallback reproduces THIS chart's defaults, including its pinned non-root uid for a root-by-default image (guideline 4).",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "pod": {
+          "description": "Merged onto the chart's pod hardening defaults and rendered as the pod's securityContext; kept open because the chart does not interpret the individual fields.",
+          "type": ["object", "null"]
+        },
+        "container": {
+          "description": "Merged onto the chart's container hardening defaults and rendered as the container's securityContext; kept open because the chart does not interpret the individual fields.",
+          "type": ["object", "null"]
+        }
+      }
+    },
+    "probe": {
+      "description": "Merged onto the chart's probe defaults and rendered as a container probe; kept open because the chart does not interpret the individual fields. May be null / empty, which means the defaults apply (#99) rather than the probe disappearing. The defaults carry the probe's context - the port NAME \"http\", so a changed container port moves the probes with it.",
+      "type": ["object", "null"]
+    }
+  }
+}

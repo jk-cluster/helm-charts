@@ -1,0 +1,29 @@
+{{- if .Values.ingress.enabled }}
+{{- include "ytdlp-web-player.validate" . }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-ingress
+  annotations:
+    cert-manager.io/cluster-issuer: {{ required "A Cluster-Issuer must be provided" .Values.ingress.clusterIssuer }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ required "A Domain/Host must be provided" .Values.ingress.domain }}
+      http:
+        paths:
+          - backend:
+              service:
+                name: {{ .Release.Name }}-{{ .Chart.Name }}-service
+                port:
+                  name: http
+            path: /
+            pathType: Prefix
+  tls:
+    - hosts:
+        - {{ required "A Domain/Host must be provided" .Values.ingress.domain }}
+      secretName: tls-{{ .Release.Name }}-{{ .Chart.Name }}-ingress
+{{- end }}

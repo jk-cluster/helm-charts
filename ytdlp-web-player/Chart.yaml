@@ -1,0 +1,53 @@
+apiVersion: v2
+name: ytdlp-web-player
+description: A Helm chart to deploy ytdlp_web_player on Kubernetes, with an optional oauth2-proxy in front of it
+icon: https://raw.githubusercontent.com/matszwe02/ytdlp_web_player/main/src/static/favicon.svg
+
+type: application
+
+version: 1.0.0+upv1.2.0
+appVersion: "v1.2.0"
+
+maintainers:
+  - name: jklein
+
+# The first chart in this repo with a dependency. The rule it breaks used to
+# read "charts have no dependencies (charts/ directories are empty)" and was
+# removed from CLAUDE.md and README.md in the same PR that added this chart -
+# see README "Chart style guidelines" for when a dependency is admissible and
+# what it costs.
+#
+# Why one here: the app ships no authentication of any kind, so anyone who
+# reaches its URL can drive it. The proxy is the answer, and it belongs into
+# this chart rather than next to it, because the two are only useful wired to
+# each other: the proxy's upstream is this release's Service, and the wiring is
+# the part that goes wrong silently.
+dependencies:
+  - name: oauth2-proxy
+    # KEEP THIS VERSION MOVING - it is the only path a proxy update has.
+    #
+    # In the cluster the proxy used to be a Helm release of its own, and the
+    # update automation read its chart version straight out of fleet.yaml. As a
+    # subchart it is invisible there: Fleet only ever sees the version of
+    # ytdlp-web-player, and what this Chart.yaml declares is baked into the
+    # packaged .tgz. So a new oauth2-proxy release - a security fix included -
+    # reaches an operator ONLY when this line is raised and a new
+    # ytdlp-web-player version is published. Nothing reports the gap; the proxy
+    # simply stays where it is.
+    #
+    # Renovate's built-in helmv3 manager reads this block and opens the PR
+    # (verified by dry-run, see the PR for #214); ci/renovate-bump-chart.sh then
+    # bumps this chart's patch version, which is what actually ships it. That
+    # chain is the whole safety net - if it is ever switched off, this line
+    # needs a human on a calendar instead.
+    #
+    # The subchart version is independent of appVersion: raising it is a minor
+    # or patch bump of this chart, never tied to the app image.
+    version: "10.7.0"
+    repository: "https://oauth2-proxy.github.io/manifests"
+    # Off by default, so a plain install renders nothing of it at all. Helm
+    # splits a condition on dots only, so the dash in the chart name needs no
+    # escaping here - but every read of the same key inside a template does
+    # need index .Values "oauth2-proxy", because .Values.oauth2-proxy parses as
+    # a subtraction.
+    condition: oauth2-proxy.enabled

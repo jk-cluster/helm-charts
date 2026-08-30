@@ -1,0 +1,369 @@
+# Scale the whole chart down without uninstalling it: scaleDown: true renders
+# every Deployment/StatefulSet with replicas: 0 (and suspends CronJobs) and
+# takes precedence over any per-workload replicas value. Services and Ingress
+# stay in place; scaleDown: false brings the workloads back up.
+#
+# It does NOT reach into the oauth2-proxy subchart: that chart has its own
+# replicaCount, and a value of this chart cannot override it implicitly. With
+# the proxy enabled, scaling the whole release down means setting
+# oauth2-proxy.replicaCount: 0 as well.
+scaleDown: false
+
+secrets:
+  # op:// item path for the oauth2-proxy credentials. Read ONLY while the proxy
+  # is enabled and still points at the Secret this chart creates for it (see
+  # oauth2-proxy.config.existingSecret below); a plain install without the
+  # proxy needs no 1Password item at all.
+  #
+  # The item must carry these three fields, spelled exactly like this, because
+  # the operator copies an item's field names into the Secret's keys and the
+  # subchart reads them by name:
+  #
+  #   client-id       the OIDC client id of the provider application
+  #   client-secret   its client secret
+  #   cookie-secret   16, 24 or 32 bytes, URL-SAFE base64
+  #
+  # The cookie-secret is the one that costs an evening. oauth2-proxy decodes it
+  # as URL-safe base64 FIRST, so the obvious "openssl rand -base64 32" produces
+  # a value containing + and /, the decode fails, and the pod exits with
+  # "cookie_secret must be 16, 24, or 32 bytes". Generate it as:
+  #
+  #   openssl rand -base64 32 | tr '+/' '-_'
+  #
+  # A field spelled differently does not fail the install: the operator writes
+  # a Secret without that key and the proxy pod stays in
+  # CreateContainerConfigError, which looks like a broken chart.
+  oauth2ProxySecretRef: null
+
+ytdlpWebPlayer:
+  # Replica count for this workload; 0 is allowed and scales it down.
+  # The chart-global scaleDown flag takes precedence.
+  #
+  # More than one replica is possible but shares nothing: each pod keeps its
+  # own /data emptyDir, so a video fetched by one pod is invisible to the
+  # other, and without session affinity the HLS segment requests of a single
+  # playback are spread over both. Raise it only behind an ingress that pins a
+  # client to a pod.
+  replicas: 1
+  # DOCUMENTED DEVIATION FROM THE HARDENING BASELINE - runAsUser/runAsGroup.
+  #
+  # The upstream image carries no USER instruction and therefore runs as root
+  # by default (verified in the published Dockerfile for v1.2.0: python:3.13-
+  # alpine, apk add ffmpeg deno, no USER). That is a default, not a
+  # requirement: measured, the container runs as an arbitrary uid with
+  # readOnlyRootFilesystem: true and the full hardening baseline, serving the
+  # UI and completing a real transcode. Everything it writes goes below
+  # DATA_PATH and into the cache directory, and both are emptyDirs this chart
+  # mounts writable (see storage). So the chart pins a non-root uid rather than
+  # following the image, and this deviation is about the NUMBER only - no part
+  # of the hardening baseline is relaxed.
+  #
+  # The uid is arbitrary on purpose (20000, the repo default). Nothing in the
+  # image belongs to it - /app is world-readable and read-only here - and no
+  # PersistentVolume is involved, so no data is tied to the number.
+  securityContext:
+    pod:
+      runAsNonRoot: true
+      runAsUser: 20000
+      runAsGroup: 1000
+      fsGroup: 1000
+      fsGroupChangePolicy: Always
+      # RuntimeDefault applies the container runtime's default seccomp filter,
+      # which blocks the syscalls a normal workload never makes. It sits in the
+      # pod context on purpose: from here it covers every container in the pod
+      # including init containers, while a container-level seccompProfile would
+      # have to be repeated for each one (and silently missed on the next one
+      # added). A container that genuinely needs a different filter can still
+      # override it under securityContext.container, which wins over this value.
+      seccompProfile:
+        type: RuntimeDefault
+    container:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      capabilities:
+        drop:
+          - ALL
+        add: []
+  # The application exposes no health endpoint, so all three probes use "/".
+  #
+  # What that path costs: it is Flask's index route, which renders the player
+  # template and touches neither ffmpeg, yt-dlp nor the network. Measured in
+  # k3d it answers in single-digit milliseconds, so probing it every 10s is
+  # free even while transcoding runs.
+  #
+  # What a green probe does NOT prove: that any video can be played. The app
+  # fetches its content from the internet at request time; with egress blocked
+  # or DNS broken, "/" still answers 200 while every playback fails. See
+  # NOTES.txt.
+  livenessProbe:
+    httpGet:
+      path: /
+      port: http
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /
+      port: http
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # The startup probe gates liveness/readiness, so those need no
+  # initialDelaySeconds. Startup budget = 5s x 30 = 150s, which is generous:
+  # the app opened its port in about two seconds in k3d, and the budget only
+  # has to cover a slow image pull's first process start.
+  startupProbe:
+    httpGet:
+      path: /
+      port: http
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30
+  # Extra environment variables, APPENDED to the ones the chart sets itself
+  # (DATA_PATH and PORT). Values are rendered through tpl; the value,
+  # secretKeyRef and configMapKeyRef forms are supported.
+  #
+  # This is where the application is configured. The upstream offers around
+  # twenty switches and this chart deliberately mirrors none of them as its own
+  # values: a chart that rebuilds every option is a lie one upstream release
+  # later, and it would also have to be kept in values.schema.json. The full,
+  # authoritative list is src/example.env in the upstream repository. As of
+  # v1.2.0 it holds APP_TITLE, THEME_COLOR, GENERATE_SPRITE_BELOW, AMOLED_BG,
+  # MAX_VIDEO_AGE, MAX_VIDEO_DURATION, DEFAULT_QUALITY, MAX_QUALITY, AUTOPLAY,
+  # MIN_LIVE_BUFFER, ALWAYS_TRANSCODE, DISABLE_TRANSCODING, MAX_PROCESSES,
+  # AUTOSKIP_SB_SEGMENTS, COOKIES_ONLY_ON_FAILURE, PLAYLIST_SUPPORT,
+  # AUTO_BG_PLAYBACK, AUDIO_VISUALIZER and PROXY.
+  #
+  # Do not set DATA_PATH, PORT, HOME or XDG_CACHE_HOME here: those four are the
+  # chart's, and a second entry with the same name silently wins (Kubernetes
+  # applies the LAST entry of the list) - pointing the app away from its
+  # writable volume, off the port the Service and probes use, or its caches
+  # back onto the read-only root filesystem.
+  #
+  # Example:
+  #   env:
+  #     - name: APP_TITLE
+  #       value: "Player"
+  #     - name: MAX_PROCESSES
+  #       value: "2"
+  env: []
+  resources:
+    # Limits are optional: memory and ephemeral-storage limits default to
+    # limitFactor x the request, an explicitly set limit always wins, and a
+    # CPU limit is only set when configured explicitly under "limits".
+    #
+    # No CPU limit on purpose (and this is the chart where it matters most):
+    # transcoding is what this app does, ffmpeg takes every core it is given,
+    # and a CPU limit does not fail a request - it throttles the encoder, which
+    # arrives at the viewer as a stuttering stream with nothing in any log.
+    #
+    # ephemeral-storage is the interesting number here, not memory. Downloaded
+    # and transcoded videos live in the /data emptyDir, and an emptyDir counts
+    # against the container's ephemeral-storage LIMIT. Going over it does not
+    # produce an application error: the kubelet evicts the whole pod, the
+    # reason sits on the pod rather than in the app's log, and every video in
+    # flight is gone with the emptyDir.
+    #
+    # Raising this number is the wrong first move. The knobs that decide how
+    # much lands there are MAX_VIDEO_AGE (how long a file survives after the
+    # last access), MAX_VIDEO_DURATION (upstream default 36000s = 10 hours, an
+    # enormous single file) and MAX_PROCESSES (how many can arrive at once) -
+    # all three via ytdlpWebPlayer.env. The limit only decides how the excess
+    # is discovered.
+    limitFactor: 3
+    requests:
+      cpu: 0.5
+      memory: 512Mi
+      # 2Gi request -> 6Gi limit at limitFactor 3.
+      ephemeralStorage: 2Gi
+  ports:
+    # The port the application listens on, and the single place it is
+    # configured: the chart derives the PORT environment variable from the
+    # entry named "http", the Service targets it by that name, and all three
+    # probes address it by name too. Changing the number here moves all four
+    # together - which is why the chart sets PORT itself instead of leaving it
+    # to ytdlpWebPlayer.env, where it could disagree with this list.
+    #
+    # 5000 is the upstream default (EXPOSE 5000) and unprivileged, so the
+    # AVD-KSV-0117 rule about containerPort < 1024 does not apply.
+    - containerPort: 5000
+      protocol: TCP
+      name: http
+
+storage:
+  # DATA_PATH is set to /data and backed by an emptyDir: the app treats the
+  # directory as a cache and removes videos again after MAX_VIDEO_AGE, so there
+  # is nothing here worth a PersistentVolume - and nothing that survives a pod
+  # restart either. That is deliberate; see NOTES.txt.
+  #
+  # Optional size caps for the two emptyDirs. Leave them null and the only
+  # ceiling is the container's ephemeral-storage limit (see resources above);
+  # note that the outcome of hitting either is the same - the kubelet evicts
+  # the pod - so a sizeLimit buys a clearer eviction message, not a graceful
+  # failure.
+  dataSizeLimit: null
+
+  # The second emptyDir, at /cache, with HOME and XDG_CACHE_HOME pointed at it.
+  #
+  # EVERY MOUNT HERE WAS MEASURED SEPARATELY, and the result is not the one the
+  # reflex predicts. Two runs of the image at uid 20000 with a read-only root
+  # filesystem, driven through metadata extraction, HLS transcoding, sprite
+  # generation and audio extraction:
+  #
+  #   - /tmp is NEVER written to. Not once, in any of those paths. The usual
+  #     "read-only rootfs, so mount an emptyDir on /tmp" is dead weight for
+  #     this image, and it is not mounted here.
+  #   - $HOME/.cache IS written to, and without it the log carries ten
+  #     "OSError: [Errno 30] Read-only file system: '/.cache'" lines. Both
+  #     bundled tools use it: deno for its module cache, yt-dlp for the
+  #     JavaScript challenge-solver library it fetches from github.com.
+  #
+  # The failure is a WARNING, not an error - the run continues. What it costs
+  # is silent: the challenge-solver library is re-downloaded from github.com on
+  # every single extraction instead of once, which turns an outage there, or an
+  # egress rule that does not expect it, into broken playback with a warning
+  # nobody read. With the volume mounted, both tools' caches land in /cache and
+  # the log is clean.
+  #
+  # Nothing here is worth keeping across a restart - it is a cache in the
+  # literal sense, refilled from the network.
+  cacheSizeLimit: null
+
+ingress:
+  # Gates this chart's own Ingress. Everything the Ingress needs is read only
+  # inside its template - the application itself needs no hostname of its own
+  # (no base-URL setting, no absolute links, no url_for(_external=True)), so
+  # switching the Ingress off frees BOTH ingress.domain and
+  # ingress.clusterIssuer instead of only the issuer.
+  #
+  # WHO OWNS THE HOST, WITH THE PROXY ENABLED: the proxy sits in the data path,
+  # so with oauth2-proxy.enabled=true the Ingress belongs to the PROXY
+  # (oauth2-proxy.ingress) and this one is switched off; the app is then
+  # reached only through its Service. Leaving both on for the same host does
+  # not produce a merged route - ingress-nginx's admission webhook rejects the
+  # second Ingress outright - so the chart refuses to render that combination.
+  # Leaving this one on for a DIFFERENT host is allowed and means exactly what
+  # it says: an unauthenticated way past the proxy.
+  enabled: true
+  clusterIssuer: null
+  domain: null
+  className: nginx
+  # Extra annotations for the Ingress; merged with the cert-manager
+  # cluster-issuer annotation the chart always sets.
+  annotations: {}
+
+# --- oauth2-proxy subchart -------------------------------------------------
+#
+# Everything below this line is passed to the oauth2-proxy chart
+# (https://oauth2-proxy.github.io/manifests), not read by this chart - with the
+# single exception of oauth2-proxy.enabled and oauth2-proxy.ingress.hosts,
+# which the two guards above consult. The keys are the subchart's, the full
+# list of them is in its own values.yaml, and this chart does not restrict
+# them: whatever it does not set here stays at the subchart's default.
+#
+# The subchart's own conventions are NOT this repo's. It is upstream software
+# and treated as such - we do not patch its templates, do not re-harden its
+# workload and do not re-implement its values. Two consequences worth knowing
+# before looking for them:
+#
+#   - Its resource limits, probes and security context follow ITS defaults, not
+#     the rules in README "Chart style guidelines". Set them under
+#     oauth2-proxy.resources / .securityContext / .livenessProbe if you want
+#     this repo's shape; the chart does not impose it on you.
+#   - The 1Password operator's auto-restart and this repo's checksum/config
+#     mechanism do not reach into it either. Repointing
+#     secrets.oauth2ProxySecretRef at a different item changes the
+#     OnePasswordItem this chart renders, but nothing in the subchart's pod
+#     template - restart it by hand:
+#       kubectl -n <ns> rollout restart deployment/<release>-oauth2-proxy
+#
+# The subchart itself has a conditional dependency on redis-ha (off by
+# default), which is why a helm dependency update here pulls two repositories.
+oauth2-proxy:
+  # Off by default. The chart is fully usable without it, nothing of the
+  # subchart is rendered, and no oauth2-proxy image is pulled.
+  #
+  # READ THIS BEFORE LEAVING IT OFF: the application has NO authentication of
+  # any kind and this chart adds none. An Ingress without the proxy is an open
+  # instance - anyone who reaches the URL can make it fetch and transcode
+  # arbitrary videos from the internet, on your egress and your CPU.
+  enabled: false
+
+  # Whether a new proxy version reaches the cluster is decided by the
+  # dependency version in Chart.yaml, not here - see the comment at that line.
+  # It is the only remaining path for a proxy update, because the subchart is
+  # invisible to everything that watches Helm release versions.
+
+  ingress:
+    # With the proxy enabled this is the Ingress that should be on, and
+    # ingress.enabled above the one that should be off. Set hosts to the same
+    # single host the app would otherwise carry.
+    enabled: false
+    className: nginx
+    # hosts:
+    #   - player.example.com
+    # tls:
+    #   - secretName: tls-player-example-com
+    #     hosts:
+    #       - player.example.com
+    annotations: {}
+    #   cert-manager.io/cluster-issuer: letsencrypt
+    #   # The second half of the 4kB cookie trap below: the response carrying
+    #   # the session cookie does not fit in ingress-nginx's default 4k proxy
+    #   # buffer, and what the browser gets is a 502 AFTER a successful login.
+    #   nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
+
+  config:
+    # The Secret holding client-id, client-secret and cookie-secret. This chart
+    # renders it as an OnePasswordItem (see secrets.oauth2ProxySecretRef above)
+    # exactly while this value still names it; point it at a Secret of your own
+    # and the chart creates none.
+    #
+    # The subchart runs this string through tpl, so .Release.Name resolves.
+    # .Chart.Name would NOT: inside the subchart it is "oauth2-proxy", so the
+    # parent chart name is written out literally here.
+    existingSecret: '{{ .Release.Name }}-ytdlp-web-player-oauth2-proxy-secret'
+
+    # The proxy's whole configuration, and the reason it is a configFile rather
+    # than the structured config.upstreams: the subchart emits config.upstreams
+    # with toJson and WITHOUT tpl, so a {{ .Release.Name }} written there ends
+    # up in the manifest verbatim as those eleven characters. config.configFile
+    # is passed through "tpl ... $", which is what makes the release name
+    # reachable at all. A wrong upstream here is not a render error - it is a
+    # 404 after a successful login, in production.
+    configFile: |
+      email_domains = ["*"]
+      upstreams = ["http://{{ .Release.Name }}-ytdlp-web-player-service:80"]
+
+      # Trust X-Forwarded-*. Without it the proxy considers every request
+      # plain http, and builds its redirect back to http:// - behind a
+      # TLS-terminating Ingress that is a redirect loop the moment a login
+      # completes.
+      reverse_proxy = true
+
+      # Keep id_token and access_token OUT of the session cookie. With them in,
+      # a user with a longer group list produces a cookie past the browsers'
+      # 4kB limit; the browser drops it and the request comes back as HTTP 502
+      # AFTER a successful login - with "[AuthSuccess]" in the proxy's log,
+      # which is why this one is hunted in the wrong place for hours.
+      #
+      # It is incompatible with pass_access_token, set_authorization_header and
+      # pass_authorization_header: switch any of those on together with this
+      # and the proxy refuses to start at all. This app needs none of them - it
+      # reads no identity headers whatsoever.
+      session_cookie_minimal = true
+
+      # Set these to your provider. Example for an OIDC provider:
+      # provider = "oidc"
+      # oidc_issuer_url = "https://sso.example.com/application/o/player/"
+      # redirect_url = "https://player.example.com/oauth2/callback"
+
+  # Leave this off. With alphaConfig.enabled=true the subchart generates a
+  # configuration WITHOUT any upstreams and ignores config.configFile
+  # silently - the login then succeeds and the app answers 404, because the
+  # proxy has nothing to forward to. It is off in the subchart's defaults too;
+  # it is spelled out here because switching it on looks like an upgrade.
+  alphaConfig:
+    enabled: false

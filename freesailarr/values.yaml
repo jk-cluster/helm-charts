@@ -705,7 +705,7 @@ sonarr:
   enabled: true
   image:
     repository: docker.io/linuxserver/sonarr
-    tag: 4.0.17
+    tag: 4.0.19
   # See the qbittorrent ingress comment.
   ingress:
     enabled: true

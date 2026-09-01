@@ -225,9 +225,13 @@ minecraft:
   # drift to a new release on every restart.
   # This value must match the Java line of the chart version: the image tag
   # comes from .Chart.AppVersion, so the JVM is fixed per published chart
-  # version. Java 8 runs Minecraft up to 1.16.5, 1.18-1.20.4 need Java 17 and
-  # 1.20.5+ need Java 21. This chart publishes appVersion "2026.8.2-java21".
-  version: "1.21.1"
+  # version. Java 8 runs Minecraft up to 1.16.5, 1.18-1.20.4 need Java 17,
+  # 1.20.5-1.21.11 need Java 21 and 26.1 and later need Java 25. The two upper
+  # boundaries are read off Mojang's version manifest (piston-meta, field
+  # javaVersion.majorVersion per release), not estimated: 1.21.11 (2025-12-09)
+  # is the last release asking for 21, and every release from 26.1 (2026-03-24)
+  # on asks for 25. This chart publishes appVersion "2026.8.2-java25".
+  version: "26.2"
 
 # curseforge, ftb and curseforgeServerpack are mutually exclusive - enabling
 # more than one is rejected by the chart (before 1.0.0 it silently rendered a

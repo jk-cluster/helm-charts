@@ -81,11 +81,13 @@ THIS CHART IS PUBLISHED ONCE PER JAVA LINE — THIS IS {{ $line | default "an un
   ({{ .Chart.AppVersion }}), not from a value. This build runs
   minecraft.version {{ .Values.minecraft.version }}.
 
-  Java 8 runs Minecraft up to 1.16.5, 1.18-1.20.4 need Java 17 and 1.20.5+ need
-  Java 21. Nothing in this chart checks that minecraft.version fits the line:
-  a mismatch renders and installs without a word, and only the container fails
-  afterwards — CrashLoopBackOff once the startup budget{{ if $budget }} ({{ $budget }}){{ end }} is spent, with
-  the reason in the log and nowhere else:
+  Java 8 runs Minecraft up to 1.16.5, 1.18-1.20.4 need Java 17, 1.20.5-1.21.11
+  need Java 21 and 26.1 and later need Java 25 (read off Mojang's version
+  manifest, javaVersion.majorVersion per release). Nothing in this chart checks
+  that minecraft.version fits the line: a mismatch renders and installs without
+  a word, and only the container fails afterwards — CrashLoopBackOff once the
+  startup budget{{ if $budget }} ({{ $budget }}){{ end }} is spent, with the reason in the log and
+  nowhere else:
 
     kubectl -n {{ .Release.Namespace }} logs {{ $pod }}
 

@@ -4,10 +4,10 @@
 # minecraft.version is deliberately NOT set here any more. Since chart 1.0.0 the
 # chart ships a pinned default that belongs to the Java line it publishes (the
 # image tag comes from .Chart.AppVersion, and Java 8 runs Minecraft only up to
-# 1.16.5, 1.18-1.20.4 need Java 17, 1.20.5+ need Java 21). Leaving it unset
-# means the install-test exercises exactly the default a user would get, so a
-# Java line published with a mismatched default version fails CI instead of
-# passing on a CI-only override.
+# 1.16.5, 1.18-1.20.4 need Java 17, 1.20.5-1.21.11 need Java 21 and 26.1+ needs
+# Java 25). Leaving it unset means the install-test exercises exactly the
+# default a user would get, so a Java line published with a mismatched default
+# version fails CI instead of passing on a CI-only override.
 #
 # server.service.type is not set either: the default is ClusterIP, which is what
 # all three real deployments run (routing is done by the static mappings of the

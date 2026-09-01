@@ -64,52 +64,86 @@ jobs:
           echo $CHART_VERSION
           echo "CHART_VERSION=$CHART_VERSION" >> $GITHUB_OUTPUT
         working-directory: ${{ inputs.chart-location }}
-      - name: "Load Helm Registry Credentials"
-        id: load-jk-cr-creds
+      - name: "Load Chart Registry Credentials"
+        id: load-registry-creds
         uses: 1password/load-secrets-action@v5
         env:
           OP_CONNECT_TOKEN: ${{ secrets.OP_CONNECT_TOKEN }}
-          JK_CR_TOKEN: op://GitHub-Actions/jk-registry-access/password
-          JK_CR_USERNAME: op://GitHub-Actions/jk-registry-access/username
-          JK_CR_CHARTS_LOCATION: op://GitHub-Actions/jk-registry-access/charts-location
-          JK_CR_HELM_REGISTRY: op://GitHub-Actions/jk-registry-access/helm-registry
-      # The values are mapped into each step's own env block and read as quoted
-      # shell variables - never interpolated into the command line.
+          REGISTRY_PASSWORD: op://GitHub-Actions/jlab-registry-access/password
+          REGISTRY_USERNAME: op://GitHub-Actions/jlab-registry-access/username
+          REGISTRY_CHARTS_URL: op://GitHub-Actions/jlab-registry-access/charts-url
+      # The target is a classic, index-based Helm registry, not an OCI one, so
+      # there is no "helm registry login" session and no "helm push": the upload
+      # is a single HTTP POST of the packaged .tgz to <charts-url>/api/charts,
+      # authenticated per request. Three properties of this step are load-bearing
+      # and each of them was paid for once already.
       #
-      # Two separate failures made this necessary. First, load-secrets-action v5
-      # (bumped in #140) no longer exports the loaded values as environment
-      # variables for later steps the way v4 did; only the step outputs carry
-      # them. Every "${{ env.JK_CR_* }}" reference therefore resolved to an empty
-      # string from that bump on, with nothing reporting an error - the loading
-      # step logs "Populating variable" and stays green either way.
+      # 1) The values are mapped into the step's own env block and read as quoted
+      # shell variables - never interpolated into the command line. load-secrets-
+      # action v5 (bumped in #140) no longer exports the loaded values as
+      # environment variables for later steps the way v4 did; only the step
+      # outputs carry them. Every "${{ env.* }}" reference therefore resolved to
+      # an empty string from that bump on, with nothing reporting an error - the
+      # loading step logs "Populating variable" and stays green either way. The
+      # ":?" guards fail loudly and name the op:// field that is missing, and
+      # quoting keeps an empty value from silently shifting arguments.
       #
-      # Second, an empty value collapsed into a missing argument instead of an
-      # error: with an empty username, "-u" swallowed the following
-      # "--password-stdin", helm stopped reading the password from stdin,
-      # prompted interactively and died on the runner with "inappropriate ioctl
-      # for device" - a terminal error for what was really an unset variable.
+      # 2) The credentials never reach the process list. "curl --user $U:$P"
+      # would put them in argv; "curl --config -" reads its options from stdin
+      # instead, so nothing sensitive appears in any argument. The price of that
+      # config file is its value syntax: an unquoted value ends at the first
+      # space (measured on curl 8.5.0 - "has space" arrived as "has"), so the
+      # step refuses whitespace in the credentials up front rather than letting
+      # a truncated password come back as a puzzling 401. A Gitea access token
+      # is 40 hex characters, so this only ever fires on a mis-entered item.
       #
-      # The ":?" guards fail loudly and name the value that is missing, quoting
-      # keeps an empty one from shifting arguments, and the token no longer
-      # appears in the process list.
-      - name: "Login to JK-Registry"
+      # 3) "--fail-with-body" is what makes a failed upload fail the job. Unlike
+      # "helm push", curl exits 0 on HTTP 401/403/409 unless asked not to - the
+      # publish would go green while nothing was uploaded. Measured against Gitea
+      # 1.24.7: a 401 without the flag is exit 0, with the flag exit 22, and the
+      # response body is still printed so the log names the cause.
+      #
+      # The file name is built from the chart name and the version read above
+      # instead of a "<chart>-*.tgz" glob: --upload-file takes exactly one file,
+      # and a glob matching two turns the second into curl's URL argument, while
+      # a glob matching none is passed through literally. Both fail obscurely.
+      # "helm package" keeps the "+" of a "1.4.0+up1.9.2" version verbatim in the
+      # file name, so "<name>-<version>.tgz" is an exact match (measured).
+      - name: "Upload Helm Chart to the Chart Registry"
         env:
-          JK_CR_TOKEN: ${{ steps.load-jk-cr-creds.outputs.JK_CR_TOKEN }}
-          JK_CR_USERNAME: ${{ steps.load-jk-cr-creds.outputs.JK_CR_USERNAME }}
-          JK_CR_HELM_REGISTRY: ${{ steps.load-jk-cr-creds.outputs.JK_CR_HELM_REGISTRY }}
+          REGISTRY_PASSWORD: ${{ steps.load-registry-creds.outputs.REGISTRY_PASSWORD }}
+          REGISTRY_USERNAME: ${{ steps.load-registry-creds.outputs.REGISTRY_USERNAME }}
+          REGISTRY_CHARTS_URL: ${{ steps.load-registry-creds.outputs.REGISTRY_CHARTS_URL }}
+          CHART_NAME: ${{ inputs.chart-name }}
+          CHART_VERSION: ${{ steps.get-chart-version.outputs.CHART_VERSION }}
         run: |-
-          : "${JK_CR_HELM_REGISTRY:?empty - check op://GitHub-Actions/jk-registry-access/helm-registry}"
-          : "${JK_CR_USERNAME:?empty - check op://GitHub-Actions/jk-registry-access/username}"
-          : "${JK_CR_TOKEN:?empty - check op://GitHub-Actions/jk-registry-access/password}"
-          printf '%s' "$JK_CR_TOKEN" | helm registry login "$JK_CR_HELM_REGISTRY" -u "$JK_CR_USERNAME" --password-stdin
-      - name: "Push Helm Chart to JK-Container Registry"
-        env:
-          JK_CR_CHARTS_LOCATION: ${{ steps.load-jk-cr-creds.outputs.JK_CR_CHARTS_LOCATION }}
-        run: |-
-          : "${JK_CR_CHARTS_LOCATION:?empty - check op://GitHub-Actions/jk-registry-access/charts-location}"
-          helm push "${{ inputs.chart-name }}"-*.tgz "$JK_CR_CHARTS_LOCATION"
+          : "${REGISTRY_CHARTS_URL:?empty - check op://GitHub-Actions/jlab-registry-access/charts-url}"
+          : "${REGISTRY_USERNAME:?empty - check op://GitHub-Actions/jlab-registry-access/username}"
+          : "${REGISTRY_PASSWORD:?empty - check op://GitHub-Actions/jlab-registry-access/password}"
+          : "${CHART_NAME:?empty - the chart-name input did not arrive}"
+          : "${CHART_VERSION:?empty - could not read version: from ${CHART_NAME}/Chart.yaml}"
+          # 1Password masks the full URL, but a curl connection error prints only
+          # "<host>:<port>", which that mask would not cover. Mask the host too.
+          CHARTS_HOST="${REGISTRY_CHARTS_URL#*://}"
+          echo "::add-mask::${CHARTS_HOST%%/*}"
+          case "${REGISTRY_USERNAME}${REGISTRY_PASSWORD}" in
+            *[[:space:]]*)
+              echo "::error::username/password in op://GitHub-Actions/jlab-registry-access must not contain whitespace - curl --config truncates an unquoted value at the first space"
+              exit 1
+              ;;
+          esac
+          CHART_PACKAGE="${CHART_NAME}-${CHART_VERSION}.tgz"
+          test -f "$CHART_PACKAGE" || {
+            echo "::error::${CHART_PACKAGE} does not exist - helm package produced: $(ls -1 ./*.tgz 2>&1)"
+            exit 1
+          }
+          echo "uploading ${CHART_PACKAGE}"
+          printf 'user = %s:%s\nurl = %s\n' \
+            "$REGISTRY_USERNAME" "$REGISTRY_PASSWORD" "${REGISTRY_CHARTS_URL%/}/api/charts" |
+            curl --config - \
+                 --fail-with-body \
+                 --silent --show-error \
+                 --request POST \
+                 --upload-file "$CHART_PACKAGE" \
+                 --write-out '\nHTTP %{http_code}\n'
         working-directory: ${{ inputs.chart-location }}
-      - name: "Logout from JK-Registry"
-        env:
-          JK_CR_HELM_REGISTRY: ${{ steps.load-jk-cr-creds.outputs.JK_CR_HELM_REGISTRY }}
-        run: helm registry logout "$JK_CR_HELM_REGISTRY"

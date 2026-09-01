@@ -26,7 +26,7 @@ Additional rules for all commits, PRs, issues, and comments:
 
 ## What this repo is
 
-A collection of self-made Helm charts, one directory per chart, published to a private OCI registry via GitHub Actions. Validation happens on three levels: locally with Helm, in the PR pipeline (`validate-charts.yml`: strict lint, package, version-bump check), and in the PR install-test stage (k3d, fixtures under `ci/` — see README):
+A collection of self-made Helm charts, one directory per chart, published to a private, classic (index-based) Helm registry via GitHub Actions — an HTTP `POST` of the packaged `.tgz`, not an OCI `helm push`; the target URL and its credentials live in 1Password and never in this repository. Validation happens on three levels: locally with Helm, in the PR pipeline (`validate-charts.yml`: strict lint, package, version-bump check), and in the PR install-test stage (k3d, fixtures under `ci/` — see README):
 
 ```bash
 helm lint --strict <chart-name>

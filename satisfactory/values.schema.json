@@ -23,7 +23,8 @@
       }
     },
     "game": {
-      "type": "object",
+      "description": "May be null / empty: the chart then falls back to its documented game defaults (issue #99) instead of aborting the render with a nil-pointer error, which is what an erased block used to do.",
+      "type": ["object", "null"],
       "additionalProperties": false,
       "properties": {
         "experimental": {
@@ -33,8 +34,8 @@
         "maxPlayers": {
           "type": ["integer", "string", "null"]
         },
-        "seasonalEvents": {
-          "description": "Inverted by the chart into DISABLESEASONALEVENTS, so true means events are enabled.",
+        "enableSeasonalEvents": {
+          "description": "Seasonal (holiday) events. NEGATED by the chart into the image's DISABLESEASONALEVENTS: true renders DISABLESEASONALEVENTS=\"false\" and the events run, false renders \"true\" and they do not. Only true/false are accepted (boolean or string); anything else aborts the render. Default false, which reproduces what the chart has always rendered - up to 6.1.0 the key was game.seasonalEvents and was passed through unchanged, so its default true wrote DISABLESEASONALEVENTS=true and the events were off despite this description claiming the opposite (issue #215). The old key game.seasonalEvents no longer exists and is rejected here rather than silently ignored.",
           "type": ["boolean", "string", "null"]
         }
       }

@@ -17,9 +17,10 @@
 {{- if and (kindIs "float64" $startup.periodSeconds) (kindIs "float64" $startup.failureThreshold) -}}
 {{- $budget = printf "%.0fs x %.0f = %.0f minutes" $startup.periodSeconds $startup.failureThreshold (divf (mulf $startup.periodSeconds $startup.failureThreshold) 60.0) -}}
 {{- end -}}
-{{- $seasonalRaw := printf "%v" .Values.game.seasonalEvents -}}
-{{- $seasonalOff := eq (lower $seasonalRaw) "true" -}}
-{{- $beta := eq (lower (printf "%v" .Values.game.experimental)) "true" -}}
+{{- $game := fromYaml (include "satisfactory.game" .Values.game) -}}
+{{- $seasonalEnv := include "satisfactory.disableSeasonalEvents" $game.enableSeasonalEvents -}}
+{{- $seasonalOff := eq $seasonalEnv "true" -}}
+{{- $beta := eq (lower (printf "%v" $game.experimental)) "true" -}}
 {{- $debug := eq (lower (printf "%v" .Values.dev.debug)) "true" -}}
 {{- $outOfRange := or (lt $gamePort 30000) (gt $gamePort 32767) (lt $msgPort 30000) (gt $msgPort 32767) -}}
 {{- $skipRaw := "" -}}
@@ -213,14 +214,37 @@ RESOURCE LIMITS ARE COMPUTED FROM limitFactor ({{ $factor }})
   unlimited container gets throttled rather than killed — a memory limit can
   end a session, a missing CPU limit only slows it down.
 
-game.seasonalEvents IS PASSED THROUGH, NOT INVERTED
-  The chart hands game.seasonalEvents to the container as
-  DISABLESEASONALEVENTS unchanged. It is currently {{ $seasonalRaw }}, so the container
-  runs with DISABLESEASONALEVENTS={{ $seasonalRaw }} — seasonal events are {{ if $seasonalOff }}OFF{{ else }}ON{{ end }}.
-  {{ if $seasonalOff }}To turn them ON, set game.seasonalEvents: false.{{ else }}To turn them OFF, set game.seasonalEvents: true.{{ end }}
-  Read that twice: the value behaves as the opposite of what its name suggests
-  and of what values.schema.json claims. Believe this paragraph and the
-  rendered env var, not the key name.
+SEASONAL EVENTS — THE KEY WAS RENAMED IN 7.0.0, AND IT IS BREAKING
+  Seasonal (holiday) events are {{ if $seasonalOff }}OFF{{ else }}ON{{ end }} in this release: game.enableSeasonalEvents is
+  {{ $game.enableSeasonalEvents }}, which the chart negates into DISABLESEASONALEVENTS={{ $seasonalEnv }}.
+  {{ if $seasonalOff }}To turn them ON, set game.enableSeasonalEvents: true.{{ else }}To turn them OFF, set game.enableSeasonalEvents: false.{{ end }}
+
+  UPGRADING FROM 6.x — WHAT YOU HAVE TO DO
+  The old key game.seasonalEvents IS GONE. It is not deprecated and not
+  quietly accepted: values.schema.json rejects it, so a values file that still
+  carries it fails the upgrade with a validation error instead of installing
+  something you did not ask for. That noise is deliberate — see below.
+
+  Remove the old key and, if you want the events, add the new one:
+
+    game:
+      enableSeasonalEvents: true    # false, the default, keeps them off
+
+  AND THE MEANING IS INVERTED FROM WHAT THE OLD KEY'S NAME SUGGESTED
+  Up to 6.1.0 the value was handed to the container UNCHANGED, into a variable
+  whose name says the opposite: game.seasonalEvents: true wrote
+  DISABLESEASONALEVENTS=true. So the shipped default had the events switched
+  OFF, in every install, for as long as this chart has existed — while
+  values.schema.json described the same key as "true means events are
+  enabled". If you left the default alone believing that description, you have
+  never had seasonal events, and the new default (enableSeasonalEvents: false)
+  changes nothing about that: it renders exactly the DISABLESEASONALEVENTS
+  this chart has always rendered, so upgrading alone does not move your
+  server. You have to ask for the events, and now the key name means what it
+  says when you do.
+
+  Only true and false are accepted, boolean or quoted; anything else aborts
+  the render rather than being guessed at.
 
 THE USER ID IS PINNED, AND PUID/PGID DO NOTHING
   The pod runs as 1000:1000 because the image supports rootless operation only

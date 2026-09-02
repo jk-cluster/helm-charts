@@ -10,7 +10,23 @@ dev:
 game:
   experimental: false
   maxPlayers: 4
-  seasonalEvents: true
+  # Seasonal (holiday) events. The image only knows the negative switch
+  # DISABLESEASONALEVENTS, so the chart NEGATES this value on the way in:
+  # enableSeasonalEvents: true renders DISABLESEASONALEVENTS="false" (events
+  # run), false renders "true" (events off). Only true/false are accepted, in
+  # boolean or string form; anything else aborts the render instead of being
+  # read as one of the two.
+  #
+  # The default is false on purpose, and it is not a preference: it reproduces
+  # what this chart has ALWAYS rendered. Up to 6.1.0 the key was called
+  # game.seasonalEvents and was passed through UNCHANGED, so its default true
+  # wrote DISABLESEASONALEVENTS=true — the events were off in every install,
+  # while values.schema.json claimed "true means events are enabled" (#215).
+  # Keeping the rendered result identical is what makes this rename loud
+  # instead of silent: nobody's server changes behaviour by upgrading, and the
+  # old key is now rejected by the schema, so anyone who set it has to decide
+  # again. Set enableSeasonalEvents: true to actually switch the events on.
+  enableSeasonalEvents: false
 
 server:
   # Replica count for this workload; 0 is allowed and scales it down.

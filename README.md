@@ -245,6 +245,7 @@ These guidelines are **binding for every current and future chart** in this repo
 
 - Every workload container offers an additive `env` value block, appended to the env entries the chart always sets.
 - Entries are rendered through `tpl` (so values may contain Helm templating) and support the `value`, `secretKeyRef` and `configMapKeyRef` forms (pattern: `template-chart/templates/xxx.deployment.yaml`).
+- **Additive means additive: an entry repeating a name the chart already sets does not replace it, and what the pair does depends on when it arrives.** At install both entries reach the pod and the later one — the user's — wins. On an *existing* release the same entry is lost: Kubernetes merges `env` by name, the pair collapses to the chart's own value, and `helm upgrade` still reports success. Measured on `urlaubsverwaltung` (helm 3.19.0, Kubernetes 1.35): `helm get manifest` shows the variable twice while the live Deployment shows it once, carrying the chart's value. The failure mode is silence, so a chart whose `NOTES.txt` tells operators to override one of its own variables has to say that the override only takes at install time — and that a green upgrade proves nothing, the value belongs read back off the Deployment.
 
 ### 11. Scaling
 

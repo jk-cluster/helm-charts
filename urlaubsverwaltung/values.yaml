@@ -73,11 +73,14 @@ urlaubsverwaltung:
   # setting trades a permanently false alarm for silence, and silence is only
   # correct as long as there is nothing to report about.
   #
-  # That override repeats a name the chart already sets, and env is additive:
-  # it renders the variable twice (the later entry wins in the container), and
-  # adding it to an ALREADY INSTALLED release makes the next upgrade fail in
-  # the API server. See the "env IS ADDITIVE ONLY" section of NOTES.txt — the
-  # switch has to go in at install time, not at upgrade time.
+  # That override repeats a name the chart already sets, and env is additive, so
+  # it renders the variable twice. At INSTALL time both entries reach the pod and
+  # the later one — yours — wins in the container. Added to an ALREADY INSTALLED
+  # release it is lost instead: Kubernetes merges env by name, the pair collapses
+  # to the chart's own entry, and helm still reports a successful upgrade. The
+  # override does not fail loudly, it fails silently. See the "env IS ADDITIVE
+  # ONLY" section of NOTES.txt — the switch has to go in at install time, and
+  # after any such change the result belongs verified on the live Deployment.
   livenessProbe:
     httpGet:
       port: 8080

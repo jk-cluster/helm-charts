@@ -226,7 +226,14 @@ THE THREE HEALTH PATHS AND WHAT EACH ONE ANSWERS FOR
   restarting the pod does not bring the database back. Adding db to the
   liveness group would turn every outage into a crash loop on top of the
   outage. Measured on this chart, with the database scaled to zero underneath a
-  running pod: readiness 503, liveness 200, pod 0/1 Ready, restart count 0.
+  running pod: readiness 503, liveness 200, pod 0/1 Ready, restart count 0 —
+  the pod left Ready about 20 seconds after the database went away.
+
+  The other half of that measurement matters just as much: when the database
+  came back, the pod returned to Ready by itself within about five seconds,
+  still with restart count 0. Nothing had to be rolled, deleted or scaled by
+  hand. That is what leaving the liveness group alone buys — the outage is
+  ridden out and then simply over.
 
   How readiness actually fails is worth knowing before you tune it. The db
   indicator does not answer 503 quickly — it waits out the JDBC connection
@@ -247,6 +254,13 @@ WHAT A READY POD DOES AND DOES NOT PROVE
   provider is reachable: OIDC is resolved once at startup (see below) and no
   health indicator watches it afterwards, so a provider that goes down after
   the rollout leaves a Ready pod on which nobody can log in.
+
+  Ready also proves reachability, not correctness: the db indicator validates a
+  connection, it never looks at the schema. Measured here — a database that came
+  back EMPTY put the pod straight back to Ready with /actuator/health at 200,
+  while not one table existed in it. A restored-but-wrong database reads as
+  healthy, so a probe going green after a database incident is not on its own
+  evidence that the data came back with it.
 
   A database outage now shows up in the pod's status: READY drops to 0/1 while
   STATUS stays Running and RESTARTS stays put. That combination — running, not
@@ -308,24 +322,36 @@ MAIL AND THE APPLICATION URL ARE PLACEHOLDERS UNTIL YOU SET THEM
   are silently not delivered. The setting is only honest while there is no mail
   server to be honest about.
 
-  Note that this variable repeats a name the chart already sets, so per the
-  rule below it can only be added at INSTALL time — putting it into an already
-  installed release makes the next upgrade fail in the API server.
+  Note that this variable repeats a name the chart already sets, so per the rule
+  below it only takes effect when it goes in at INSTALL time. Put into an
+  already installed release it does nothing at all, and says so nowhere: helm
+  reports a successful upgrade while the container keeps "false".
 
-urlaubsverwaltung.env IS ADDITIVE ONLY, AND A COLLISION BREAKS THE UPGRADE
+urlaubsverwaltung.env IS ADDITIVE ONLY, AND A COLLISION IS LOST ON UPGRADE
   The entries are appended AFTER the chart's own list{{ if $envNames }} (this release appends:
   {{ join ", " $envNames }}){{ end }}. An entry that repeats a name the
   chart already sets does not replace it — it renders the variable twice, and
-  that has a sharp edge: adding such a name to an ALREADY INSTALLED release
-  makes the next upgrade fail in the API server, before anything changes, with
+  what happens to that pair depends on WHEN it first appears:
 
-    UPGRADE FAILED: cannot patch "{{ .Release.Name }}-{{ .Chart.Name }}-deployment" ...
-    The order in patch list ... doesn't match $setElementOrder list
+  AT INSTALL both entries reach the pod and the later one — yours — wins in the
+  container. The API server accepts it with a warning:
 
-  because env entries are merged by name and a duplicate name breaks that
-  ordering. A fresh install with the same values goes through, so the failure
-  looks arbitrary until you know it. Treat the variables above as fixed for the
-  life of a release: to really change one, reinstall.
+    Warning: spec.template.spec.containers[0].env[N]: hides previous definition
+    of "NAME", which may be dropped when using apply
+
+  AT UPGRADE that warning comes true. Kubernetes merges env by name, so the pair
+  collapses back to ONE entry and the surviving value is the CHART's, not yours.
+  Nothing fails: helm prints "Release has been upgraded", the revision counts up,
+  and the override is simply gone. Measured on this chart (helm 3.19.0,
+  Kubernetes 1.35): "helm get manifest" shows the variable twice while the live
+  Deployment shows it once, with the chart's value.
+
+  So the trap is silence, not an error. Treat the variables above as fixed for
+  the life of a release: to really change one, reinstall. And never read a green
+  upgrade as proof that an override took effect — read it off the object:
+
+    kubectl -n {{ .Release.Namespace }} get deployment {{ .Release.Name }}-{{ .Chart.Name }}-deployment \
+      -o jsonpath='{.spec.template.spec.containers[0].env}'
 
   Anything sensitive belongs in valueFrom.secretKeyRef rather than a plain
   value: a value is stored in the pod spec and readable by anyone who can read

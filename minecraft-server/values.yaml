@@ -4,6 +4,38 @@
 # Services stay in place; scaleDown: false brings the workloads back up.
 scaleDown: false
 
+image:
+  # Tag of the itzg/minecraft-server image. Empty means "use the chart's
+  # appVersion" (2026.8.2-java25 here), which is what every release before chart
+  # 5.0.0 did unconditionally.
+  #
+  # WHY THIS EXISTS. Since chart 5.0.0 only the NEWEST Java line is maintained
+  # (see Chart.yaml). The older lines stay published as frozen artifacts - java8
+  # and java17 at chart 4.0.0, java21 at 4.1.0 - and never receive another chart
+  # change. To run an older JVM with the CURRENT chart, set the tag here instead
+  # of installing a frozen chart version:
+  #
+  #   image:
+  #     tagOverride: "2026.8.2-java21"
+  #   minecraft:
+  #     version: "1.21.11"
+  #
+  # It is called tagOverride, not tag, because it is an emergency exit: it
+  # decouples the running image from the chart version, so the release no longer
+  # says in its metadata what it actually runs. Prefer moving to the current
+  # line; use this when a modpack pins you to an older Minecraft version.
+  #
+  # DELIBERATELY NOT MANAGED BY RENOVATE. renovate.json5 tracks appVersion in
+  # Chart.yaml (partitioned by its "java<N>" compatibility group) and nothing
+  # else. A tag set here is never bumped by anything - it is yours to review.
+  #
+  # The Java line of the effective tag (this value, or appVersion when it is
+  # empty) is checked against minecraft.version at render time; a mismatch fails
+  # the render with both values named. Two cases pass unchecked on purpose: a
+  # tag without a recognizable "java<N>" part, and a minecraft.version that is
+  # not a plain numeric x[.y[.z]] (snapshots, pre-releases, "LATEST").
+  tagOverride: ""
+
 secrets:
   # op:// item path for the 1Password operator. Only needs to carry a
   # "curseforge-api-key" key when curseforge.enabled is true and an
@@ -223,14 +255,31 @@ minecraft:
     memory: "4"
   # Minecraft version to run. Pinned rather than "LATEST", which would silently
   # drift to a new release on every restart.
-  # This value must match the Java line of the chart version: the image tag
-  # comes from .Chart.AppVersion, so the JVM is fixed per published chart
-  # version. Java 8 runs Minecraft up to 1.16.5, 1.18-1.20.4 need Java 17,
-  # 1.20.5-1.21.11 need Java 21 and 26.1 and later need Java 25. The two upper
-  # boundaries are read off Mojang's version manifest (piston-meta, field
-  # javaVersion.majorVersion per release), not estimated: 1.21.11 (2025-12-09)
-  # is the last release asking for 21, and every release from 26.1 (2026-03-24)
-  # on asks for 25. This chart publishes appVersion "2026.8.2-java25".
+  #
+  # This value must match the Java line of the EFFECTIVE image tag - appVersion,
+  # or image.tagOverride when that is set. Since chart 5.0.0 the chart checks it
+  # and FAILS THE RENDER on a mismatch, naming both values; before 5.0.0 a
+  # mismatch installed silently and only the container failed afterwards.
+  #
+  #   up to 1.16.5     Java 8
+  #   1.17 - 1.17.1    Java 16   (never published as a chart line here)
+  #   1.18 - 1.20.4    Java 17
+  #   1.20.5 - 1.21.11 Java 21
+  #   26.1 and later   Java 25
+  #
+  # These are Mojang's boundaries, not this chart's: javaVersion.majorVersion
+  # from the piston-meta version manifest, swept over all 102 releases on
+  # 2026-09-02. There are exactly four transitions and they are monotonic in
+  # release order (1.6.1-1.6.4 predate the field and declare none).
+  #
+  # Only a plain numeric x[.y[.z]] is compared. A snapshot ("26w13a"), a
+  # pre-release ("1.21.11-pre1") or "LATEST" is let through unchecked - see
+  # image.tagOverride for why the two gaps are deliberate.
+  #
+  # Quote the value. Unquoted YAML reads 1.20 as the number 1.2, and the chart
+  # would pass "1.2" to the image as VERSION.
+  #
+  # This chart publishes appVersion "2026.8.2-java25".
   version: "26.2"
 
 # curseforge, ftb and curseforgeServerpack are mutually exclusive - enabling

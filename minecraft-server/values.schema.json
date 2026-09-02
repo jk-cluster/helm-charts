@@ -12,6 +12,17 @@
     "scaleDown": {
       "type": "boolean"
     },
+    "image": {
+      "description": "May be null / empty: the effective tag then falls back to the chart's appVersion, which is the pre-5.0.0 behaviour.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "tagOverride": {
+          "description": "Tag of the itzg/minecraft-server image. Empty or null means the chart's appVersion. Deliberately not called \"tag\": it decouples the running image from the chart version and is not managed by Renovate. The Java line of the effective tag is validated against minecraft.version at render time; a tag without a recognizable \"java<N>\" part is let through on purpose.",
+          "type": ["string", "null"]
+        }
+      }
+    },
     "secrets": {
       "type": "object",
       "additionalProperties": false,

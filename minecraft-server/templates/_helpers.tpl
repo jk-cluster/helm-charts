@@ -184,6 +184,133 @@ last one silently won. Fail loudly instead.
 {{- end -}}
 
 {{/*
+The tag of the itzg/minecraft-server image this release actually runs.
+
+Default: .Chart.AppVersion, exactly as before chart 5.0.0. image.tagOverride
+replaces it when set - that is the one way to run a Java line other than the
+one this chart version publishes, now that only the newest line is maintained
+(see Chart.yaml). The value is deliberately NOT called image.tag: it is an
+emergency exit, not a knob to turn in passing, and it is not managed by
+Renovate (renovate.json5 tracks appVersion only).
+*/}}
+{{- define "minecraft-server.imageTag" -}}
+{{- $override := "" -}}
+{{- if kindIs "map" .Values.image -}}
+{{- if not (kindIs "invalid" .Values.image.tagOverride) -}}
+{{- $override = printf "%v" .Values.image.tagOverride | trim -}}
+{{- end -}}
+{{- end -}}
+{{- if $override -}}{{ $override }}{{- else -}}{{ .Chart.AppVersion }}{{- end -}}
+{{- end -}}
+
+{{/*
+Where the effective tag came from - used in the guard's message so the reader
+knows which of the two values to change.
+*/}}
+{{- define "minecraft-server.imageTagSource" -}}
+{{- $override := "" -}}
+{{- if kindIs "map" .Values.image -}}
+{{- if not (kindIs "invalid" .Values.image.tagOverride) -}}
+{{- $override = printf "%v" .Values.image.tagOverride | trim -}}
+{{- end -}}
+{{- end -}}
+{{- if $override -}}image.tagOverride{{- else -}}.Chart.AppVersion{{- end -}}
+{{- end -}}
+
+{{/*
+The Java line the effective image tag carries ("java25", "java17", ...), or the
+empty string when the tag does not name one.
+
+regexFind rather than a suffix comparison, so flavoured tags keep working:
+"2026.8.2-java25", "java21-alpine" and "latest-java17-jdk" all resolve.
+*/}}
+{{- define "minecraft-server.javaLine" -}}
+{{- regexFind "java[0-9]+" (include "minecraft-server.imageTag" .) -}}
+{{- end -}}
+
+{{/*
+The Java line minecraft.version requires, or the empty string when the value is
+not a version this chart can compare.
+
+The boundaries are Mojang's, not this chart's: they are javaVersion.majorVersion
+from the piston-meta version manifest, swept over all 102 releases on 2026-09-02.
+The transitions are exactly four, and monotonic in release order:
+
+  1.0    - 1.16.5   java 8    (1.6.1-1.6.4 predate the field and carry none)
+  1.17   - 1.17.1   java 16
+  1.18   - 1.20.4   java 17
+  1.20.5 - 1.21.11  java 21
+  26.1   and later  java 25
+
+DELIBERATE GAP: a minecraft.version that is not a plain numeric "x", "x.y" or
+"x.y.z" - a snapshot ("26w13a"), a pre-release ("1.21.11-pre1"), "LATEST" -
+yields the empty string and is let through unchecked. The chart cannot compare
+it, and a guard that rejects everything it does not understand gets worked
+around instead of respected. The mismatch then still surfaces the old way:
+CrashLoopBackOff once the startup budget is spent, with the reason in the log.
+*/}}
+{{- define "minecraft-server.requiredJavaLine" -}}
+{{- $v := printf "%v" .Values.minecraft.version | trim -}}
+{{- if regexMatch "^[0-9]+(\\.[0-9]+){0,2}$" $v -}}
+{{- $n := len (splitList "." $v) -}}
+{{- $sv := $v -}}
+{{- if eq $n 1 -}}{{- $sv = printf "%s.0.0" $v -}}{{- else if eq $n 2 -}}{{- $sv = printf "%s.0" $v -}}{{- end -}}
+{{- if semverCompare "< 1.17.0" $sv -}}java8
+{{- else if semverCompare "< 1.18.0" $sv -}}java16
+{{- else if semverCompare "< 1.20.5" $sv -}}java17
+{{- else if semverCompare "< 26.1.0" $sv -}}java21
+{{- else -}}java25
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Guard: minecraft.version must fit the Java line of the effective image tag.
+
+Until chart 5.0.0 nothing checked this - a mismatch rendered and installed
+without a word, and only the container failed afterwards. It now fails at render
+time, which is a behaviour change for an installation that already runs a
+mismatched pair (it does not run: it fails earlier and visibly instead).
+
+The check runs ALWAYS, not only when image.tagOverride is set: Helm merges user
+values into the chart defaults indistinguishably, so a template cannot tell a
+deliberately set minecraft.version from the chart's own default.
+
+DELIBERATE GAP, the second one: an image tag without a recognizable java<N> part
+is let through - see minecraft-server.javaLine. Same reasoning as for an
+uncomparable minecraft.version.
+*/}}
+{{- define "minecraft-server.validateJavaLine" -}}
+{{- $tag := include "minecraft-server.imageTag" . -}}
+{{- $line := include "minecraft-server.javaLine" . -}}
+{{- $required := include "minecraft-server.requiredJavaLine" . -}}
+{{- if and $line $required -}}
+{{- if ne $line $required -}}
+{{- $source := include "minecraft-server.imageTagSource" . -}}
+{{- $swapped := regexReplaceAll "java[0-9]+" $tag $required -}}
+{{- fail (printf (join "\n" (list
+  "minecraft-server: the image tag and minecraft.version belong to different Java lines."
+  ""
+  "  image tag          %-22s is the %s line   (from %s)"
+  "  minecraft.version  %-22s needs the %s line"
+  ""
+  "Java 8 runs Minecraft up to 1.16.5, 1.17-1.17.1 need Java 16, 1.18-1.20.4 need"
+  "Java 17, 1.20.5-1.21.11 need Java 21, and 26.1 and later need Java 25 (Mojang's"
+  "version manifest, javaVersion.majorVersion per release)."
+  ""
+  "Change one of the two:"
+  "  - set minecraft.version to a release of the %s line, or"
+  "  - set image.tagOverride to an itzg/minecraft-server tag of the %s line"
+  "    (this tag with its line swapped would be \"%s\" - check that upstream"
+  "    published it before using it)."))
+  (printf "%q" $tag) $line $source
+  (printf "%q" (printf "%v" .Values.minecraft.version)) $required
+  $line $required $swapped) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Merge a user-supplied values sub-tree onto a dict of chart defaults so that a
 null / empty override falls back to the defaults instead of erasing them.
 

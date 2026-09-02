@@ -5,16 +5,25 @@ icon: https://avatars.githubusercontent.com/u/988985
 
 type: application
 
-# The Java line of this chart version is chosen through appVersion, which is
-# the image tag: the chart is published once per line (java8 / java17 / java21 /
-# java25) and minecraft.version in values.yaml must match the line published
-# here.
+# ONLY THE NEWEST JAVA LINE IS MAINTAINED (chart 5.0.0, issue #158).
+# appVersion is the image tag and therefore fixes the JVM. Up to chart 4.1.0 the
+# chart was published once per line (java8 / java17 / java21 / java25) out of
+# this single directory, which is what made the lines drift apart: whatever
+# change landed while a line happened to lie in the directory reached that line
+# only. That is over. This directory carries exactly one line - the newest -
+# and it is the only one that gets chart changes.
+# The older lines stay published as frozen artifacts and are still installable:
+# java8 and java17 at 4.0.0, java21 at 4.1.0. They will not be updated again.
+# To run an older JVM with the CURRENT chart, set image.tagOverride in values
+# instead of installing a frozen chart version; the chart then checks that
+# minecraft.version fits the line of that tag and fails the render if it does
+# not.
 # Since chart 2.0.0 the tag is a DATED upstream release ("<release>-java<N>")
 # instead of the rolling line tag ("java<N>"): the rolling tags are rebuilt
 # continuously, so a pod restart could pull a different image than the last one
 # without anything being recorded anywhere. The dated tags are immutable, so the
 # image is now pinned by the chart version like every other chart in this repo.
-version: 4.1.0+up2026.8.2.java25
+version: 5.0.0+up2026.8.2.java25
 appVersion: "2026.8.2-java25"
 
 maintainers:

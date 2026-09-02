@@ -9,7 +9,9 @@
 {{- if and (kindIs "float64" $startup.periodSeconds) (kindIs "float64" $startup.failureThreshold) -}}
 {{- $budget = printf "%.0f seconds" (mulf $startup.periodSeconds $startup.failureThreshold) -}}
 {{- end -}}
-{{- $line := regexFind "java[0-9]+" (printf "%v" .Chart.AppVersion) -}}
+{{- $tag := include "minecraft-server.imageTag" . -}}
+{{- $line := include "minecraft-server.javaLine" . -}}
+{{- $tagOverridden := ne (include "minecraft-server.imageTagSource" .) ".Chart.AppVersion" -}}
 {{- $svc := printf "%s-%s-service" .Release.Name .Chart.Name -}}
 {{- $sfs := printf "%s-%s-sfs" .Release.Name .Chart.Name -}}
 {{- $pod := printf "%s-%s-sfs-0" .Release.Name .Chart.Name -}}
@@ -26,7 +28,7 @@
 {{- end -}}
 {{- end -}}
 {{- $memPinned := not (kindIs "invalid" (index $givenReq "memory")) -}}
-minecraft-server {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+minecraft-server {{ $tag }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
 
 ACCESS — A MINECRAFT SERVER, NOT A WEB SERVICE
   This release has no Ingress, no certificate and no URL. Clients speak the
@@ -76,25 +78,53 @@ ACCESS — A MINECRAFT SERVER, NOT A WEB SERVICE
 
     kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $svc }} {{ .Values.server.service.port }}:{{ .Values.server.service.port }}
 
-THIS CHART IS PUBLISHED ONCE PER JAVA LINE — THIS IS {{ $line | default "an unrecognized line" | upper }}
-  The JVM is fixed by the image tag, which comes from the chart's appVersion
-  ({{ .Chart.AppVersion }}), not from a value. This build runs
-  minecraft.version {{ .Values.minecraft.version }}.
+THE JAVA LINE OF THIS RELEASE IS {{ $line | default "NOT RECOGNIZABLE FROM ITS TAG" | upper }}
+  The JVM is fixed by the image tag, not by a value of the game. This release
+  runs
 
-  Java 8 runs Minecraft up to 1.16.5, 1.18-1.20.4 need Java 17, 1.20.5-1.21.11
-  need Java 21 and 26.1 and later need Java 25 (read off Mojang's version
-  manifest, javaVersion.majorVersion per release). Nothing in this chart checks
-  that minecraft.version fits the line: a mismatch renders and installs without
-  a word, and only the container fails afterwards — CrashLoopBackOff once the
-  startup budget{{ if $budget }} ({{ $budget }}){{ end }} is spent, with the reason in the log and
+    itzg/minecraft-server:{{ $tag }}
+
+  with minecraft.version {{ .Values.minecraft.version }}.
+{{- if $tagOverridden }}
+
+  That tag comes from image.tagOverride, NOT from the chart's appVersion
+  ({{ .Chart.AppVersion }}). So the chart version no longer says what this release runs:
+  "helm list" reports {{ .Chart.Version }} while the pod is on the tag
+  above. That is the price of the override, and the reason it is not called
+  image.tag.
+{{- else }}
+
+  That tag comes from the chart's appVersion; image.tagOverride is empty, so
+  the chart version tells the whole truth about the image.
+{{- end }}
+
+  Since chart 5.0.0 THAT PAIRING IS CHECKED: if the line of the tag above does
+  not fit minecraft.version, the render fails and names both values. Two cases
+  are let through on purpose — a tag without a recognizable "java<N>" part, and
+  a minecraft.version that is not a plain numeric x[.y[.z]] (a snapshot, a
+  pre-release, "LATEST"). In those two the old failure mode still applies: the
+  release installs, and only the container fails afterwards — CrashLoopBackOff
+  once the startup budget{{ if $budget }} ({{ $budget }}){{ end }} is spent, with the reason in the log and
   nowhere else:
 
     kubectl -n {{ .Release.Namespace }} logs {{ $pod }}
 
-  So moving the server across a line boundary is a change of CHART VERSION, not
-  a change of minecraft.version: pick the published chart of the target line and
-  set minecraft.version to match it. Changing only minecraft.version leaves the
-  old JVM in place.
+  The boundaries are Mojang's (javaVersion.majorVersion in the piston-meta
+  version manifest, per release):
+
+    up to 1.16.5      Java 8
+    1.17 - 1.17.1     Java 16
+    1.18 - 1.20.4     Java 17
+    1.20.5 - 1.21.11  Java 21
+    26.1 and later    Java 25
+
+  ONLY THE NEWEST LINE IS MAINTAINED. This chart directory carries one line and
+  gets chart changes only for that one; java8 and java17 stay frozen at chart
+  4.0.0, java21 at 4.1.0. So moving the server across a line boundary is no
+  longer a change of chart version: set image.tagOverride to a tag of the target
+  line AND minecraft.version to a release of it, in the same upgrade. Changing
+  only one of the two now fails the render instead of leaving a broken pod
+  behind.
 {{- if eq $replicas "0" }}
 
 SCALED TO ZERO

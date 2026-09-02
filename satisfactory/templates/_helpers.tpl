@@ -289,6 +289,52 @@ Probe specifics that a rebuilt default must not lose:
 {{- end -}}
 
 {{/*
+The effective game block (issue #99, found alongside #215).
+
+"--set game=null" — or a leftover "game:" with all sub-keys deleted — used to
+abort the render with a nil-pointer error at .Values.game.maxPlayers, because
+this block never got the null-safe treatment the probes, security contexts and
+resources have. It now falls back to the same defaults values.yaml documents.
+
+The defaults below MUST stay in sync with the game block in values.yaml.
+Note that enableSeasonalEvents defaults to FALSE: that is what keeps
+DISABLESEASONALEVENTS at "true", the value this chart has always rendered.
+*/}}
+{{- define "satisfactory.game" -}}
+{{- $defaults := dict
+      "experimental" false
+      "maxPlayers" 4
+      "enableSeasonalEvents" false -}}
+{{- include "satisfactory.defaultedDict" (dict "defaults" $defaults "given" . "path" "game") -}}
+{{- end -}}
+
+{{/*
+Render the DISABLESEASONALEVENTS env value from game.enableSeasonalEvents
+(issue #215).
+
+The image only offers the negative switch, so the chart negates the positive
+value here — that is the whole point of the rename: the key says what it does
+and the env var keeps the name the image expects.
+
+Go's "not" cannot do this: it treats every non-empty string as true, so the
+string form "false" (which fleet bundles habitually write for booleans, and
+which the schema therefore accepts) would flip the wrong way. Hence the
+explicit comparison — and an explicit fail for anything that is neither, so a
+typo like "yes" cannot be silently read as "events off". Null never reaches
+here; satisfactory.game has already replaced it with the default.
+*/}}
+{{- define "satisfactory.disableSeasonalEvents" -}}
+{{- $raw := printf "%v" . -}}
+{{- if eq (lower $raw) "true" -}}
+false
+{{- else if eq (lower $raw) "false" -}}
+true
+{{- else -}}
+{{- fail (printf "game.enableSeasonalEvents must be true or false (boolean or string), got %q" $raw) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The effective resources block, fed into the resources helper above so that an
 erased "resources:" still yields the chart's requests and computed limits.
 The limitFactor default stays 2 here (not the repo-wide 3): the game server

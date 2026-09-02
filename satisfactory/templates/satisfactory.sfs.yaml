@@ -1,3 +1,4 @@
+{{- $game := fromYaml (include "satisfactory.game" .Values.game) -}}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -25,7 +26,7 @@ spec:
             - name: DEBUG
               value: "{{ .Values.dev.debug }}"
             - name: MAXPLAYERS
-              value: "{{ .Values.game.maxPlayers }}"
+              value: "{{ include "satisfactory.formatNumber" $game.maxPlayers }}"
             # PUID/PGID are only used by the image's root entrypoint path;
             # with the default non-root security context they are ignored.
             - name: PGID
@@ -35,9 +36,11 @@ spec:
             - name: SKIPUPDATE
               value: "false"
             - name: STEAMBETA
-              value: "{{ .Values.game.experimental }}"
+              value: "{{ $game.experimental }}"
+            # The image only knows the negative switch, so game.enableSeasonalEvents
+            # is negated here (#215): true -> "false" (events run).
             - name: DISABLESEASONALEVENTS
-              value: "{{ .Values.game.seasonalEvents }}"
+              value: "{{ include "satisfactory.disableSeasonalEvents" $game.enableSeasonalEvents }}"
             - name: SERVERGAMEPORT
               value: "{{ .Values.server.gamePort }}"
             - name: SERVERMESSAGINGPORT

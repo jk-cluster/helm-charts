@@ -4,5 +4,5 @@ description: A Helm chart to deploy urlaubsverwaltung on Kubernetes
 icon: https://raw.githubusercontent.com/urlaubsverwaltung/urlaubsverwaltung/main/src/main/resources/static/favicons/apple-touch-icon.png
 type: application
 
-version: 8.1.0+up6.7.0
+version: 9.0.0+up6.7.0
 appVersion: 6.7.0

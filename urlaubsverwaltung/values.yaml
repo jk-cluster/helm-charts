@@ -45,6 +45,39 @@ urlaubsverwaltung:
       capabilities:
         drop:
           - ALL
+  # HEALTH INDICATORS — TWO SETTINGS THE CHART FIXES IN THE TEMPLATE
+  #
+  # The chart sets these two as plain environment variables, not as values,
+  # because urlaubsverwaltung.env below already overrides anything:
+  #
+  #   MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE=readinessState,db
+  #     puts the datasource into the readiness group, so a database outage
+  #     takes the pod out of Ready instead of leaving it serving errors (#218).
+  #     The liveness group stays untouched on purpose — an outage must keep
+  #     traffic away, not restart the pod in a loop.
+  #   MANAGEMENT_HEALTH_MAIL_ENABLED=false
+  #     removes the mail indicator, which otherwise pins the aggregate
+  #     /actuator/health at 503 DOWN forever, because the chart's mail wiring
+  #     points at localhost:1025 where nothing listens (#217).
+  #
+  # THE CONSEQUENCE TO KNOW BEFORE IT BITES: whoever later configures real mail
+  # delivery (SPRING_MAIL_HOST/SPRING_MAIL_PORT via urlaubsverwaltung.env) MUST
+  # switch the indicator back on in the same change:
+  #
+  #   env:
+  #     - name: MANAGEMENT_HEALTH_MAIL_ENABLED
+  #       value: "true"
+  #
+  # Left at false, /actuator/health keeps answering 200 while the configured
+  # mail server is unreachable and no notification mail is delivered. The
+  # setting trades a permanently false alarm for silence, and silence is only
+  # correct as long as there is nothing to report about.
+  #
+  # That override repeats a name the chart already sets, and env is additive:
+  # it renders the variable twice (the later entry wins in the container), and
+  # adding it to an ALREADY INSTALLED release makes the next upgrade fail in
+  # the API server. See the "env IS ADDITIVE ONLY" section of NOTES.txt — the
+  # switch has to go in at install time, not at upgrade time.
   livenessProbe:
     httpGet:
       port: 8080

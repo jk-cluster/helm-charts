@@ -199,33 +199,89 @@ THE MEMORY LIMIT SIZES THE JAVA HEAP — IT IS NOT JUST A CEILING
 
     kubectl -n {{ .Release.Namespace }} logs deployment/{{ .Release.Name }}-{{ .Chart.Name }}-deployment | head -1
 
-DO NOT HEALTH-CHECK THIS RELEASE ON /actuator/health
-  That endpoint aggregates every health indicator, and one of them is the mail
-  sender pointed at localhost:1025 by this chart (see below). Nothing listens
-  there, so the aggregate answers 503 DOWN on a completely healthy release,
-  for the lifetime of that release:
+THE THREE HEALTH PATHS AND WHAT EACH ONE ANSWERS FOR
+  This chart sets two health settings in the deployment template, and they are
+  what makes the three paths mean different things:
 
-    {"components":{ ... "mail":{"status":"DOWN"} ... },"status":"DOWN"}
+    MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE=readinessState,db
+    MANAGEMENT_HEALTH_MAIL_ENABLED=false
 
-  Everything else in it — db, ping, diskSpace, ssl — is UP. The probes this
-  chart configures deliberately use the /actuator/health/liveness and
-  /actuator/health/readiness GROUPS instead, which contain only the
-  application's lifecycle state and answer 200. Any external monitor you point
-  at this release has to use the same two paths, or it will page you forever
-  about a mail server you never configured.
+  /actuator/health            everything the release actually runs: db,
+                              diskSpace, ping, ssl and the two lifecycle
+                              states. 200 UP on a healthy release. The mail
+                              indicator is NOT in it — see the mail section.
+    → point external monitoring here. This is the only path that also fails on
+      diskSpace or ssl.
 
-WHAT A READY POD DOES NOT PROVE
-  Those two groups report lifecycle state and nothing else — the datasource is
-  not in them. Measured here: with the database scaled away underneath a
-  running pod, both groups kept answering 200, the pod stayed 1/1 Ready and was
-  never restarted. The database is verified exactly once, at boot, by the
-  migration.
+  /actuator/health/readiness  readinessState AND db. Goes DOWN (503) on a
+                              database outage, which takes the pod out of Ready
+                              and stops traffic reaching it.
+    → the readinessProbe.
 
-  Know the resulting picture in advance: during a database outage the pod stays
-  Ready, its endpoint keeps receiving traffic{{ if .Values.ingress.enabled }}, the Ingress keeps routing to
-  it{{ end }}, and users get application errors while Kubernetes reports everything
-  healthy. Nothing in the pod's status or restart count points at the database.
-  Look there first anyway.
+  /actuator/health/liveness   livenessState alone, deliberately WITHOUT db.
+                              Stays 200 through a database outage.
+    → the livenessProbe and the startupProbe.
+
+  The split is the point: a database outage has to keep traffic away, but
+  restarting the pod does not bring the database back. Adding db to the
+  liveness group would turn every outage into a crash loop on top of the
+  outage. Measured on this chart, with the database scaled to zero underneath a
+  running pod: readiness 503, liveness 200, pod 0/1 Ready, restart count 0 —
+  the pod left Ready about 20 seconds after the database went away.
+
+  The other half of that measurement matters just as much: when the database
+  came back, the pod returned to Ready by itself within about five seconds,
+  still with restart count 0. Nothing had to be rolled, deleted or scaled by
+  hand. That is what leaving the liveness group alone buys — the outage is
+  ridden out and then simply over.
+
+  How readiness actually fails is worth knowing before you tune it. The db
+  indicator does not answer 503 quickly — it waits out the JDBC connection
+  timeout first, measured at 30 seconds against a database whose Service has no
+  endpoints at all. readinessProbe.timeoutSeconds is 5, so the kubelet gives up
+  long before the answer arrives and logs
+
+    Readiness probe failed: ... context deadline exceeded
+
+  rather than a 503. The pod leaves Ready either way, and faster; the 503 is
+  what a client with patience sees. Raising timeoutSeconds past the JDBC
+  timeout would swap the timeout for the 503 and delay the reaction — there is
+  no reason to.
+
+WHAT A READY POD DOES AND DOES NOT PROVE
+  Ready now means the pod can reach the database — that is checked on every
+  readiness period, not once at boot. It still does not mean the identity
+  provider is reachable: OIDC is resolved once at startup (see below) and no
+  health indicator watches it afterwards, so a provider that goes down after
+  the rollout leaves a Ready pod on which nobody can log in.
+
+  Ready also proves reachability, not correctness: the db indicator validates a
+  connection, it never looks at the schema. Measured here — a database that came
+  back EMPTY put the pod straight back to Ready with /actuator/health at 200,
+  while not one table existed in it. A restored-but-wrong database reads as
+  healthy, so a probe going green after a database incident is not on its own
+  evidence that the data came back with it.
+
+  A database outage now shows up in the pod's status: READY drops to 0/1 while
+  STATUS stays Running and RESTARTS stays put. That combination — running, not
+  restarting, not Ready — is the signature of a dependency outage rather than
+  of a broken release. The reason is in the endpoint, not in the log:
+
+    kubectl -n {{ .Release.Namespace }} get pod -l app={{ .Release.Name }}-{{ .Chart.Name }}-deployment
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-{{ .Chart.Name }}-service 8080:80
+    curl -s localhost:8080/actuator/health
+
+  The body names components only when show-details is on; the chart does not
+  set it, so the aggregate answers {"status":"DOWN","groups":[...]} and the
+  status code carries the message. To see WHICH component is down, add
+
+    urlaubsverwaltung.env:
+      - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
+        value: always
+
+  and know what that publishes to anyone who can reach the endpoint: the
+  database product, the container's filesystem path and free bytes, the
+  certificate chains, and the stack-trace class of whatever failed.
 
   Note also that there is no shell in this image: "kubectl exec" cannot open
   one, and neither can a debug sidecar sharing the process namespace run the
@@ -241,25 +297,61 @@ MAIL AND THE APPLICATION URL ARE PLACEHOLDERS UNTIL YOU SET THEM
     UV_MAIL_APPLICATIONURL = http://localhost:8080
 
   Nothing in this pod listens on localhost:1025, so no notification mail leaves
-  the release and the mail health indicator stays DOWN. UV_MAIL_APPLICATIONURL
-  is what the app puts into the links inside those mails — it is NOT derived
-  from ingress.domain. Left as it is, every link points at the reader's own
-  machine.
+  the release. UV_MAIL_APPLICATIONURL is what the app puts into the links
+  inside those mails — it is NOT derived from ingress.domain. Left as it is,
+  every link points at the reader's own machine.
 
-urlaubsverwaltung.env IS ADDITIVE ONLY, AND A COLLISION BREAKS THE UPGRADE
+  BECAUSE that wiring is a placeholder, the chart sets
+
+    MANAGEMENT_HEALTH_MAIL_ENABLED=false
+
+  and the mail indicator is gone from /actuator/health. Otherwise the aggregate
+  would answer 503 DOWN on a perfectly healthy release for its whole lifetime,
+  and any monitor pointed at it would page forever about a mail server nobody
+  configured.
+
+  THE PART THAT BITES LATER: the day you configure real mail delivery, switch
+  the indicator back on in the SAME change —
+
+    urlaubsverwaltung.env:
+      - name: MANAGEMENT_HEALTH_MAIL_ENABLED
+        value: "true"
+
+  Left at false it does not report a false alarm, it reports nothing: the
+  endpoint answers 200 while the mail server is unreachable and notifications
+  are silently not delivered. The setting is only honest while there is no mail
+  server to be honest about.
+
+  Note that this variable repeats a name the chart already sets, so per the rule
+  below it only takes effect when it goes in at INSTALL time. Put into an
+  already installed release it does nothing at all, and says so nowhere: helm
+  reports a successful upgrade while the container keeps "false".
+
+urlaubsverwaltung.env IS ADDITIVE ONLY, AND A COLLISION IS LOST ON UPGRADE
   The entries are appended AFTER the chart's own list{{ if $envNames }} (this release appends:
   {{ join ", " $envNames }}){{ end }}. An entry that repeats a name the
   chart already sets does not replace it — it renders the variable twice, and
-  that has a sharp edge: adding such a name to an ALREADY INSTALLED release
-  makes the next upgrade fail in the API server, before anything changes, with
+  what happens to that pair depends on WHEN it first appears:
 
-    UPGRADE FAILED: cannot patch "{{ .Release.Name }}-{{ .Chart.Name }}-deployment" ...
-    The order in patch list ... doesn't match $setElementOrder list
+  AT INSTALL both entries reach the pod and the later one — yours — wins in the
+  container. The API server accepts it with a warning:
 
-  because env entries are merged by name and a duplicate name breaks that
-  ordering. A fresh install with the same values goes through, so the failure
-  looks arbitrary until you know it. Treat the variables above as fixed for the
-  life of a release: to really change one, reinstall.
+    Warning: spec.template.spec.containers[0].env[N]: hides previous definition
+    of "NAME", which may be dropped when using apply
+
+  AT UPGRADE that warning comes true. Kubernetes merges env by name, so the pair
+  collapses back to ONE entry and the surviving value is the CHART's, not yours.
+  Nothing fails: helm prints "Release has been upgraded", the revision counts up,
+  and the override is simply gone. Measured on this chart (helm 3.19.0,
+  Kubernetes 1.35): "helm get manifest" shows the variable twice while the live
+  Deployment shows it once, with the chart's value.
+
+  So the trap is silence, not an error. Treat the variables above as fixed for
+  the life of a release: to really change one, reinstall. And never read a green
+  upgrade as proof that an override took effect — read it off the object:
+
+    kubectl -n {{ .Release.Namespace }} get deployment {{ .Release.Name }}-{{ .Chart.Name }}-deployment \
+      -o jsonpath='{.spec.template.spec.containers[0].env}'
 
   Anything sensitive belongs in valueFrom.secretKeyRef rather than a plain
   value: a value is stored in the pod spec and readable by anyone who can read

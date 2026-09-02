@@ -50,6 +50,32 @@ spec:
                 secretKeyRef:
                   name: {{ .Release.Name }}-{{ .Chart.Name }}-db-secret
                   key: password
+            # Health indicators and probe groups
+            #
+            # Spring Boot creates the "liveness" and "readiness" groups by
+            # itself here (measured: /actuator/health answers
+            # {"groups":["liveness","readiness"]} with nothing configured), but
+            # the readiness group ships with readinessState ALONE. Without the
+            # line below a total database outage leaves /actuator/health/readiness
+            # at 200 and the pod 1/1 Ready while every request fails (#218).
+            # Naming the group's members REPLACES the default, so readinessState
+            # has to be repeated. "db" is the datasource indicator's real name,
+            # read off the running endpoint.
+            - name: MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE
+              value: "readinessState,db"
+            # The liveness group is deliberately NOT extended: a database
+            # outage has to keep traffic away, but restarting the pod does not
+            # bring the database back — it would only add a crash loop to the
+            # outage.
+            #
+            # The mail indicator is switched off because the mail wiring below
+            # points at localhost:1025, where nothing listens. Left on, it holds
+            # the aggregate /actuator/health at 503 DOWN for the whole life of a
+            # healthy release (#217). Anyone who later configures real mail
+            # delivery has to switch it back on via urlaubsverwaltung.env, or
+            # the endpoint stays blind to a broken mail server.
+            - name: MANAGEMENT_HEALTH_MAIL_ENABLED
+              value: "false"
             # Mail
             - name: UV_MAIL_FROM
               value: urlaubsverwaltung@example.org

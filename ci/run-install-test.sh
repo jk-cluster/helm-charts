@@ -32,6 +32,15 @@ if [ -f "$CI_DIR/$CHART/settings.env" ]; then
 fi
 
 # --- Exclusion list ---------------------------------------------------------
+# In CI this branch is no longer reached: the install-test job in
+# .github/workflows/validate-charts.yml reads the same list in its "if" and is
+# reported as SKIPPED, because a job that printed SKIP and exited 0 showed up as
+# a passed check and read exactly like a chart that had actually come up
+# (issue #231). The list is parsed there the way it is parsed here - first
+# whitespace-separated field, the rest of the line the reason - so both places
+# select the same charts.
+# The branch stays for local runs, where "ci/run-install-test.sh <chart>" should
+# say why it does nothing rather than fail.
 if [ -f "$CI_DIR/excluded-charts.txt" ]; then
   REASON="$(grep -E "^$CHART([[:space:]]|$)" "$CI_DIR/excluded-charts.txt" | sed -E "s/^$CHART[[:space:]]*//" || true)"
   if [ -n "$REASON" ]; then

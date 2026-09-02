@@ -11,6 +11,7 @@ jobs:
       any-chart-changed: ${{ steps.detect.outputs.any-chart-changed }}
       scan-charts: ${{ steps.detect.outputs.scan-charts }}
       any-scan: ${{ steps.detect.outputs.any-scan }}
+      excluded-charts: ${{ steps.detect.outputs.excluded-charts }}
     steps:
       - name: "Checkout Repository"
         uses: actions/checkout@v7
@@ -53,6 +54,34 @@ jobs:
           else
             echo "any-scan=true" >> "$GITHUB_OUTPUT"
           fi
+
+          # The charts that cannot run in CI (issue #231). The install-test job
+          # reads this list in its "if" and is then reported as SKIPPED instead
+          # of running a job that only prints SKIP and exits 0 - which GitHub
+          # showed as a passed check, indistinguishable from a chart that
+          # actually came up in the cluster.
+          # The list is parsed exactly the way ci/run-install-test.sh parses it:
+          # first whitespace-separated field of every line that is neither empty
+          # nor a comment, the rest of the line being the mandatory reason.
+          EXCLUDED="[]"
+          if [ -f ci/excluded-charts.txt ]; then
+            EXCLUDED=$(grep -vE '^[[:space:]]*(#|$)' ci/excluded-charts.txt \
+              | awk '{print $1}' \
+              | jq -Rsc 'split("\n") | map(select(length > 0))')
+          fi
+          echo "excluded-charts=$EXCLUDED" >> "$GITHUB_OUTPUT"
+          echo "Charts excluded from the install-test: $EXCLUDED"
+
+          # A skipped check says "not run" but not why, and the reason is the
+          # part that matters when someone weighs whether a PR is covered. So
+          # every excluded chart in this PR's matrix names itself, with its
+          # justification, in the job summary.
+          for CHART in $(echo "$CHARTS" | jq -r '.[]'); do
+            if echo "$EXCLUDED" | jq -e --arg c "$CHART" 'index($c)' >/dev/null; then
+              REASON=$(grep -E "^$CHART([[:space:]]|$)" ci/excluded-charts.txt | sed -E "s/^$CHART[[:space:]]*//")
+              echo "- **Install-test \`$CHART\`: skipped** — $REASON (see \`ci/excluded-charts.txt\`)" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
 
   build-chart:
     name: "Build ${{ matrix.chart }}"
@@ -162,7 +191,24 @@ jobs:
   install-test:
     name: "Install-test ${{ matrix.chart }}"
     needs: [detect-changed-charts, build-chart]
-    if: needs.detect-changed-charts.outputs.any-chart-changed == 'true'
+    # Two conditions, and the second one is evaluated per matrix entry: a chart
+    # listed in ci/excluded-charts.txt gets no job, so GitHub reports
+    # "Install-test <chart>  Skipped" in the check list (issue #231).
+    # Previously the job ran, ci/run-install-test.sh printed SKIP and exited 0,
+    # and the check list showed a green tick that read exactly like a chart that
+    # had been installed and become Ready - the one thing this repo does not
+    # tolerate anywhere else, a display that claims more than the state (see
+    # "Values that must not lie" in the README).
+    # Skipping the job rather than filtering the chart out of the matrix is
+    # deliberate: an absent job is silent, and silence is what the issue is
+    # about. A skipped entry keeps the chart's name in the list, next to the
+    # ones that were tested, and the detect job writes its documented reason
+    # into the job summary.
+    # The exclusion itself is unchanged and stays a documented, justified
+    # mechanism; only its display changes.
+    if: >-
+      needs.detect-changed-charts.outputs.any-chart-changed == 'true'
+      && !contains(fromJSON(needs.detect-changed-charts.outputs.excluded-charts), matrix.chart)
     runs-on: ubuntu-latest
     # Blocking since Renovate automerges patch/minor updates: a chart that no
     # longer starts must stop the PR before it reaches main and publishes. This
@@ -227,11 +273,12 @@ jobs:
         run: curl -sSfL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | TAG="$K3D_VERSION" bash
       - name: "Create k3d cluster"
         run: k3d cluster create install-test --image "$K3S_IMAGE" --wait --timeout 180s
-      # Excluded charts (see ci/excluded-charts.txt) are skipped inside the
-      # script with their documented reason. The variables below are empty for
-      # every other chart and are read only by the chart that declares them in
-      # ci/<chart>/settings.env (REQUIRED_ENV); the script fails loudly if a
-      # declared one is missing, it never skips over it.
+      # Excluded charts never reach this step - the job's "if" above already
+      # skipped them. The script keeps its own exclusion check for local runs.
+      # The variables below are empty for every other chart and are read only by
+      # the chart that declares them in ci/<chart>/settings.env (REQUIRED_ENV);
+      # the script fails loudly if a declared one is missing, it never skips
+      # over it.
       - name: "Install chart and wait for readiness"
         env:
           FREESAILARR_WG_KEY: ${{ steps.load-freesailarr-vpn.outputs.FREESAILARR_WG_KEY }}

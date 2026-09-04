@@ -4,6 +4,7 @@
 # fixtures under ci/<chart>/ and requires every workload to become Ready.
 #
 # Usage: ci/run-install-test.sh <chart-name>
+#        ci/run-install-test.sh --list-excluded
 #
 # Layout (repo root):
 #   ci/common/            fixtures applied for every chart (OnePasswordItem stub CRD)
@@ -14,11 +15,47 @@
 #   ci/excluded-charts.txt        charts that cannot run in CI, with reasons
 set -euo pipefail
 
-CHART="${1:?usage: $0 <chart-name>}"
 NAMESPACE="default"
 RELEASE="ci"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CI_DIR="$ROOT/ci"
+
+# --- The exclusion list, parsed in exactly one place ------------------------
+# Two consumers read ci/excluded-charts.txt: this script, and the install-test
+# matrix in .github/workflows/validate-charts.yml, which drops the excluded
+# charts before the matrix is built (issue #231). Two parsers would be two
+# chances to select different charts - and the failure would be silent in the
+# worst direction, a chart the workflow believes excluded and the script
+# believes testable, or the reverse. So there is one parser, here, and the
+# workflow calls it through "--list-excluded" instead of re-implementing it.
+#
+# The format is one chart per line: first whitespace-separated field the chart
+# name, the rest of the line its mandatory justification. Blank lines and lines
+# starting with "#" are comments. A line carrying only a name and no reason is
+# deliberately NOT an exclusion (the "NF > 1" below): the justification is what
+# the README requires, and a bare name would silently drop a chart out of CI
+# with nothing to review.
+list_excluded() {
+  [ -f "$CI_DIR/excluded-charts.txt" ] || return 0
+  { grep -vE '^[[:space:]]*(#|$)' "$CI_DIR/excluded-charts.txt" || true; } \
+    | awk 'NF > 1 { name = $1; $1 = ""; sub(/^[[:space:]]+/, ""); print name "\t" $0 }'
+}
+
+# The reason a chart is excluded, empty if it is not. Exact string match on the
+# name, not a regex, so a chart name is never read as a pattern.
+excluded_reason() {
+  list_excluded | awk -F'\t' -v chart="$1" '$1 == chart { print $2; exit }'
+}
+
+# Emits "<chart><TAB><reason>" for every excluded chart. Read by the detect job
+# of validate-charts.yml before any chart is picked, which is why this runs
+# before the argument is required.
+if [ "${1:-}" = "--list-excluded" ]; then
+  list_excluded
+  exit 0
+fi
+
+CHART="${1:?usage: $0 <chart-name> | --list-excluded}"
 
 # Per-chart override via ci/<chart>/settings.env (INSTALL_TIMEOUT in seconds).
 # REQUIRED_ENV is a space-separated list of environment variables the chart's

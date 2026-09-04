@@ -69,12 +69,16 @@ if [ -f "$CI_DIR/$CHART/settings.env" ]; then
 fi
 
 # --- Exclusion list ---------------------------------------------------------
-if [ -f "$CI_DIR/excluded-charts.txt" ]; then
-  REASON="$(grep -E "^$CHART([[:space:]]|$)" "$CI_DIR/excluded-charts.txt" | sed -E "s/^$CHART[[:space:]]*//" || true)"
-  if [ -n "$REASON" ]; then
-    echo "SKIP: chart '$CHART' is excluded from the install-test: $REASON"
-    exit 0
-  fi
+# Through excluded_reason(), i.e. the same parser --list-excluded uses, so a
+# local run and the workflow matrix can never disagree about which charts are
+# excluded. In CI this branch is no longer reached: the detect job drops the
+# excluded charts before the matrix is built, so no install-test job exists for
+# them (#231). It stays for local runs, where "ci/run-install-test.sh
+# satisfactory" should say why it does nothing instead of trying.
+REASON="$(excluded_reason "$CHART")"
+if [ -n "$REASON" ]; then
+  echo "SKIP: chart '$CHART' is excluded from the install-test: $REASON"
+  exit 0
 fi
 
 if [ ! -d "$ROOT/$CHART" ] || [ ! -f "$ROOT/$CHART/Chart.yaml" ]; then

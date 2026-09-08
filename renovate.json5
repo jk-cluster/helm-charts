@@ -201,14 +201,48 @@
     //
     // When adding a chart, add a block here — see README "Creating a new chart".
     //
-    // Exception, deliberately no block: `freesailarr`. It bundles nine
-    // independently versioned upstreams, so none of them is "the" app version
-    // and no image tag comes from appVersion — all nine are pinned as
+    // Exception, deliberately no APP-VERSION block: `freesailarr`. It bundles
+    // ten independently versioned upstreams, so none of them is "the" app
+    // version and no image tag comes from appVersion — they are pinned as
     // image.repository/image.tag in its values.yaml, where the built-in
     // helm-values manager already finds them and proposes one update per
-    // image. Adding a block here would either duplicate those updates or
-    // rewrite an appVersion that selects nothing. Its appVersion is a
-    // hand-maintained marker; see freesailarr/Chart.yaml.
+    // image. Adding an appVersion block here would either duplicate those
+    // updates or rewrite an appVersion that selects nothing. Its appVersion is
+    // a hand-maintained marker; see freesailarr/Chart.yaml. The one image the
+    // built-in manager cannot follow — mediathekarr, pinned by digest — has its
+    // own block directly below.
+
+    {
+      description: [
+        "freesailarr / mediathekarr: the only image in this repo pinned by DIGEST, because its",
+        "tags carry no version at all — 'latest' is a 2024 build (v0.2.5) and the upstream README",
+        "points at the moving 'beta'. The built-in helm-values manager reads repository/tag and",
+        "would have nothing to compare, so this manager captures all three keys and lets Renovate",
+        "propose digest updates for the beta tag (currentDigest + currentValue = a digest-only",
+        "lookup; automerged under the 'digest' update type in the rule above).",
+        "",
+        "The pattern is anchored on the three keys in their values.yaml order: repository, tag,",
+        "digest. Reordering or renaming them does not fail anything — it silently stops matching,",
+        "and the image then never gets an update again (#158: a valid rule is not a matching rule).",
+        "",
+        "Verified by dry-run (renovate 44.69.11, --platform=local --dry-run=lookup, real registry),",
+        "two fixtures, because 'no update' is what BOTH a working and a broken rule look like while",
+        "the pin is current:",
+        "  currentDigest = the pinned one -> extracted with currentValue 'beta', updates [] (the",
+        "    beta tag really does still point at it).",
+        "  currentDigest = sha256:0000... -> updates [{updateType: digest, newValue: beta,",
+        "    newDigest: sha256:3ed7e14...}] on branch renovate/docker.io-pcjones-mediathekarr-beta.",
+        "The same run also shows the built-in helm-values manager finding this image and skipping it",
+        "(skipReason invalid-value, 'no currentDigest or pinDigests' — it does not read the digest",
+        "key), so the two managers cannot produce competing PRs.",
+      ],
+      customType: "regex",
+      managerFilePatterns: ["freesailarr/values.yaml"],
+      matchStrings: [
+        "repository: (?<depName>docker\\.io/pcjones/mediathekarr)\\s+tag: (?<currentValue>[^\\s]+)\\s+digest: (?<currentDigest>sha256:[0-9a-f]{64})",
+      ],
+      datasourceTemplate: "docker",
+    },
 
     {
       description: "apache-tika: four-part version plus flavour suffix (3.3.1.0-full); the compatibility group keeps the chart on -full.",

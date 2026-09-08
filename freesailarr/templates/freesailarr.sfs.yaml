@@ -521,6 +521,109 @@ spec:
               subPath: {{ . | quote }}
               {{- end }}
         {{- end }}
+        {{- if .Values.mediathekarr.enabled }}
+        # MediathekArr, the tenth container and the only one off by default: a fake
+        # Usenet indexer for Prowlarr (Newznab, port 5008) and a fake SABnzbd
+        # for Sonarr/Radarr (port 5007), fetching from the ARD and ZDF media
+        # libraries. Both consumers sit in this pod and reach it over
+        # 127.0.0.1, so it needs neither a service nor DNS to do its job.
+        - name: mediathekarr
+          # Tag AND digest: the tag stays readable, the digest is what is
+          # actually pulled. "beta" moves, and "latest" is a 2024 build - see
+          # the values comment.
+          image: "{{ .Values.mediathekarr.image.repository }}:{{ .Values.mediathekarr.image.tag }}@{{ required "mediathekarr.image.digest is required - the tag alone is a moving reference" .Values.mediathekarr.image.digest }}"
+          imagePullPolicy: IfNotPresent
+          {{- if .Values.mediathekarr.startGate.enabled }}
+          # THE START GATE. Kubernetes cannot order two regular containers, and
+          # an initContainer waiting for gluetun would deadlock (gluetun only
+          # starts once the init containers are done). So the wait happens here,
+          # in front of the image entrypoint: poll gluetun's health server -
+          # 200 only while the tunnel actually works - and exec the entrypoint
+          # afterwards.
+          #
+          # Why this is not optional decoration: MediathekArr fetches its
+          # ruleset once at start and never retries. Started before the tunnel,
+          # it answered every Newznab search with 0 results for over eleven
+          # minutes - container up, Ready, nothing in the log. The failure case
+          # looks exactly like the healthy one, which is why the gate exits
+          # instead of starting anyway when the timeout passes: a crash-looping
+          # container is visible, a silently empty indexer is not.
+          #
+          # wget comes with the (Debian) image, bash is its entrypoint's own
+          # interpreter - no extra tooling and no shell built into the chart.
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -eu
+              deadline=$(( SECONDS + {{ int .Values.mediathekarr.startGate.timeoutSeconds }} ))
+              echo "mediathekarr: waiting for gluetun to report healthy (127.0.0.1:9999)"
+              until wget -q -T 5 -O /dev/null http://127.0.0.1:9999/; do
+                if [ "$SECONDS" -ge "$deadline" ]; then
+                  echo "mediathekarr: gluetun did not report healthy within {{ int .Values.mediathekarr.startGate.timeoutSeconds }}s - exiting instead of starting without a tunnel, because a MediathekArr started too early answers every search with 0 results and reports nothing" >&2
+                  exit 1
+                fi
+                sleep {{ int .Values.mediathekarr.startGate.intervalSeconds }}
+              done
+              echo "mediathekarr: gluetun healthy after ${SECONDS}s"
+              {{- if gt (int .Values.mediathekarr.startGate.settleSeconds) 0 }}
+              sleep {{ int .Values.mediathekarr.startGate.settleSeconds }}
+              {{- end }}
+              exec /app/docker_start.sh
+          {{- end }}
+          env:
+            - name: TZ
+              value: {{ .Values.timezone | quote }}
+            {{- /* Both download paths are set by the chart, not left to the
+                   image: complete/ has to be visible to Sonarr/Radarr under
+                   the SAME absolute path (they are handed this value as the
+                   SABnzbd complete_dir, and a deviation imports nothing
+                   without an error), and incomplete/ has to live on the media
+                   claim rather than in an emptyDir, which would count against
+                   the container's ephemeral-storage limit and let one large
+                   download evict the whole pod. Setting them also keeps the
+                   image's built-in /data/mediathek default out of play, which
+                   the read-only root filesystem does not provide. */}}
+            - name: DOWNLOAD_INCOMPLETE_PATH
+              value: {{ printf "/downloads/%s/incomplete" .Values.mediathekarr.downloads.directory | quote }}
+            - name: DOWNLOAD_COMPLETE_PATH
+              value: {{ printf "/downloads/%s/complete" .Values.mediathekarr.downloads.directory | quote }}
+            {{- include "freesailarr.env" (dict "root" $ "env" .Values.mediathekarr.env) | nindent 12 }}
+          ports:
+            - containerPort: 5007
+              protocol: TCP
+              name: mediathekarr
+            - containerPort: 5008
+              protocol: TCP
+              name: ma-newznab
+          livenessProbe:
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "mediathekarr" "kind" "livenessProbe" "given" .Values.mediathekarr.livenessProbe) | nindent 12 }}
+          readinessProbe:
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "mediathekarr" "kind" "readinessProbe" "given" .Values.mediathekarr.readinessProbe) | nindent 12 }}
+          startupProbe:
+            {{- include "freesailarr.probeFor" (dict "root" $ "app" "mediathekarr" "kind" "startupProbe" "given" .Values.mediathekarr.startupProbe) | nindent 12 }}
+          resources:
+            {{- include "freesailarr.resourcesFor" (dict "root" $ "app" "mediathekarr" "given" .Values.mediathekarr.resources) | nindent 12 }}
+          securityContext:
+            {{- include "freesailarr.securityContextFor" (dict "root" $ "app" "mediathekarr" "given" .Values.mediathekarr.securityContext) | nindent 12 }}
+          volumeMounts:
+            - mountPath: /app/config
+              name: mediathekarr-config
+            {{- /* The same claim, the same mount path as sonarr/radarr - that
+                   is what makes the complete_dir path identical on both
+                   sides. */}}
+            - mountPath: /downloads
+              name: {{ include "freesailarr.mediaVolumeName" (dict "root" $ "category" "downloads") }}
+              {{- with .Values.media.downloads.subPath }}
+              subPath: {{ . | quote }}
+              {{- end }}
+            # Not a measured requirement: the container ran through with a
+            # read-only root and without a writable /tmp. Kept as cheap
+            # insurance for the .NET runtime, which is the kind of consumer that
+            # reaches for /tmp on a code path nobody exercised yet.
+            - mountPath: /tmp
+              name: mediathekarr-tmp
+        {{- end }}
       restartPolicy: Always
       volumes:
         # The tun device gluetun needs to create the Wireguard tunnel.
@@ -542,11 +645,11 @@ spec:
         setup with three separate claims still renders byte-identically to
         2.0.1 and the diff itself proves the change is inert there.
         */}}
-        {{- if or .Values.qbittorrent.enabled .Values.radarr.enabled .Values.sonarr.enabled }}
+        {{- if or .Values.qbittorrent.enabled .Values.radarr.enabled .Values.sonarr.enabled .Values.mediathekarr.enabled }}
         {{- if include "freesailarr.mediaVolumeOwned" (dict "root" $ "category" "downloads") }}
         - name: media-downloads
           persistentVolumeClaim:
-            claimName: {{ required "media.downloads.existingClaim is required when qbittorrent, radarr or sonarr is enabled" .Values.media.downloads.existingClaim }}
+            claimName: {{ required "media.downloads.existingClaim is required when qbittorrent, radarr, sonarr or mediathekarr is enabled" .Values.media.downloads.existingClaim }}
         {{- end }}
         {{- end }}
         {{- if or .Values.radarr.enabled .Values.bazarr.enabled }}
@@ -579,12 +682,16 @@ spec:
         - name: seerr-tmp
           emptyDir: {}
         {{- end }}
+        {{- if .Values.mediathekarr.enabled }}
+        - name: mediathekarr-tmp
+          emptyDir: {}
+        {{- end }}
   # Config volumes for gluetun and the enabled apps. NOTE: volumeClaimTemplates
   # are immutable - toggling an app's enabled flag later requires recreating
   # the StatefulSet once (kubectl delete statefulset <name> --cascade=orphan
   # before upgrading; existing PVCs and their data survive).
   volumeClaimTemplates:
-    {{- range $app := list "gluetun" "qbittorrent" "prowlarr" "radarr" "recyclarr" "sonarr" "seerr" "bazarr" }}
+    {{- range $app := list "gluetun" "qbittorrent" "prowlarr" "radarr" "recyclarr" "sonarr" "seerr" "bazarr" "mediathekarr" }}
     {{- $config := index $.Values $app }}
     {{- if or (eq $app "gluetun") $config.enabled }}
     - metadata:

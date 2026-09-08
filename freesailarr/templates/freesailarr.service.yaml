@@ -21,5 +21,16 @@ spec:
       port: {{ int $app.port }}
       targetPort: {{ $app.name }}
       name: {{ $app.name }}
+    {{- /* An app with more than one port keeps them in ONE service rather than
+           getting a second object: they belong to the same container and the
+           same pod IP, and only the primary port is ever addressed by an
+           ingress. mediathekarr is the only such app today - 5007 (SABnzbd
+           role, primary) and 5008 (Newznab role). */}}
+    {{- range $extra := $app.extraPorts | default list }}
+    - protocol: TCP
+      port: {{ int $extra.port }}
+      targetPort: {{ $extra.name }}
+      name: {{ $extra.name }}
+    {{- end }}
   type: ClusterIP
 {{- end }}

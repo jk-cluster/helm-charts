@@ -5,8 +5,8 @@ icon: https://avatars.githubusercontent.com/u/988985
 
 type: application
 
-version: 4.1.0+up1.46.4
-appVersion: "1.46.4"
+version: 4.1.1+up1.46.5
+appVersion: "1.46.5"
 
 maintainers:
   - name: jklein

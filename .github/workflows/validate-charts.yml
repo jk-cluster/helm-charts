@@ -11,6 +11,8 @@ jobs:
       any-chart-changed: ${{ steps.detect.outputs.any-chart-changed }}
       scan-charts: ${{ steps.detect.outputs.scan-charts }}
       any-scan: ${{ steps.detect.outputs.any-scan }}
+      install-charts: ${{ steps.detect.outputs.install-charts }}
+      any-install: ${{ steps.detect.outputs.any-install }}
     steps:
       - name: "Checkout Repository"
         uses: actions/checkout@v7
@@ -53,6 +55,55 @@ jobs:
           else
             echo "any-scan=true" >> "$GITHUB_OUTPUT"
           fi
+
+          # --- The install-test matrix: changed charts minus the excluded ones
+          # (issue #231). A chart in ci/excluded-charts.txt used to get a job
+          # that ran the script, printed SKIP and exited 0 - and GitHub knows
+          # only the exit code, so the check list showed a green tick for a
+          # chart nothing was ever attempted on. Dropping it here means no job
+          # exists for it and nothing claims it passed.
+          #
+          # The list is NOT parsed here. ci/run-install-test.sh --list-excluded
+          # emits "<chart><TAB><reason>", and that script is the one parser;
+          # re-implementing the format in YAML would be a second chance to
+          # select different charts, silently. The comparison below is jq's
+          # "!=" on whole strings, so a chart name is never read as a pattern.
+          INSTALL_CHARTS="$CHARTS"
+          SUMMARY_ROWS=""
+          while IFS=$'\t' read -r EX_NAME EX_REASON; do
+            [ -n "$EX_NAME" ] || continue
+            if [ "$(echo "$INSTALL_CHARTS" | jq -r --arg c "$EX_NAME" 'index($c) != null')" = "true" ]; then
+              # A "|" in the justification would break out of the table cell.
+              SUMMARY_ROWS="${SUMMARY_ROWS}| \`$EX_NAME\` | ${EX_REASON//|/\\|} |"$'\n'
+              echo "Excluded from the install-test: $EX_NAME - $EX_REASON"
+            fi
+            INSTALL_CHARTS="$(echo "$INSTALL_CHARTS" | jq -c --arg c "$EX_NAME" 'map(select(. != $c))')"
+          done <<< "$(ci/run-install-test.sh --list-excluded)"
+          echo "install-charts=$INSTALL_CHARTS" >> "$GITHUB_OUTPUT"
+          if [ "$INSTALL_CHARTS" = "[]" ]; then
+            echo "any-install=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "any-install=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          # An absent job says "not run" but never why, and an absence is easy
+          # to miss entirely. So every excluded chart of this PR is named here
+          # WITH its documented justification - which is the question a review
+          # actually asks. This summary is the visible half of the change; the
+          # dropped matrix entry is only the half that stops the lie.
+          if [ -n "$SUMMARY_ROWS" ]; then
+            {
+              echo "### Charts excluded from the install-test"
+              echo
+              echo "These charts are changed by this PR but listed in \`ci/excluded-charts.txt\`, so they get **no** install-test job. There is no green tick for them, because nothing was attempted (issue #231)."
+              echo
+              echo "| Chart | Documented reason |"
+              echo "| --- | --- |"
+              printf '%s' "$SUMMARY_ROWS"
+              echo
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "Install-test matrix: $INSTALL_CHARTS"
 
   build-chart:
     name: "Build ${{ matrix.chart }}"
@@ -162,7 +213,7 @@ jobs:
   install-test:
     name: "Install-test ${{ matrix.chart }}"
     needs: [detect-changed-charts, build-chart]
-    if: needs.detect-changed-charts.outputs.any-chart-changed == 'true'
+    if: needs.detect-changed-charts.outputs.any-install == 'true'
     runs-on: ubuntu-latest
     # Blocking since Renovate automerges patch/minor updates: a chart that no
     # longer starts must stop the PR before it reaches main and publishes. This
@@ -171,8 +222,22 @@ jobs:
     timeout-minutes: 30
     strategy:
       fail-fast: false
+      # "install-charts", not "charts": the changed charts minus the ones in
+      # ci/excluded-charts.txt, filtered in detect-changed-charts. Excluded
+      # charts are named with their reason in that job's summary (issue #231).
+      #
+      # DO NOT try to move that decision into an "if" on this job, e.g.
+      #   if: ... && !contains(fromJSON(needs.detect-changed-charts.outputs.excluded-charts), matrix.chart)
+      # to get a visible "Skipped" per chart instead of an absent entry.
+      # GitHub rejects it - jobs.<id>.if is evaluated BEFORE the matrix is
+      # expanded, so the matrix context does not exist there:
+      #   context "matrix" is not allowed here.
+      #   available contexts are "github", "inputs", "needs", "vars".
+      # Measured on run 33650724109 (PR #233, closed): the whole workflow ended
+      # in failure with zero jobs created. The per-chart value has to be gone
+      # from the matrix by the time this job is reached.
       matrix:
-        chart: ${{ fromJSON(needs.detect-changed-charts.outputs.charts) }}
+        chart: ${{ fromJSON(needs.detect-changed-charts.outputs.install-charts) }}
     env:
       K3D_VERSION: v5.9.0
       K3S_IMAGE: docker.io/rancher/k3s:v1.35.5-k3s1
@@ -227,11 +292,11 @@ jobs:
         run: curl -sSfL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | TAG="$K3D_VERSION" bash
       - name: "Create k3d cluster"
         run: k3d cluster create install-test --image "$K3S_IMAGE" --wait --timeout 180s
-      # Excluded charts (see ci/excluded-charts.txt) are skipped inside the
-      # script with their documented reason. The variables below are empty for
-      # every other chart and are read only by the chart that declares them in
-      # ci/<chart>/settings.env (REQUIRED_ENV); the script fails loudly if a
-      # declared one is missing, it never skips over it.
+      # Every chart reaching this step is one the exclusion filter let through,
+      # so the script's SKIP branch is never taken here - it exists for local
+      # runs. The variables below are empty for every chart but the one that
+      # declares them in ci/<chart>/settings.env (REQUIRED_ENV); the script
+      # fails loudly if a declared one is missing, it never skips over it.
       - name: "Install chart and wait for readiness"
         env:
           FREESAILARR_WG_KEY: ${{ steps.load-freesailarr-vpn.outputs.FREESAILARR_WG_KEY }}

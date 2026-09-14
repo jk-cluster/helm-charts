@@ -135,7 +135,7 @@ implementation lives in template-chart.
 {{/*
 Render additive env entries (the repo-wide <app>.env convention: tpl-rendered,
 supporting the value, secretKeyRef and configMapKeyRef forms). Shared as a
-helper here because this chart has nine containers, each with its own env block.
+helper here because this chart has ten containers, each with its own env block.
 
 Usage:
   {{- include "freesailarr.env" (dict "root" $ "env" .Values.<app>.env) | nindent 12 }}
@@ -176,6 +176,14 @@ recyclarr is deliberately absent: in daemon mode it serves no port, so it gets
 no container port, no service and no ingress. flaresolverr is present - it
 listens on 8191 and therefore gets a service - but it has no ingress block in
 values and is never exposed from outside the cluster.
+
+"port" is the app's PRIMARY port: the one its service is named after and the one
+an ingress points at. mediathekarr is the only app with a second one, because it
+runs two processes in one container - the SABnzbd role on 5007 (the UI, hence
+the primary) and the Newznab role Prowlarr consumes on 5008. Optional
+"extraPorts" entries ({name, port}) are additional ports of the SAME service and
+are declared to gluetun's firewall alongside the primary; they never take part
+in the ingress, which addresses a service port by name.
 */}}
 {{- define "freesailarr.portApps" -}}
 {{- $apps := list -}}
@@ -186,7 +194,8 @@ values and is never exposed from outside the cluster.
   (dict "name" "radarr" "port" 7878)
   (dict "name" "sonarr" "port" 8989)
   (dict "name" "seerr" "port" 5055)
-  (dict "name" "bazarr" "port" 6767) -}}
+  (dict "name" "bazarr" "port" 6767)
+  (dict "name" "mediathekarr" "port" 5007 "extraPorts" (list (dict "name" "ma-newznab" "port" 5008))) -}}
 {{- if (index $.Values $app.name).enabled -}}
 {{- $apps = append $apps $app -}}
 {{- end -}}
@@ -214,8 +223,9 @@ ingress block with enabled: true. Used by the ingress template.
 {{/*
 The sub-path an app is served under in the shared-domain mode, e.g. "/sonarr".
 Null-safe by construction: an absent or erased <app>.ingress.path falls back to
-"/<app>", and to "/" for seerr, which has no base-path support at all and can
-therefore only live at the root.
+"/<app>", and to "/" for the two apps that can only live at the root - seerr,
+which has no base-path support at all, and mediathekarr, whose UI links its
+assets with root-absolute paths (see the guard in sharedIngressApps).
 
 Input: dict "root" $ "app" <app name>.
 */}}
@@ -226,7 +236,7 @@ Input: dict "root" $ "app" <app name>.
 {{- $path = $config.path -}}
 {{- end -}}
 {{- if or (kindIs "invalid" $path) (eq (toString $path) "") -}}
-{{- if eq .app "seerr" -}}
+{{- if has .app (list "seerr" "mediathekarr") -}}
 {{- $path = "/" -}}
 {{- else -}}
 {{- $path = printf "/%s" .app -}}
@@ -250,9 +260,12 @@ Two guards live here rather than in the ingress template, so that every
 consumer - the ingress objects, the UrlBase env vars and NOTES.txt - sees the
 same validated list:
 
-  1. seerr under any path other than "/". seerr has no base-path support
-     (upstream request open since May 2022), so a chart that rendered it under
-     a sub-path would produce something that provably cannot work.
+  1. seerr or mediathekarr under any path other than "/". seerr has no base-path
+     support (upstream request open since May 2022) and MediathekArr's UI links
+     its assets with root-absolute paths, so a chart that rendered either under
+     a sub-path would produce something that provably cannot work. Both at "/"
+     on one host is caught by guard 2 below - one of them then needs a host of
+     its own.
   2. Two apps claiming the same path on the shared host. Only paths on the
      shared host can collide; apps with their own host are on a different host
      and are therefore not part of this check.
@@ -269,11 +282,14 @@ same validated list:
 {{- $config := (index $root.Values $app.name).ingress -}}
 {{- if not ($config.host | default "") -}}
 {{- $path := include "freesailarr.appPath" (dict "root" $root "app" $app.name) -}}
-{{- if and (eq $app.name "seerr") (ne $path "/") -}}
-{{- fail (printf "seerr.ingress.path is %q, but seerr has no base-path support and can only be served at \"/\" (https://github.com/Fallenbagel/jellyseerr/issues/97). Either leave seerr.ingress.path at \"/\" or give seerr its own seerr.ingress.host." $path) -}}
+{{- $rootOnly := dict
+      "seerr" "seerr has no base-path support (https://github.com/Fallenbagel/jellyseerr/issues/97)"
+      "mediathekarr" "MediathekArr links its UI assets with root-absolute paths (/download/css/..., measured), so a sub-path stays broken even behind a prefix-stripping rewrite - the browser then asks for those assets at the host root" -}}
+{{- if and (hasKey $rootOnly $app.name) (ne $path "/") -}}
+{{- fail (printf "%s.ingress.path is %q, but %s and it can therefore only be served at \"/\". Either leave %s.ingress.path at \"/\" or give it its own %s.ingress.host." $app.name $path (index $rootOnly $app.name) $app.name $app.name) -}}
 {{- end -}}
 {{- if hasKey $seen $path -}}
-{{- fail (printf "%s.ingress.path and %s.ingress.path are both %q on the shared host %q - every app under ingress.host needs its own path" (index $seen $path) $app.name $path $host) -}}
+{{- fail (printf "%s.ingress.path and %s.ingress.path are both %q on the shared host %q - every app under ingress.host needs its own path. Where neither can move (seerr and mediathekarr can only be served at \"/\"), give one of them its own <app>.ingress.host." (index $seen $path) $app.name $path $host) -}}
 {{- end -}}
 {{- $_ := set $seen $path $app.name -}}
 {{- $apps = append $apps (dict "name" $app.name "port" $app.port "path" $path) -}}
@@ -356,6 +372,9 @@ alive. It is not what opens the ports today.
 {{- $ports := list -}}
 {{- range $app := include "freesailarr.portApps" . | fromJsonArray -}}
 {{- $ports = append $ports (int $app.port) -}}
+{{- range $extra := $app.extraPorts | default list -}}
+{{- $ports = append $ports (int $extra.port) -}}
+{{- end -}}
 {{- end -}}
 {{- $ports = append $ports 9999 -}}
 {{- join "," $ports -}}
@@ -366,7 +385,7 @@ Whether a media category is mounted at all, i.e. whether at least one app that
 mounts it is enabled. "true" when it is, the empty string when it is not (an
 empty string is falsy in a template "if", so the result can be used directly).
 
-  downloads: qbittorrent, radarr, sonarr
+  downloads: qbittorrent, radarr, sonarr, mediathekarr
   movies:    radarr, bazarr
   tv:        sonarr, bazarr
 
@@ -375,7 +394,7 @@ Input: dict "root" $ "category" <"downloads"|"movies"|"tv">.
 {{- define "freesailarr.mediaCategoryEnabled" -}}
 {{- $v := .root.Values -}}
 {{- if eq .category "downloads" -}}
-{{- if or $v.qbittorrent.enabled $v.radarr.enabled $v.sonarr.enabled -}}true{{- end -}}
+{{- if or $v.qbittorrent.enabled $v.radarr.enabled $v.sonarr.enabled $v.mediathekarr.enabled -}}true{{- end -}}
 {{- else if eq .category "movies" -}}
 {{- if or $v.radarr.enabled $v.bazarr.enabled -}}true{{- end -}}
 {{- else if eq .category "tv" -}}
@@ -885,6 +904,47 @@ bazarr:
         - FOWNER
         - SETGID
         - SETUID
+mediathekarr:
+  livenessProbe:
+    exec:
+      command:
+        - /bin/bash
+        - -c
+        - >-
+          wget -q -T 5 -O /dev/null "http://127.0.0.1:5008/api?t=caps" &&
+          wget -q -T 5 -O /dev/null "http://127.0.0.1:5007/download/api?mode=version&output=json&apikey=x"
+    periodSeconds: 30
+    timeoutSeconds: 15
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /download/
+      port: 5007
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  startupProbe:
+    httpGet:
+      path: /download/
+      port: 5007
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 60
+  resources:
+    limitFactor: 3
+    requests:
+      cpu: 0.1
+      memory: 256Mi
+      ephemeralStorage: 100Mi
+  securityContext:
+    runAsUser: {{ .Values.puid }}
+    runAsGroup: {{ .Values.pgid }}
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    capabilities:
+      drop:
+        - ALL
 configInit:
   resources:
     limitFactor: 3
@@ -905,7 +965,7 @@ configInit:
 
 {{/*
 The effective pod security context. Separate from the per-container table
-because it is the one block shared by all nine containers.
+because it is the one block shared by all containers of the pod.
 */}}
 {{- define "freesailarr.podSecurityContext" -}}
 {{- $given := (fromYaml (include "freesailarr.subBlock" (dict "block" .Values.securityContext "key" "pod" "path" "securityContext"))).value -}}

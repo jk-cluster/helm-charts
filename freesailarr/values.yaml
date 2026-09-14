@@ -4,10 +4,11 @@
 # the Wireguard tunnel.
 #
 # Image pinning (documented deviation from the Chart.AppVersion standard):
-# NO image tag comes from appVersion. All nine images, gluetun included, are
+# NO image tag comes from appVersion. All ten images, gluetun included, are
 # pinned here via <app>.image.repository / <app>.image.tag, because the stack
-# combines nine independently versioned upstream projects and none of them is
-# "the" one app version.
+# combines ten independently versioned upstream projects and none of them is
+# "the" one app version. mediathekarr additionally carries an image.digest -
+# see the reasoning in its own block at the end of this file.
 #
 # That is also what puts every image under Renovate: the built-in helm-values
 # manager reads image.repository/image.tag pairs out of this file and proposes
@@ -84,7 +85,7 @@ storage:
 # Media libraries as pre-existing PVCs (shared with the separately deployed
 # Jellyfin) - the chart mounts but never creates them. Each claim is required
 # as soon as an app that mounts it is enabled:
-#   downloads: qbittorrent, radarr, sonarr
+#   downloads: qbittorrent, radarr, sonarr, mediathekarr
 #   movies:    radarr, bazarr
 #   tv:        sonarr, bazarr
 #
@@ -874,3 +875,259 @@ bazarr:
         - FOWNER
         - SETGID
         - SETUID
+
+# MediathekArr: the tenth container, and the only one that is OFF by default. It fakes a Usenet indexer towards Prowlarr and a SABnzbd downloader
+# towards Sonarr/Radarr, and fetches the content over plain HTTP from the ARD
+# and ZDF media libraries. Both consumers already sit in this pod and share
+# gluetun's network namespace, so they reach it over 127.0.0.1 - no service, no
+# DNS, no ingress detour.
+#
+# Off by default because it is additive and nobody's existing release should
+# grow a container on an upgrade: enabling it creates a new
+# volumeClaimTemplate, which a StatefulSet cannot take without being recreated
+# (see the NOTES and the volumeClaimTemplates comment in the StatefulSet).
+#
+# ----------------------------------------------------------------------------
+# THE GEO CAVEAT, AND HOW TO CHECK IT YOURSELF
+# ----------------------------------------------------------------------------
+# The tunnel leaves through Zurich by this chart's default, and ARD and ZDF
+# block parts of their catalogue outside Germany. Every container hangs in
+# gluetun's namespace; there is no bypass for a single container.
+#
+# Measured, 480 URLs across 12 channels: 104 of 473 loadable URLs were blocked
+# through Zurich (22.0%), none of them on the German side. The spread is very
+# uneven - ONE 97.5%, ZDFneo 47.5%, ZDFinfo 37.5%, Das Erste 20.5%, ZDF 10.3%,
+# BR 0% - so a single number tells you little about the show you actually want.
+#
+# THE PROCEDURE, NOT A TABLE OF SERIES. A list of titles is stale in half a
+# year; the marker in the CDN path is not. Over two measurement rounds it
+# predicted the outcome perfectly - 584 of 584 cases in the full survey, not a
+# single misclassification. Look at the media URL of an entry and read the
+# path:
+#
+#   /de/, /geo/de/, /deutschlandweit/, geoavailability_D  -> blocked outside DE
+#   /weltweit/                                            -> open
+#   /none/            (ZDF)                               -> open
+#   /dach/, deChAt    (WDR variant)                       -> open, Switzerland
+#                                                            is part of DACH
+#
+# The obvious rule of thumb "own production = available worldwide" is MEASURABLY
+# WRONG and is named here so nobody re-invents it: an ARD own production was
+# blocked, a licensed series was open. Only the marker counts.
+#
+# THE ESCAPE ROUTE AND ITS PRICE. The exit is a deployment decision, not a chart
+# property: set gluetun.vpn.serverCountries/serverCities to a German exit and
+# the blocks disappear. The price is that this moves the WHOLE stack, all ten
+# containers - qBittorrent included - into that jurisdiction and onto those
+# servers. There is no per-container exit, and this chart deliberately does not
+# pretend otherwise.
+#
+# ----------------------------------------------------------------------------
+# THE fail_message: null TRAP - READ THIS BEFORE DEBUGGING A FAILED DOWNLOAD
+# ----------------------------------------------------------------------------
+# MediathekArr never checks the HTTP status code. Measured A/B with an identical
+# NZB: direct (DE) -> status Completed, 94,235,525 bytes, fail_message null;
+# through Zurich -> status Failed, 0 bytes, fail_message ALSO null.
+#
+# On a geo-blocked fetch it writes the ~476-byte HTML error page out as .mp4 and
+# logs "Download completed". Only mkvmerge then refuses the file (exit code 2)
+# and flips the status to Failed. Two consequences:
+#
+#   1. Sonarr is told "failed" without a reason. A geo block looks exactly like
+#      a broken server, an expired URL or a full disk - and the container log
+#      does not mention the 403 either.
+#   2. That protection is an accident, not error handling. It rests entirely on
+#      mkvmerge rejecting an HTML page. Any geo response mkvmerge would accept
+#      is reported as Completed, and then a broken file walks into the library.
+#      It did not happen in either measurement round (Akamai consistently
+#      returns HTML), but that is not something to rely on.
+#
+# ----------------------------------------------------------------------------
+# OPEN QUESTION, EXPLICITLY UNMEASURED: HLS
+# ----------------------------------------------------------------------------
+# Part of the catalogue is served as an HLS playlist (application/x-mpegURL)
+# instead of a progressive MP4. The image carries an ffmpeg-based M3U8 path
+# (log lines "Starting M3U8 download" / "M3U8 download completed", and ffmpeg is
+# present in the image), so the code is there - but whether such an entry
+# actually completes end to end has NOT been measured. If it does not, those
+# entries fail regardless of any geo block. Stated as an open question on
+# purpose: no assumption in either direction.
+mediathekarr:
+  enabled: false
+  # Pinned BY DIGEST, unlike every other image in this chart, because the tags
+  # are unusable: "latest" is from 2024-11-12 (= v0.2.5) and the upstream README
+  # points at "beta", which is a moving tag. tag + digest together keep the
+  # human-readable line and the immutable reference.
+  #
+  # The image is SINGLE-ARCH, linux/amd64 only - there is no arm64 variant. The
+  # target cluster is amd64 throughout, so this is a note, not a problem; on a
+  # mixed cluster the pod would need a nodeSelector this chart does not offer.
+  #
+  # Renovate: the built-in helm-values manager cannot follow this pair (the tag
+  # carries no version), so renovate.json5 has a customManagers block that
+  # matches exactly these three lines and proposes digest updates for the beta
+  # tag. Renaming or reordering the keys silently switches that off - the rule
+  # would still be valid, it just would not match any more (#158).
+  image:
+    repository: docker.io/pcjones/mediathekarr
+    tag: beta
+    digest: sha256:3ed7e1487810e1519301bd56a0c420e260e428295b029a47806c0397e4a52a33
+  # TWO ports, not one, and the upstream documentation only mentions the first:
+  #   5007  MediathekArrDownloader - the SABnzbd role and the web UI
+  #   5008  MediathekArrServer     - the Newznab role Prowlarr talks to
+  # The SABnzbd API lives under /download/api, NOT under /api: a request to
+  # /api on 5007 answers with a Newznab validation error and sends you looking
+  # in the wrong place. Both ports are declared to gluetun's firewall
+  # automatically (see the firewallInputPorts helper).
+  #
+  # No ingress by default: MediathekArr's UI links its assets with root-absolute
+  # paths (/download/css/..., measured), so it can only be served at the ROOT of
+  # a host - a sub-path is broken even behind a prefix-stripping rewrite,
+  # because the browser then requests the assets at the host root. On the shared
+  # domain the root belongs to seerr, so enabling this ingress there needs
+  # either seerr switched off or a host of its own here. Both consumers reach
+  # MediathekArr over localhost and need no ingress at all; the UI is only
+  # needed to run the setup wizard, for which a port-forward is enough.
+  ingress:
+    enabled: false
+    host: null
+    # Read only in the shared-domain mode. "/" is the only value that works;
+    # anything else fails the render rather than producing a broken UI.
+    path: /
+    # clusterIssuer: null
+    # className: null
+    # annotations: {}
+  storage:
+    # Size of the MediathekArr config volume (/app/config, a small JSON).
+    size: 1Gi
+  # THE START GATE - the sharpest point of this container, and the one whose
+  # failure mode looks green.
+  #
+  # If MediathekArr starts before the tunnel is up, its ruleset fetch fails once
+  # and is never retried: the instance then answered every Newznab search with 0
+  # results for over eleven minutes, while the container was up, Ready and
+  # logged nothing wrong. A green pod proves nothing here. With the start
+  # delayed until gluetun reports healthy, the ruleset loads and the search
+  # matches an instance running with direct egress (the search itself is not
+  # geo-blocked - 56 hits through either exit).
+  #
+  # Kubernetes cannot express "start after that container": gluetun is a regular
+  # container, and an initContainer waiting for it would deadlock. So the gate
+  # lives in this container's command - it polls gluetun's health server on
+  # 127.0.0.1:9999 (the same endpoint gluetun's own probes use, 200 only while
+  # the tunnel works) and only then execs the image entrypoint.
+  #
+  # On timeout the container EXITS instead of starting anyway. That is
+  # deliberate: a crash-looping container is visible, a silently empty indexer
+  # is not.
+  #
+  # Keep startupProbe budget > timeoutSeconds + app start, or the kubelet kills
+  # the container while the gate is still waiting. Defaults: 180s gate,
+  # 5s * 60 = 300s startup budget.
+  startGate:
+    enabled: true
+    # Poll interval and total budget for gluetun becoming healthy. gluetun's own
+    # startup budget is 150s, so 180s covers a normal handshake with room.
+    intervalSeconds: 3
+    timeoutSeconds: 180
+    # Extra pause after gluetun reports healthy, before the app starts. NOT a
+    # measured requirement - gluetun's 200 is the actual condition - but a cheap
+    # buffer for DNS and routing to settle. 0 disables it.
+    settleSeconds: 10
+  # WHERE THE DOWNLOADS GO. Both directories live on the SHARED downloads claim
+  # (media.downloads), mounted at /downloads exactly like sonarr, radarr and
+  # qbittorrent mount it, under this sub-directory:
+  #
+  #   /downloads/<directory>/incomplete   work in progress
+  #   /downloads/<directory>/complete     finished, plus one sub-dir per category
+  #
+  # Two reasons, both of them the kind that fails silently:
+  #
+  #   1. complete/ MUST be visible to Sonarr/Radarr under the SAME absolute
+  #      path. The chart hands that path to MediathekArr
+  #      (DOWNLOAD_COMPLETE_PATH), which reports it to Sonarr as the SABnzbd
+  #      complete_dir. Every container here mounts the claim at /downloads, so
+  #      the paths are identical by construction - a deviation imports nothing,
+  #      without an error.
+  #   2. incomplete/ must NOT be an emptyDir. An emptyDir counts against the
+  #      container's ephemeral-storage limit, and one large download makes the
+  #      kubelet evict the WHOLE pod - all ten containers. Same trap as the one
+  #      documented in ytdlp-web-player.
+  #
+  # Do not set DOWNLOAD_COMPLETE_PATH or DOWNLOAD_INCOMPLETE_PATH in the env
+  # block below: the chart always sets both, and a second entry of the same name
+  # is not a defined state (see README, "Environment variables").
+  downloads:
+    directory: mediathekarr
+  # Extra environment variables, appended to the ones the chart always sets.
+  # Useful ones the image reads: CATEGORIES, MAX_PARALLEL_DOWNLOADS,
+  # MEDIATHEKARR_API_BASE_URL.
+  env: []
+  # Probes on measured 200 endpoints - MediathekArr has NO health endpoint at
+  # all (/health, /healthz, /api/health, /download/health, /status and /ping all
+  # answer 404).
+  #
+  # Liveness is an exec on purpose: one container runs TWO processes, and the
+  # kubelet allows one probe of each kind. The Newznab half can wedge while the
+  # downloader half still answers, and that is exactly the failure that makes
+  # searches come back empty. The command checks both ports and restarts the
+  # container when either stops answering. (The entrypoint already exits when
+  # one of the two processes CRASHES - the exec probe covers the case where it
+  # is alive but not serving.)
+  #
+  # Readiness and startup use the downloader port: that is the one the Service
+  # and any ingress point at, and /download/ answers 200 without a query string.
+  livenessProbe:
+    exec:
+      command:
+        - /bin/bash
+        - -c
+        - >-
+          wget -q -T 5 -O /dev/null "http://127.0.0.1:5008/api?t=caps" &&
+          wget -q -T 5 -O /dev/null "http://127.0.0.1:5007/download/api?mode=version&output=json&apikey=x"
+    periodSeconds: 30
+    timeoutSeconds: 15
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /download/
+      port: 5007
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # The startup probe gates liveness/readiness AND has to outlast the start gate
+  # (see startGate above): 5s * 60 = 300s against a 180s gate.
+  startupProbe:
+    httpGet:
+      path: /download/
+      port: 5007
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 60
+  resources:
+    limitFactor: 3
+    # ephemeral-storage stays small on purpose: downloads land on the media
+    # claim, not on the container filesystem (see downloads above).
+    requests:
+      cpu: 0.1
+      memory: 256Mi
+      ephemeralStorage: 100Mi
+  # Measured, including a real download and the mkvmerge remux: the container
+  # runs fully hardened - non-root, uid/gid from puid/pgid,
+  # readOnlyRootFilesystem: true - as long as its writable paths are volumes.
+  # Those are /app/config (the config claim) and the two download directories on
+  # the media claim; the image's built-in default /data/mediathek is never
+  # touched, because the chart overrides both paths by environment (measured:
+  # read-only root, no /data/mediathek mount, no error).
+  # PUID/PGID are NOT needed (the image's gosu path is only taken when they are
+  # set), and the
+  # commented-out non-root block in its Dockerfile is outdated for the beta.
+  # runAsUser/runAsGroup come from the global puid/pgid values in the template -
+  # do not set them here.
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    capabilities:
+      drop:
+        - ALL

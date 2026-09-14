@@ -535,6 +535,76 @@
           "$ref": "#/definitions/containerSecurityContext"
         }
       }
+    },
+    "mediathekarr": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "image": {
+          "$ref": "#/definitions/pinnedImage"
+        },
+        "ingress": {
+          "$ref": "#/definitions/appIngress"
+        },
+        "storage": {
+          "$ref": "#/definitions/appStorage"
+        },
+        "startGate": {
+          "description": "Delays the container until gluetun reports healthy. NOT null-safe on purpose and not merged through the fallback helper: this block decides whether the gate is rendered at all, and an erased block would silently produce a container that starts before the tunnel - the failure this chart writes three paragraphs about, and one that looks green.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "intervalSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "timeoutSeconds": {
+              "description": "Total wait before the container exits instead of starting without a tunnel. Keep the startup probe's budget (periodSeconds x failureThreshold) above it, or the kubelet kills the container while the gate is still waiting.",
+              "type": "integer",
+              "minimum": 1
+            },
+            "settleSeconds": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "downloads": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "directory": {
+              "description": "Sub-directory on the shared downloads claim holding incomplete/ and complete/. The chart derives DOWNLOAD_INCOMPLETE_PATH and DOWNLOAD_COMPLETE_PATH from it; complete/ is what Sonarr/Radarr are told to import from, under the identical absolute path.",
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "env": {
+          "$ref": "#/definitions/env"
+        },
+        "livenessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "readinessProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "startupProbe": {
+          "$ref": "#/definitions/probe"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "securityContext": {
+          "$ref": "#/definitions/containerSecurityContext"
+        }
+      }
     }
   },
   "definitions": {
@@ -746,6 +816,27 @@
         "object",
         "null"
       ]
+    },
+    "pinnedImage": {
+      "description": "Like image, plus the digest mediathekarr is pinned by: its tags are unusable (\"latest\" is a 2024 build, \"beta\" moves), so the tag stays as the readable label and the digest is what is actually pulled. Deliberately a separate definition instead of adding an optional digest to image: on every other image in this chart a digest key would be a value the templates never read - exactly the silent no-op the schema exists to reject (#68).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "tag": {
+          "type": [
+            "string",
+            "number"
+          ]
+        },
+        "digest": {
+          "description": "Image digest, sha256:<64 hex>. Required - the template refuses to render without it.",
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
     }
   }
 }

@@ -11,7 +11,7 @@
 {{- $sharedNames := list -}}
 {{- range $shared }}{{ $sharedNames = append $sharedNames .name }}{{ end -}}
 freesailarr — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
-Nine containers in ONE pod, sharing gluetun's network namespace.
+{{ if .Values.mediathekarr.enabled }}Ten{{ else }}Nine{{ end }} containers in ONE pod, sharing gluetun's network namespace.
 
 NOTHING IS READY UNTIL THE TUNNEL IS UP
   gluetun's readiness probe is its health server, which answers 200 only while
@@ -133,6 +133,101 @@ QBITTORRENT HAS NO SAVE PATH SET (qbittorrent.savePath is empty)
   qbittorrent.savePath or set Options -> Downloads -> Default Save Path in the
   WebUI before starting any download.
 {{- end }}
+{{- end }}
+{{- if .Values.mediathekarr.enabled }}
+{{- $dir := .Values.mediathekarr.downloads.directory }}
+{{- $gate := .Values.mediathekarr.startGate }}
+{{- $mediaStartup := fromYaml (include "freesailarr.probeFor" (dict "root" $ "app" "mediathekarr" "kind" "startupProbe" "given" .Values.mediathekarr.startupProbe)) }}
+
+MEDIATHEKARR: TWO PORTS, AND THE SABNZBD API IS NOT AT /api
+  Every container shares one network namespace, so both consumers reach it over
+  127.0.0.1 — no service name, no DNS, no ingress:
+
+    Prowlarr      -> Newznab indexer, http://127.0.0.1:5008
+    Sonarr/Radarr -> SABnzbd host 127.0.0.1, port 5007, API path /download/api
+
+  A request to /api on 5007 answers with a Newznab validation error and sends
+  you looking at the wrong half of the app — the upstream documentation only
+  mentions port 5007 at all.
+
+  Sonarr and Radarr must import from
+
+    /downloads/{{ $dir }}/complete     (one sub-directory per category below it)
+
+  which is exactly the path the chart hands MediathekArr and which it reports
+  back as the SABnzbd complete_dir. Any deviation — a remote path mapping, a
+  different mount — imports NOTHING, without an error.
+
+  The UI (setup wizard and download queue) has no ingress{{ if and .Values.mediathekarr.ingress.enabled .Values.mediathekarr.ingress.host }}, other than the one
+  you gave it on {{ .Values.mediathekarr.ingress.host }}{{ end }}:
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $name }}-mediathekarr-service 5007:5007
+{{- if $gate.enabled }}
+
+  IT DELIBERATELY STARTS LATE, AND THAT IS THE POINT
+    The container waits (up to {{ $gate.timeoutSeconds }}s) for gluetun to report healthy before
+    it starts MediathekArr{{ if gt (int $gate.settleSeconds) 0 }}, plus {{ $gate.settleSeconds }}s of settling time{{ end }}. Started before the tunnel,
+    MediathekArr fails its one ruleset fetch, never retries it, and then answers
+    EVERY search with 0 results — container up, Ready, nothing in the log. That
+    is why a green pod proves nothing here and why the gate exits instead of
+    starting anyway on timeout: a crash-looping container is visible, a silently
+    empty indexer is not.
+
+      kubectl -n {{ .Release.Namespace }} logs {{ $name }}-sfs-0 -c mediathekarr | head -3
+
+    The startup probe has to outlast the gate ({{ mul (int $mediaStartup.periodSeconds) (int $mediaStartup.failureThreshold) }}s budget against a {{ $gate.timeoutSeconds }}s gate),
+    otherwise the kubelet kills the container while it is still waiting.
+{{- else }}
+
+  THE START GATE IS OFF (mediathekarr.startGate.enabled: false)
+    MediathekArr may then start before the Wireguard tunnel is up. Its ruleset
+    fetch fails once, is never retried, and the indexer answers every search
+    with 0 results afterwards — measured over eleven minutes, with the container
+    up, Ready and no error anywhere. Nothing reports this state. Check a search
+    by hand after every restart, or switch the gate back on.
+{{- end }}
+
+A FAILED MEDIATHEKARR DOWNLOAD NEVER SAYS WHY
+  MediathekArr does not check the HTTP status code. On a geo-blocked fetch it
+  writes the ~476-byte HTML error page out as .mp4 and logs "Download
+  completed"; only mkvmerge then refuses the file and the status flips to
+  Failed — with fail_message: null. Measured A/B with one identical NZB:
+  direct 94,235,525 bytes and Completed, through a foreign exit 0 bytes and
+  Failed, fail_message null in BOTH cases.
+
+  So a geo block is indistinguishable from a broken server, an expired URL or a
+  full disk, in Sonarr and in the container log alike. And the protection is an
+  accident: it rests entirely on mkvmerge rejecting an HTML page. Anything a
+  geo endpoint returns that mkvmerge accepts is reported as Completed and walks
+  into your library.
+
+WHETHER A SHOW WORKS THROUGH YOUR EXIT: READ THE MARKER, NOT A LIST
+  The tunnel currently exits {{ with .Values.gluetun.vpn.serverCities }}in {{ . }}{{ else }}{{ with .Values.gluetun.vpn.serverCountries }}in {{ . }}{{ else }}wherever gluetun picks{{ end }}{{ end }}. ARD and ZDF block parts of their
+  catalogue outside Germany, and every container hangs in gluetun's namespace —
+  there is no per-container exit.
+
+  A table of series goes stale; the marker in the media URL does not. It
+  predicted the outcome in 584 of 584 measured cases:
+
+    /de/, /geo/de/, /deutschlandweit/, geoavailability_D  -> blocked outside DE
+    /weltweit/                                            -> open
+    /none/          (ZDF)                                 -> open
+    /dach/, deChAt  (WDR variant)                         -> open
+
+  The rule of thumb "own production = available worldwide" is MEASURABLY WRONG
+  (an ARD own production was blocked, a licensed series was open). Only the
+  marker counts.
+
+  The escape route is one value — gluetun.vpn.serverCountries/serverCities set
+  to a German exit — and its price is that it moves the WHOLE stack, all ten
+  containers, qBittorrent included, into that jurisdiction and onto those
+  servers. That is a deployment decision, not a chart setting to flip lightly.
+
+OPEN, EXPLICITLY UNMEASURED: HLS ENTRIES
+  Part of the catalogue is served as an HLS playlist instead of a progressive
+  MP4. The image carries an ffmpeg-based M3U8 path, but whether such an entry
+  completes end to end has not been measured. If it does not, those entries fail
+  regardless of any geo block — and, per the paragraph above, without a reason.
 {{- end }}
 
 EVERY SERVICE POINTS AT THE SAME POD IP

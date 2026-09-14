@@ -1,4 +1,4 @@
-# freesailarr: the whole stack in one pod - gluetun plus eight app containers
+# freesailarr: the whole stack in one pod - gluetun plus nine app containers
 # that share its network namespace and sit behind its kill switch. Nothing here
 # is a shortcut around that: the install-test brings up a real Wireguard tunnel
 # with a CI-only Mullvad key (see ci/freesailarr/fixtures.env.yaml), because a
@@ -37,3 +37,11 @@ ingress:
   # in the CI cluster, and the install-test checks readiness, not routing.
   host: freesailarr.example.com
   clusterIssuer: ci
+
+mediathekarr:
+  # On in CI although it is off by default, so the install-test actually covers
+  # the tenth container: its digest-pinned image (single-arch amd64, ~850 MB),
+  # its start gate against gluetun's health server, and its probes on the two
+  # ports. Its ingress stays off - MediathekArr can only be served at the root
+  # of a host, and the root of the shared host above belongs to seerr.
+  enabled: true

@@ -462,16 +462,30 @@ jobs:
           # it produces exactly the sporadic red this job must not have. The
           # loop asks for the node list, which is the thing that has to work
           # and exercises discovery on the way.
-          for ATTEMPT in $(seq 1 60); do
-            kubectl get nodes >/dev/null 2>&1 && break
-            if [ "$ATTEMPT" -eq 60 ]; then
-              echo "::error::the k3d cluster '$CLUSTER' was created but never became reachable"
-              kubectl get nodes || true
+          # It waits for a READY NODE, not for the API server to answer. The
+          # difference is not pedantry, it is the second bug this check had:
+          # `kubectl get nodes` exits 0 on an EMPTY list, so the first version
+          # passed against a cluster whose server was up and whose node had
+          # not registered - the log said "No resources found" and the step
+          # went green, and the failure surfaced five minutes later as a pod
+          # stuck in Pending with no node and no scheduling event. A check
+          # that a broken cluster passes is worse than none. `kubectl wait
+          # --for=condition=Ready nodes --all` has the same hole: with zero
+          # nodes it succeeds vacuously.
+          for ATTEMPT in $(seq 1 90); do
+            READY_NODES="$(kubectl get nodes --no-headers 2>/dev/null | awk '$2 == "Ready"' | wc -l | tr -d ' ')"
+            [ "$READY_NODES" -ge 1 ] && break
+            if [ "$ATTEMPT" -eq 90 ]; then
+              echo "::error::the k3d cluster '$CLUSTER' answers but has no Ready node after 180s"
+              kubectl get nodes -o wide || true
+              kubectl describe nodes || true
+              echo "--- k3s server log ---"
+              docker logs "k3d-$CLUSTER-server-0" 2>&1 | tail -80 || true
               exit 1
             fi
             sleep 2
           done
-          kubectl get nodes
+          kubectl get nodes -o wide
       # Every chart reaching this step is one the exclusion filter let through,
       # so the script's SKIP branch is never taken here - it exists for local
       # runs. The variables below are empty for every chart but the one that

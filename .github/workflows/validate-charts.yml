@@ -404,7 +404,55 @@ jobs:
             echo "::error::chart name '$CLUSTER' is ${#CLUSTER} characters and k3d allows at most 32 for a cluster name."
             exit 1
           fi
-          k3d cluster create "$CLUSTER" --image "$K3S_IMAGE" --wait --timeout 180s
+
+          # Does THIS job run inside a container? That, and not which forge we
+          # are on, is what decides whether k3d's cluster is reachable (#227).
+          #
+          # k3d publishes the API server port on the Docker *host*. When the
+          # job runs straight on the host - GitHub's hosted runners - that is
+          # the same machine, and the "https://0.0.0.0:<port>" k3d writes into
+          # the kubeconfig works. When the job itself is a container, as every
+          # Gitea Actions job is, the host is the dind container and 0.0.0.0
+          # points at the job container itself, where nothing listens. The
+          # cluster comes up fine and the first kubectl call is refused.
+          #
+          # Deliberately NOT keyed on github.server_url, although that would
+          # pick the right branch today: a self-hosted GitHub runner in a
+          # container has exactly this problem, and a condition that says
+          # "GitHub" while meaning "not containerised" is the kind of lie this
+          # repo exists to remove. So the state is detected instead of
+          # inferred, and the detection is the same question the fix needs
+          # answered anyway: ask the daemon about ourselves. Inside a
+          # container that the daemon knows, this returns our network and k3d
+          # joins it, which puts k3s and this job on one bridge where Docker's
+          # own DNS resolves the container names. On a host it returns nothing,
+          # because the hostname is not a container, and the old path is taken
+          # unchanged.
+          # The "|| true" is load-bearing: this step runs under `bash -e -o
+          # pipefail`, and on a host `docker inspect` exits non-zero, which
+          # would abort the step instead of taking the else branch.
+          JOB_NET="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$(hostname)" 2>/dev/null | awk '{print $1}' || true)"
+
+          if [ -n "$JOB_NET" ]; then
+            echo "Containerised job: $(hostname) on docker network '$JOB_NET' - k3d joins it."
+            k3d cluster create "$CLUSTER" --image "$K3S_IMAGE" --network "$JOB_NET" --wait --timeout 180s
+            # Same reason: the published port is useless from in here, so the
+            # kubeconfig is pointed at the load balancer container by name,
+            # over the shared network. If the API server certificate did not
+            # carry that name this would fail on the TLS handshake and the
+            # cluster-info below would say so - it holds without an extra
+            # --tls-san, measured on the probe PR of #225.
+            kubectl config set-cluster "k3d-$CLUSTER" --server="https://k3d-$CLUSTER-serverlb:6443"
+          else
+            echo "Job runs on the docker host - k3d's published port is reachable as written."
+            k3d cluster create "$CLUSTER" --image "$K3S_IMAGE" --wait --timeout 180s
+          fi
+
+          # Proves reachability here rather than letting it surface two steps
+          # later as a validation error on the fixtures, which is where it
+          # showed up before and named nothing useful.
+          kubectl cluster-info
+          kubectl get nodes
       # Every chart reaching this step is one the exclusion filter let through,
       # so the script's SKIP branch is never taken here - it exists for local
       # runs. The variables below are empty for every chart but the one that

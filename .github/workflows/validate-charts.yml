@@ -451,7 +451,26 @@ jobs:
           # Proves reachability here rather than letting it surface two steps
           # later as a validation error on the fixtures, which is where it
           # showed up before and named nothing useful.
-          kubectl cluster-info
+          #
+          # Polled, not asked once. k3d's --wait returns when the node
+          # container reports ready, but the API server can still answer
+          # discovery with 503 for a moment afterwards. Measured the hard way:
+          # a bare `kubectl cluster-info` right here failed with
+          # "ServiceUnavailable: the server is currently unable to handle the
+          # request" on one of two legs of the same GitHub run while the other
+          # passed - a check that is itself racy is worse than no check, since
+          # it produces exactly the sporadic red this job must not have. The
+          # loop asks for the node list, which is the thing that has to work
+          # and exercises discovery on the way.
+          for ATTEMPT in $(seq 1 60); do
+            kubectl get nodes >/dev/null 2>&1 && break
+            if [ "$ATTEMPT" -eq 60 ]; then
+              echo "::error::the k3d cluster '$CLUSTER' was created but never became reachable"
+              kubectl get nodes || true
+              exit 1
+            fi
+            sleep 2
+          done
           kubectl get nodes
       # Every chart reaching this step is one the exclusion filter let through,
       # so the script's SKIP branch is never taken here - it exists for local

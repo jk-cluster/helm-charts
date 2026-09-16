@@ -108,7 +108,7 @@ Fixture images avoid Docker Hub where possible (`public.ecr.aws`/`ghcr.io`) to d
 
 ## Dependency updates (Renovate)
 
-Renovate runs as the self-hosted `jlab-renovate` GitHub App while the repo is on github.com, and as a scheduled job of its own (`.github/workflows/renovate.yml`) on Gitea, where no app model exists — see "Renovate on Gitea" below. Which of the two runs it changes nothing about *what* gets updated: its config is **`renovate.json5`** in the repo root (JSON5 for the inline reasoning; requires Renovate >= 41 for `managerFilePatterns`/`customType`). There must be exactly one config file — do not add a second `renovate.json` or `.github/renovate.json`.
+Renovate runs as the self-hosted `jlab-renovate` GitHub App while the repo is on github.com, and on Gitea as the shared `jlab-renovate-bot` instance that already serves the other repositories there — see "Renovate on Gitea" below. **There is no Renovate workflow in this repo, and none should be added.** Which of the two runs it changes nothing about *what* gets updated: its config is **`renovate.json5`** in the repo root (JSON5 for the inline reasoning; requires Renovate >= 41 for `managerFilePatterns`/`customType`). There must be exactly one config file — do not add a second `renovate.json` or `.github/renovate.json`.
 
 What Renovate keeps current:
 
@@ -154,13 +154,14 @@ If the dependency dashboard reports `Failed to look up github-releases package �
 
 ### Renovate on Gitea
 
-There is no Renovate app for Gitea, so after the move the bot is run by this repository: `.github/workflows/renovate.yml`, a daily schedule plus a manual dispatch that defaults to a dry run. It executes the official `ghcr.io/renovatebot/renovate` image; no Docker socket is involved, because starting a job's `container:` is the runner's own work — the job only lives in it. The file carries an `if: github.server_url != 'https://github.com'` guard so the same workflow stays inert on github.com, where a Gitea token and a Gitea endpoint would fail nightly for a reason nobody is watching for.
+**Do not add a Renovate workflow to this repository.** It is the obvious thing to reach for — Gitea has no app model, so a scheduled job in the repo looks like the only way to run the bot — and it is wrong here: a **shared `jlab-renovate-bot` instance already runs on the Gitea side** and already has this repository enrolled. A second runner against the same repo produces duplicate PRs and two schedulers rewriting each other's branches, which is not a safety net but a fault. This paragraph exists so the next reader who finds no workflow knows why instead of building one.
 
-Three things about it are easy to get wrong and cost nothing to get right:
+The instance is outside this repository, which has two consequences worth writing down:
 
-- **`GITHUB_COM_TOKEN` is not optional here.** Every `github-releases`/`github-tags` lookup and the whole built-in `github-actions` manager resolve against github.com. Under the App those calls rode on the installation token; a Gitea token is worth nothing there, and unauthenticated github.com runs into the rate limit inside a single pass. The symptom is the `no-result` line on the dependency dashboard, not an error.
-- **`allowedCommands` moved into the workflow.** `postUpgradeTasks` only runs when the command is allow-listed in the *instance* config, which this workflow now is: `RENOVATE_ALLOWED_COMMANDS='["^ci/renovate-bump-chart\.sh"]'`. Without it Renovate skips the version-bump hook **silently** and every chart PR stays red on the version check.
-- **Renovate keeps its own image current.** The built-in `github-actions` manager reads `container:` images, not only `uses:`. Proved by dry run rather than assumed: pinned to `44.80.0`, the lookup returns `44.87.1` as a `minor` update on branch `renovate/ghcr.io-renovatebot-renovate-44.x`, with `pendingChecks: true` from the 3-day `minimumReleaseAge`. The `ubuntu-docker` runner label is **not** touched by the `github-runners` manager — it is not extracted at all, so nothing will quietly "fix" it back to a version label.
+- **It reads our `renovate.json5` and the per-chart rules do fire.** Measured, not assumed: its first run on the migrated repo opened PRs for `searxng` and `gotenberg` plus the dependency dashboard. Those two are `customManagers` targets of ours — no built-in manager finds an `appVersion:` in a `Chart.yaml` — so the config is demonstrably in effect.
+- **`allowedCommands` is already granted there, and the version-bump hook runs.** This was the expensive unknown: `postUpgradeTasks` only executes when the command is allow-listed in the *instance* config, and a missing entry is skipped **silently**, leaving every chart PR red on the version check. The proof is in that searxng PR's diff, which carries `version: 1.0.4+up2026.9.11.ffe96f8a6` → `1.0.5+up2026.9.13.96479fff6` alongside the `appVersion` change. Nothing but `ci/renovate-bump-chart.sh` writes `version:`. Nothing has to be configured for the move — but the allow-list is not visible from this repo either, so if it is ever dropped, the symptom here will be red chart PRs with no explanation.
+
+One item does not come for free on either side and is named in "The version-bump hook" above: a `GITHUB_COM_TOKEN` for github.com datasource lookups. Under the GitHub App those rode on the installation token; a Gitea token is worth nothing at github.com, and unauthenticated lookups hit the rate limit inside a single pass. The symptom is a `no-result` line on the dependency dashboard, not an error.
 
 ### PR policy
 

@@ -28,6 +28,7 @@ The repository is moving from github.com to the Gitea instance JLab-Git (#225). 
 - **`gh` only as `op plugin run -- gh`**, `tea` only as `op plugin run -- tea`. A bare `gh` falls back to the wrong identity. Every call costs a 1Password confirmation, so bundle them and never poll.
 - **After the move: no merge queue.** Gitea has none. Its place is taken by **auto-merge on green checks** — the PR is armed once and merges itself when the required checks pass. The manager still decides *whether* to arm it; rule 6 above is unchanged: the user merges, and an agent never merges its own PR.
 - **Issue numbers will not survive the move.** Gitea renumbers, and issues and PRs share one counter. A `#n` written today keeps pointing at the GitHub issue; `ci/migrate-issues-to-gitea.sh` writes the old→new mapping but deliberately rewrites nothing.
+- **Renovate is already running on the Gitea side, and not from this repo.** A shared `jlab-renovate-bot` instance serves the other repositories there and has this one enrolled; it reads our `renovate.json5` and its `postUpgradeTasks` hook is allow-listed (both verified on its first run). **Do not add a Renovate workflow here** — a second runner against the same repo means duplicate PRs and two schedulers rewriting each other's branches. README, "Renovate on Gitea", has the evidence.
 
 ## Keep the docs current
 

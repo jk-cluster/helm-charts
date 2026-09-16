@@ -49,9 +49,15 @@
   //   allowedCommands: ["^ci/renovate-bump-chart\\.sh"]
   //
   // Without that entry Renovate skips the task silently and every chart PR
-  // stays red on the version-bump check. On Gitea, where this repo runs
-  // Renovate itself, "the instance config" is .github/workflows/renovate.yml -
-  // it sets RENOVATE_ALLOWED_COMMANDS to exactly that value.
+  // stays red on the version-bump check.
+  //
+  // On the Gitea side (#225) that entry EXISTS and was verified rather than
+  // hoped for: the shared instance's first run on the migrated repo produced
+  // a searxng PR whose diff carries `version: 1.0.4+up... -> 1.0.5+up...`
+  // next to the appVersion. No built-in manager touches `version:`, so that
+  // line can only come from this hook. Nothing has to be configured for the
+  // move - but the allow-list lives on that instance, not in this repo, so it
+  // is also not visible from here if it is ever removed.
   postUpgradeTasks: {
     commands: ["ci/renovate-bump-chart.sh {{{packageFileDir}}}"],
     fileFilters: ["**/Chart.yaml"],

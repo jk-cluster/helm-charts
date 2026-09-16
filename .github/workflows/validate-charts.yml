@@ -285,11 +285,51 @@ jobs:
     env:
       K3D_VERSION: v5.9.0
       K3S_IMAGE: docker.io/rancher/k3s:v1.35.5-k3s1
+      # Pinned rather than taken from the runner image. The argument is not
+      # "Gitea's image has no kubectl" - that is only how it was noticed. A
+      # kubectl inherited from whatever the image happens to ship drifts
+      # unannounced with every image rebuild, and an install-test is supposed
+      # to run against a KNOWN client. That GitHub's hosted image already
+      # carries one does not make the pin unnecessary; it only makes the drift
+      # invisible there. The value mirrors K3S_IMAGE above (v1.35.5), which is
+      # the cluster this client talks to.
+      # renovate: datasource=github-releases depName=kubernetes/kubernetes
+      KUBECTL_VERSION: v1.35.5
     steps:
       - name: "Checkout Repository"
         uses: actions/checkout@v7
       - name: "Install Helm"
         uses: azure/setup-helm@v5
+      - name: "Install kubectl"
+        run: |
+          # kubectl and the cluster are a pair: the client talks to the server
+          # K3S_IMAGE starts, and Kubernetes supports at most one minor of
+          # skew between them. Renovate updates KUBECTL_VERSION on its own
+          # while K3S_IMAGE is tracked by nothing, so without this check the
+          # two drift apart until the client is talking to a server it no
+          # longer supports - silently, because kubectl only warns. And it is
+          # not theoretical: measured by dry run, a lookup from v1.34.0
+          # offers v1.37.0 in ONE step, because Renovate fills the non-major
+          # bucket with the newest candidate rather than walking the minors.
+          # So this check WILL fire one day, on purpose, with a message that
+          # says which of the two pins to move.
+          #
+          # Deliberately not solved with an allowedVersions constraint pinning
+          # kubectl to the k3s minor: that is the nginx trap the README
+          # describes - a filter that silently stops offering updates the day
+          # the other side moves. A loud failure beats a quiet freeze.
+          read -r KMAJ KMIN <<<"$(printf '%s' "$KUBECTL_VERSION" | sed -E 's/^v([0-9]+)\.([0-9]+).*/\1 \2/')"
+          read -r SMAJ SMIN <<<"$(printf '%s' "$K3S_IMAGE" | sed -E 's/.*:v([0-9]+)\.([0-9]+).*/\1 \2/')"
+          SKEW=$(( (KMAJ * 100 + KMIN) - (SMAJ * 100 + SMIN) ))
+          if [ "${SKEW#-}" -gt 1 ]; then
+            echo "::error::kubectl $KUBECTL_VERSION and k3s $K3S_IMAGE are more than one minor apart. Bump K3S_IMAGE to match, or pin KUBECTL_VERSION back."
+            exit 1
+          fi
+          curl -sSfL -o /tmp/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          mkdir -p "$HOME/.local/bin"
+          install -m 0755 /tmp/kubectl "$HOME/.local/bin/kubectl"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/kubectl" version --client
       # freesailarr is the one chart whose install-test needs credentials:
       # without a real Wireguard key gluetun never completes a handshake, and
       # behind its kill switch not a single app container becomes Ready. The key
@@ -334,8 +374,37 @@ jobs:
           echo "Both VPN values arrived non-empty."
       - name: "Install k3d"
         run: curl -sSfL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | TAG="$K3D_VERSION" bash
+      # One cluster per matrix leg, named after the chart. It used to be the
+      # fixed name "install-test", and that was wrong on GitHub too - it just
+      # could not show there, because GitHub gives every matrix leg its own VM
+      # with its own Docker daemon, so two legs never saw each other's
+      # cluster. The environment hid the bug for two years rather than
+      # preventing it. Gitea runs all legs of a matrix CONCURRENTLY in ONE job
+      # on ONE daemon, and there the fixed name collides at once: measured on
+      # the probe PR of #225, one leg logs "Re-using existing network
+      # 'k3d-install-test'", the other dies on "The container name
+      # /k3d-install-test-server-0 is already in use" - and then the first
+      # leg's rollback deletes the shared network out from under the second,
+      # which fails with "network k3d-install-test not found". Both legs red,
+      # neither cause in either message. DO NOT put the fixed name back.
+      #
+      # Why the bare chart name and not a prefixed one: k3d rejects a cluster
+      # name over 32 characters ("Cluster name must be <= 32 characters",
+      # measured against k3d v5.9.0 - 32 passes, 33 fails), and every
+      # container is named k3d-<cluster>-server-0 from it. The longest chart
+      # here is calibre-web-automated at 21, so "install-test-<chart>" would
+      # be 34 and break exactly that one chart and no other - the kind of
+      # prefix that is worse than the fixed name because it only sometimes
+      # breaks. The guard below states the limit instead of leaving it to be
+      # rediscovered.
       - name: "Create k3d cluster"
-        run: k3d cluster create install-test --image "$K3S_IMAGE" --wait --timeout 180s
+        run: |
+          CLUSTER="${{ matrix.chart }}"
+          if [ "${#CLUSTER}" -gt 32 ]; then
+            echo "::error::chart name '$CLUSTER' is ${#CLUSTER} characters and k3d allows at most 32 for a cluster name."
+            exit 1
+          fi
+          k3d cluster create "$CLUSTER" --image "$K3S_IMAGE" --wait --timeout 180s
       # Every chart reaching this step is one the exclusion filter let through,
       # so the script's SKIP branch is never taken here - it exists for local
       # runs. The variables below are empty for every chart but the one that
@@ -346,6 +415,10 @@ jobs:
           FREESAILARR_WG_KEY: ${{ steps.load-freesailarr-vpn.outputs.FREESAILARR_WG_KEY }}
           FREESAILARR_WG_ADDRESSES: ${{ steps.load-freesailarr-vpn.outputs.FREESAILARR_WG_ADDRESSES }}
         run: ci/run-install-test.sh "${{ matrix.chart }}"
+      # Must carry the same per-leg name as the create step above: a blanket
+      # cleanup, or the old fixed name, would tear down the neighbouring leg's
+      # cluster on a runner that shares one Docker daemon - which is precisely
+      # the half of the collision that turned one red leg into two.
       - name: "Delete k3d cluster"
         if: always()
-        run: k3d cluster delete install-test || true
+        run: k3d cluster delete "${{ matrix.chart }}" || true

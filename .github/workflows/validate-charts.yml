@@ -330,6 +330,35 @@ jobs:
           install -m 0755 /tmp/kubectl "$HOME/.local/bin/kubectl"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/kubectl" version --client
+      - name: "Provide envsubst"
+        run: |
+          # ci/run-install-test.sh renders ci/<chart>/fixtures.env.yaml with
+          # envsubst - today only freesailarr has one, and without the tool
+          # the fixtures collapse to "error: no objects passed to apply",
+          # gluetun never gets its Wireguard key, and nothing behind its kill
+          # switch becomes Ready. GitHub's hosted image ships gettext-base,
+          # the Gitea runner image does not. The script is fine as it is; a
+          # standard tool is simply missing.
+          #
+          # CHECKED FOR, NOT PINNED - and that is a different decision from
+          # kubectl above, on purpose. kubectl's VERSION changes what the test
+          # means: its distance to the API server is a real source of failure,
+          # which is why it is pinned, tracked and guarded. envsubst
+          # substitutes text; which release performs the substitution does not
+          # change the result. Pinning it would buy nothing and add a line for
+          # Renovate to carry. So: present - do nothing, which keeps the
+          # GitHub path free of any package install; missing - fetch it, and
+          # the difference between the two runners is stated rather than
+          # hidden behind an unconditional apt-get.
+          if command -v envsubst >/dev/null 2>&1; then
+            echo "envsubst present at $(command -v envsubst) - nothing to do"
+            exit 0
+          fi
+          echo "envsubst missing on this runner image - installing gettext-base"
+          if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
+          $SUDO apt-get update -qq
+          $SUDO apt-get install -y -qq --no-install-recommends gettext-base
+          command -v envsubst
       # freesailarr is the one chart whose install-test needs credentials:
       # without a real Wireguard key gluetun never completes a handshake, and
       # behind its kill switch not a single app container becomes Ready. The key
@@ -448,30 +477,36 @@ jobs:
             k3d cluster create "$CLUSTER" --image "$K3S_IMAGE" --wait --timeout 180s
           fi
 
-          # Proves reachability here rather than letting it surface two steps
-          # later as a validation error on the fixtures, which is where it
-          # showed up before and named nothing useful.
+          # Reachability is proven HERE, and the shape of this check is the
+          # product of getting it wrong twice. Both mistakes are written down
+          # because both look like something to simplify away.
           #
-          # Polled, not asked once. k3d's --wait returns when the node
-          # container reports ready, but the API server can still answer
-          # discovery with 503 for a moment afterwards. Measured the hard way:
-          # a bare `kubectl cluster-info` right here failed with
-          # "ServiceUnavailable: the server is currently unable to handle the
-          # request" on one of two legs of the same GitHub run while the other
-          # passed - a check that is itself racy is worse than no check, since
-          # it produces exactly the sporadic red this job must not have. The
-          # loop asks for the node list, which is the thing that has to work
-          # and exercises discovery on the way.
-          # It waits for a READY NODE, not for the API server to answer. The
-          # difference is not pedantry, it is the second bug this check had:
-          # `kubectl get nodes` exits 0 on an EMPTY list, so the first version
-          # passed against a cluster whose server was up and whose node had
-          # not registered - the log said "No resources found" and the step
-          # went green, and the failure surfaced five minutes later as a pod
-          # stuck in Pending with no node and no scheduling event. A check
-          # that a broken cluster passes is worse than none. `kubectl wait
-          # --for=condition=Ready nodes --all` has the same hole: with zero
-          # nodes it succeeds vacuously.
+          # It is a LOOP and not a single call. k3d's --wait returns when the
+          # node container reports ready, but the API server can still answer
+          # discovery with 503 for a moment after that. Measured: a single
+          # `kubectl cluster-info` right here failed with "ServiceUnavailable:
+          # the server is currently unable to handle the request" on one of
+          # two legs of the SAME GitHub run while the other passed. A check
+          # that is itself racy produces exactly the sporadic red this job
+          # must never have (#227) - and a test people have learned to re-run
+          # is one they have stopped believing.
+          #
+          # It counts READY NODES and not "did kubectl answer". `kubectl get
+          # nodes` exits 0 on an EMPTY list, so the first version passed
+          # against a cluster whose API server was up and whose node had never
+          # registered: the log said "No resources found", the step went
+          # green, and the failure surfaced five minutes later as a pod stuck
+          # in Pending with no node and no scheduling event - nowhere near its
+          # cause. A check that a broken cluster passes is worse than no
+          # check. `kubectl wait --for=condition=Ready nodes --all` is not the
+          # shorter way to write this: it has the identical hole, because with
+          # zero nodes the condition is vacuously satisfied.
+          #
+          # The evidence that this version earns its keep: only after it
+          # counted nodes did the real cause become visible in the dump below
+          # - k3s could not start containerd ("error creating fsnotify
+          # watcher: too many open files", an inotify limit on the host), and
+          # nothing above this line had ever said so.
           for ATTEMPT in $(seq 1 90); do
             READY_NODES="$(kubectl get nodes --no-headers 2>/dev/null | awk '$2 == "Ready"' | wc -l | tr -d ' ')"
             [ "$READY_NODES" -ge 1 ] && break

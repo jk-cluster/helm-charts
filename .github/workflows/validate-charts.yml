@@ -294,7 +294,7 @@ jobs:
       # invisible there. The value mirrors K3S_IMAGE above (v1.35.5), which is
       # the cluster this client talks to.
       # renovate: datasource=github-releases depName=kubernetes/kubernetes
-      KUBECTL_VERSION: v1.35.5
+      KUBECTL_VERSION: v1.37.0
     steps:
       - name: "Checkout Repository"
         uses: actions/checkout@v7

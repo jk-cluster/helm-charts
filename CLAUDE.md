@@ -7,16 +7,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 The main Claude session acts as the **task manager** and does not implement issues itself:
 
 1. **Plan first, get approval**: The manager presents a plan for the issue and waits for the user's explicit approval. No implementation before approval.
-2. **Document the final plan on the issue**: Once approved, the plan is posted as a comment on the GitHub issue before implementation starts (skip if the issue body already contains the full plan; later decisions go there as comments too).
+2. **Document the final plan on the issue**: Once approved, the plan is posted as a comment on the issue before implementation starts (skip if the issue body already contains the full plan; later decisions go there as comments too).
 3. **Delegate implementation**: After approval, the manager launches a dedicated **development agent**. The agent implements the issue completely on its own branch and opens a PR.
 4. **PR comment handling by the agent**: After opening the PR, the development agent watches it for review comments. New comments are addressed automatically (code changes, reply on the thread), and addressed threads are marked as **resolved**.
 5. **Agent lifetime**: The development agent terminates itself once its PR has been merged (or closed).
 6. Only after the PR has been **merged by the user** may work on the next issue begin. The user merges; never merge yourself.
-7. **After the merge, verify the linked issue was closed** (auto-close via "Fixes #n"); close it manually if not.
+7. **After the merge, verify the linked issue was closed** (auto-close via "Fixes #n"); close it manually if not. Gitea auto-closes on the same keywords, but only for an issue in the same repository — a migrated issue whose number changed is closed by hand.
 
 Additional rules for all commits, PRs, issues, and comments:
 
 - Do **not** add a `Co-Authored-By` trailer and do **not** append "Generated with Claude Code" footers.
+- **Commits must be signed.** Verify the signature before opening the PR; if `op-ssh-sign` fails, stop and report rather than pushing unsigned work.
+
+## Which forge, and with which tool
+
+The repository is moving from github.com to the Gitea instance JLab-Git (#225). The move is **not finished**, so both are live and the steps below differ by where the work happens. README, "Where this repo lives", holds the measured differences between the two CIs; this section holds only what changes about the *workflow*.
+
+- **Remotes are named `github` and `JLab-Git`** — there is no `origin`. Say which one you mean; `git push` without a remote is ambiguous here.
+- **Today the merge flow still runs on GitHub.** Issues, pull requests and merges happen there until the maintainer switches Actions off and turns on the mirror. Until then, **do not push to `JLab-Git/main`**: with publish workflows armed on both sides, two CIs publish into the same registry, and that registry accepts a re-upload of an existing version silently, replacing the artifact (#160). Pushing a *branch* to Gitea is fine — only `main` triggers a publish.
+- **`gh` only as `op plugin run -- gh`**, `tea` only as `op plugin run -- tea`. A bare `gh` falls back to the wrong identity. Every call costs a 1Password confirmation, so bundle them and never poll.
+- **After the move: no merge queue.** Gitea has none. Its place is taken by **auto-merge on green checks** — the PR is armed once and merges itself when the required checks pass. The manager still decides *whether* to arm it; rule 6 above is unchanged: the user merges, and an agent never merges its own PR.
+- **Issue numbers will not survive the move.** Gitea renumbers, and issues and PRs share one counter, so a `#n` written today will not land on the same number over there. The migration itself is the maintainer's one-off job over the API; how the old references are dealt with afterwards is open and decided in #225. Until that is decided, a `#n` anywhere in this repo means the GitHub issue.
+- **Renovate is already running on the Gitea side, and not from this repo.** A shared `jlab-renovate-bot` instance serves the other repositories there and has this one enrolled; it reads our `renovate.json5` and its `postUpgradeTasks` hook is allow-listed (both verified on its first run). **Do not add a Renovate workflow here** — a second runner against the same repo means duplicate PRs and two schedulers rewriting each other's branches. README, "Renovate on Gitea", has the evidence.
 
 ## Keep the docs current
 
@@ -26,7 +38,7 @@ Additional rules for all commits, PRs, issues, and comments:
 
 ## What this repo is
 
-A collection of self-made Helm charts, one directory per chart, published to a private, classic (index-based) Helm registry via GitHub Actions — an HTTP `POST` of the packaged `.tgz`, not an OCI `helm push`; the target URL and its credentials live in 1Password and never in this repository. Validation happens on three levels: locally with Helm, in the PR pipeline (`validate-charts.yml`: strict lint, package, version-bump check), and in the PR install-test stage (k3d, fixtures under `ci/` — see README):
+A collection of self-made Helm charts, one directory per chart, published to a private, classic (index-based) Helm registry by CI (GitHub Actions today, Gitea Actions after #225; the workflow files are read by both unchanged) — an HTTP `POST` of the packaged `.tgz`, not an OCI `helm push`; the target URL and its credentials live in 1Password and never in this repository. Validation happens on three levels: locally with Helm, in the PR pipeline (`validate-charts.yml`: strict lint, package, version-bump check), and in the PR install-test stage (k3d, fixtures under `ci/` — see README):
 
 ```bash
 helm lint --strict <chart-name>

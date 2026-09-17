@@ -50,6 +50,14 @@
   //
   // Without that entry Renovate skips the task silently and every chart PR
   // stays red on the version-bump check.
+  //
+  // On the Gitea side (#225) that entry EXISTS and was verified rather than
+  // hoped for: the shared instance's first run on the migrated repo produced
+  // a searxng PR whose diff carries `version: 1.0.4+up... -> 1.0.5+up...`
+  // next to the appVersion. No built-in manager touches `version:`, so that
+  // line can only come from this hook. Nothing has to be configured for the
+  // move - but the allow-list lives on that instance, not in this repo, so it
+  // is also not visible from here if it is ever removed.
   postUpgradeTasks: {
     commands: ["ci/renovate-bump-chart.sh {{{packageFileDir}}}"],
     fileFilters: ["**/Chart.yaml"],
@@ -80,10 +88,13 @@
       matchUpdateTypes: ["patch", "minor", "digest"],
       automerge: true,
       automergeType: "pr",
-      // Renovate waits for the checks itself instead of handing the PR to
-      // GitHub's auto-merge. GitHub would merge immediately when the branch has
-      // no required status checks configured — and validate-charts is not (yet)
-      // a required check.
+      // Renovate waits for the checks itself instead of handing the PR to the
+      // forge's own auto-merge. Both of them — GitHub's, and the auto-merge
+      // that takes the merge queue's place on Gitea, which has none — merge
+      // immediately when the branch has no required status checks configured,
+      // and validate-charts is not (yet) a required check on either side. This
+      // is a statement about the branch protection, not about the platform:
+      // once required checks exist on `main`, true is the better value.
       platformAutomerge: false,
       // A release that is hours old should not walk into main unattended; a
       // chart publish follows the merge straight away.

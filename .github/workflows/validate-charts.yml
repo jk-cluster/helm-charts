@@ -199,11 +199,27 @@ jobs:
         uses: actions/checkout@v7
       - name: "Install Helm"
         uses: azure/setup-helm@v5
+      # A plain release download rather than aquasecurity/setup-trivy, and the
+      # reason is measured on the Gitea probe PR of #225, not assumed. That
+      # action runs actions/checkout against aquasecurity/trivy on github.com
+      # and hands it `github.token` - which on Gitea is a GITEA token.
+      # github.com answers 401, checkout retries twice and the job ends on
+      # "fatal: could not read Username for 'https://github.com': terminal
+      # prompts disabled", an error naming neither the action nor the token.
+      # Its actions/cache step is inert on the instance as well ("Cache action
+      # is only supported on GHES version >= 3.5"), and fetching the nested
+      # actions cost 4m30s before the job even started. One tarball behaves
+      # identically on both forges, and the `# renovate:` comment above still
+      # keeps TRIVY_VERSION current - verified by dry run: pinned to v0.72.0
+      # the lookup offers v0.74.0 as a minor update.
       - name: "Install Trivy"
-        uses: aquasecurity/setup-trivy@v0.3.1
-        with:
-          version: ${{ env.TRIVY_VERSION }}
-          cache: true
+        run: |
+          curl -sSfL -o /tmp/trivy.tar.gz \
+            "https://github.com/aquasecurity/trivy/releases/download/${TRIVY_VERSION}/trivy_${TRIVY_VERSION#v}_Linux-64bit.tar.gz"
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf /tmp/trivy.tar.gz -C "$HOME/.local/bin" trivy
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/trivy" --version
       # Findings land in the job summary, not only in the log: exceptions with
       # their reasons come from ci/trivy/trivyignore.yaml, the trusted-registry
       # list from ci/trivy/data/ksv0125.yaml.
@@ -214,7 +230,35 @@ jobs:
     name: "Install-test ${{ matrix.chart }}"
     needs: [detect-changed-charts, build-chart]
     if: needs.detect-changed-charts.outputs.any-install == 'true'
-    runs-on: ubuntu-latest
+    # The one job in this repo that does not simply say ubuntu-latest, and the
+    # expression is not decoration - the same label means different machines on
+    # the two forges this repo currently lives on (#225).
+    #
+    # This is the only job that needs a Docker socket: it creates a k3d
+    # cluster, and k3d is a Docker client. On GitHub's hosted runners every
+    # label carries Docker, so the question never came up. On the Gitea
+    # instance it was MEASURED on a probe pull request, per job:
+    # detect-changed-charts, build-chart, the quantity render and the Trivy
+    # scan all pass on `ubuntu-latest` - none of them needs Docker - while the
+    # install-test dies there at "Create k3d cluster" with "Cannot connect to
+    # the Docker daemon at unix:///var/run/docker.sock", an error that points
+    # at k3d and never at the runner label. `ubuntu-docker` is the label that
+    # carries a socket, and Gitea does evaluate this expression: the probe job
+    # was picked up by the docker runner with labels ["ubuntu-docker"].
+    #
+    # Why an expression and not a plain `ubuntu-docker`: that label does not
+    # exist on GitHub, so every chart PR would sit queued forever for as long
+    # as this repo still builds on github.com - blocking the merge with no
+    # error anywhere. github.server_url is the one context value that separates
+    # the two without naming our instance.
+    #
+    # KNOWN, and not fixed by this line: `ubuntu-docker`'s daemon is ROOTLESS
+    # and reports "Cgroup Driver: none" plus "Running in rootless-mode without
+    # cgroups". k3d then gets as far as starting the k3s node, which restarts
+    # immediately with an empty log, because k3s needs cgroup delegation. Until
+    # the instance's Docker-in-Docker provides it, this job cannot pass on
+    # Gitea - see #225. The label is necessary, it is just not sufficient.
+    runs-on: ${{ github.server_url == 'https://github.com' && 'ubuntu-latest' || 'ubuntu-docker' }}
     # Blocking since Renovate automerges patch/minor updates: a chart that no
     # longer starts must stop the PR before it reaches main and publishes. This
     # ends the stabilization phase of issue #22 - the job reported failures
@@ -241,11 +285,80 @@ jobs:
     env:
       K3D_VERSION: v5.9.0
       K3S_IMAGE: docker.io/rancher/k3s:v1.35.5-k3s1
+      # Pinned rather than taken from the runner image. The argument is not
+      # "Gitea's image has no kubectl" - that is only how it was noticed. A
+      # kubectl inherited from whatever the image happens to ship drifts
+      # unannounced with every image rebuild, and an install-test is supposed
+      # to run against a KNOWN client. That GitHub's hosted image already
+      # carries one does not make the pin unnecessary; it only makes the drift
+      # invisible there. The value mirrors K3S_IMAGE above (v1.35.5), which is
+      # the cluster this client talks to.
+      # renovate: datasource=github-releases depName=kubernetes/kubernetes
+      KUBECTL_VERSION: v1.35.5
     steps:
       - name: "Checkout Repository"
         uses: actions/checkout@v7
       - name: "Install Helm"
         uses: azure/setup-helm@v5
+      - name: "Install kubectl"
+        run: |
+          # kubectl and the cluster are a pair: the client talks to the server
+          # K3S_IMAGE starts, and Kubernetes supports at most one minor of
+          # skew between them. Renovate updates KUBECTL_VERSION on its own
+          # while K3S_IMAGE is tracked by nothing, so without this check the
+          # two drift apart until the client is talking to a server it no
+          # longer supports - silently, because kubectl only warns. And it is
+          # not theoretical: measured by dry run, a lookup from v1.34.0
+          # offers v1.37.0 in ONE step, because Renovate fills the non-major
+          # bucket with the newest candidate rather than walking the minors.
+          # So this check WILL fire one day, on purpose, with a message that
+          # says which of the two pins to move.
+          #
+          # Deliberately not solved with an allowedVersions constraint pinning
+          # kubectl to the k3s minor: that is the nginx trap the README
+          # describes - a filter that silently stops offering updates the day
+          # the other side moves. A loud failure beats a quiet freeze.
+          read -r KMAJ KMIN <<<"$(printf '%s' "$KUBECTL_VERSION" | sed -E 's/^v([0-9]+)\.([0-9]+).*/\1 \2/')"
+          read -r SMAJ SMIN <<<"$(printf '%s' "$K3S_IMAGE" | sed -E 's/.*:v([0-9]+)\.([0-9]+).*/\1 \2/')"
+          SKEW=$(( (KMAJ * 100 + KMIN) - (SMAJ * 100 + SMIN) ))
+          if [ "${SKEW#-}" -gt 1 ]; then
+            echo "::error::kubectl $KUBECTL_VERSION and k3s $K3S_IMAGE are more than one minor apart. Bump K3S_IMAGE to match, or pin KUBECTL_VERSION back."
+            exit 1
+          fi
+          curl -sSfL -o /tmp/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          mkdir -p "$HOME/.local/bin"
+          install -m 0755 /tmp/kubectl "$HOME/.local/bin/kubectl"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/kubectl" version --client
+      - name: "Provide envsubst"
+        run: |
+          # ci/run-install-test.sh renders ci/<chart>/fixtures.env.yaml with
+          # envsubst - today only freesailarr has one, and without the tool
+          # the fixtures collapse to "error: no objects passed to apply",
+          # gluetun never gets its Wireguard key, and nothing behind its kill
+          # switch becomes Ready. GitHub's hosted image ships gettext-base,
+          # the Gitea runner image does not. The script is fine as it is; a
+          # standard tool is simply missing.
+          #
+          # CHECKED FOR, NOT PINNED - and that is a different decision from
+          # kubectl above, on purpose. kubectl's VERSION changes what the test
+          # means: its distance to the API server is a real source of failure,
+          # which is why it is pinned, tracked and guarded. envsubst
+          # substitutes text; which release performs the substitution does not
+          # change the result. Pinning it would buy nothing and add a line for
+          # Renovate to carry. So: present - do nothing, which keeps the
+          # GitHub path free of any package install; missing - fetch it, and
+          # the difference between the two runners is stated rather than
+          # hidden behind an unconditional apt-get.
+          if command -v envsubst >/dev/null 2>&1; then
+            echo "envsubst present at $(command -v envsubst) - nothing to do"
+            exit 0
+          fi
+          echo "envsubst missing on this runner image - installing gettext-base"
+          if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
+          $SUDO apt-get update -qq
+          $SUDO apt-get install -y -qq --no-install-recommends gettext-base
+          command -v envsubst
       # freesailarr is the one chart whose install-test needs credentials:
       # without a real Wireguard key gluetun never completes a handshake, and
       # behind its kill switch not a single app container becomes Ready. The key
@@ -290,8 +403,124 @@ jobs:
           echo "Both VPN values arrived non-empty."
       - name: "Install k3d"
         run: curl -sSfL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | TAG="$K3D_VERSION" bash
+      # One cluster per matrix leg, named after the chart. It used to be the
+      # fixed name "install-test", and that was wrong on GitHub too - it just
+      # could not show there, because GitHub gives every matrix leg its own VM
+      # with its own Docker daemon, so two legs never saw each other's
+      # cluster. The environment hid the bug for two years rather than
+      # preventing it. Gitea runs all legs of a matrix CONCURRENTLY in ONE job
+      # on ONE daemon, and there the fixed name collides at once: measured on
+      # the probe PR of #225, one leg logs "Re-using existing network
+      # 'k3d-install-test'", the other dies on "The container name
+      # /k3d-install-test-server-0 is already in use" - and then the first
+      # leg's rollback deletes the shared network out from under the second,
+      # which fails with "network k3d-install-test not found". Both legs red,
+      # neither cause in either message. DO NOT put the fixed name back.
+      #
+      # Why the bare chart name and not a prefixed one: k3d rejects a cluster
+      # name over 32 characters ("Cluster name must be <= 32 characters",
+      # measured against k3d v5.9.0 - 32 passes, 33 fails), and every
+      # container is named k3d-<cluster>-server-0 from it. The longest chart
+      # here is calibre-web-automated at 21, so "install-test-<chart>" would
+      # be 34 and break exactly that one chart and no other - the kind of
+      # prefix that is worse than the fixed name because it only sometimes
+      # breaks. The guard below states the limit instead of leaving it to be
+      # rediscovered.
       - name: "Create k3d cluster"
-        run: k3d cluster create install-test --image "$K3S_IMAGE" --wait --timeout 180s
+        run: |
+          CLUSTER="${{ matrix.chart }}"
+          if [ "${#CLUSTER}" -gt 32 ]; then
+            echo "::error::chart name '$CLUSTER' is ${#CLUSTER} characters and k3d allows at most 32 for a cluster name."
+            exit 1
+          fi
+
+          # Does THIS job run inside a container? That, and not which forge we
+          # are on, is what decides whether k3d's cluster is reachable (#227).
+          #
+          # k3d publishes the API server port on the Docker *host*. When the
+          # job runs straight on the host - GitHub's hosted runners - that is
+          # the same machine, and the "https://0.0.0.0:<port>" k3d writes into
+          # the kubeconfig works. When the job itself is a container, as every
+          # Gitea Actions job is, the host is the dind container and 0.0.0.0
+          # points at the job container itself, where nothing listens. The
+          # cluster comes up fine and the first kubectl call is refused.
+          #
+          # Deliberately NOT keyed on github.server_url, although that would
+          # pick the right branch today: a self-hosted GitHub runner in a
+          # container has exactly this problem, and a condition that says
+          # "GitHub" while meaning "not containerised" is the kind of lie this
+          # repo exists to remove. So the state is detected instead of
+          # inferred, and the detection is the same question the fix needs
+          # answered anyway: ask the daemon about ourselves. Inside a
+          # container that the daemon knows, this returns our network and k3d
+          # joins it, which puts k3s and this job on one bridge where Docker's
+          # own DNS resolves the container names. On a host it returns nothing,
+          # because the hostname is not a container, and the old path is taken
+          # unchanged.
+          # The "|| true" is load-bearing: this step runs under `bash -e -o
+          # pipefail`, and on a host `docker inspect` exits non-zero, which
+          # would abort the step instead of taking the else branch.
+          JOB_NET="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$(hostname)" 2>/dev/null | awk '{print $1}' || true)"
+
+          if [ -n "$JOB_NET" ]; then
+            echo "Containerised job: $(hostname) on docker network '$JOB_NET' - k3d joins it."
+            k3d cluster create "$CLUSTER" --image "$K3S_IMAGE" --network "$JOB_NET" --wait --timeout 180s
+            # Same reason: the published port is useless from in here, so the
+            # kubeconfig is pointed at the load balancer container by name,
+            # over the shared network. If the API server certificate did not
+            # carry that name this would fail on the TLS handshake and the
+            # cluster-info below would say so - it holds without an extra
+            # --tls-san, measured on the probe PR of #225.
+            kubectl config set-cluster "k3d-$CLUSTER" --server="https://k3d-$CLUSTER-serverlb:6443"
+          else
+            echo "Job runs on the docker host - k3d's published port is reachable as written."
+            k3d cluster create "$CLUSTER" --image "$K3S_IMAGE" --wait --timeout 180s
+          fi
+
+          # Reachability is proven HERE, and the shape of this check is the
+          # product of getting it wrong twice. Both mistakes are written down
+          # because both look like something to simplify away.
+          #
+          # It is a LOOP and not a single call. k3d's --wait returns when the
+          # node container reports ready, but the API server can still answer
+          # discovery with 503 for a moment after that. Measured: a single
+          # `kubectl cluster-info` right here failed with "ServiceUnavailable:
+          # the server is currently unable to handle the request" on one of
+          # two legs of the SAME GitHub run while the other passed. A check
+          # that is itself racy produces exactly the sporadic red this job
+          # must never have (#227) - and a test people have learned to re-run
+          # is one they have stopped believing.
+          #
+          # It counts READY NODES and not "did kubectl answer". `kubectl get
+          # nodes` exits 0 on an EMPTY list, so the first version passed
+          # against a cluster whose API server was up and whose node had never
+          # registered: the log said "No resources found", the step went
+          # green, and the failure surfaced five minutes later as a pod stuck
+          # in Pending with no node and no scheduling event - nowhere near its
+          # cause. A check that a broken cluster passes is worse than no
+          # check. `kubectl wait --for=condition=Ready nodes --all` is not the
+          # shorter way to write this: it has the identical hole, because with
+          # zero nodes the condition is vacuously satisfied.
+          #
+          # The evidence that this version earns its keep: only after it
+          # counted nodes did the real cause become visible in the dump below
+          # - k3s could not start containerd ("error creating fsnotify
+          # watcher: too many open files", an inotify limit on the host), and
+          # nothing above this line had ever said so.
+          for ATTEMPT in $(seq 1 90); do
+            READY_NODES="$(kubectl get nodes --no-headers 2>/dev/null | awk '$2 == "Ready"' | wc -l | tr -d ' ')"
+            [ "$READY_NODES" -ge 1 ] && break
+            if [ "$ATTEMPT" -eq 90 ]; then
+              echo "::error::the k3d cluster '$CLUSTER' answers but has no Ready node after 180s"
+              kubectl get nodes -o wide || true
+              kubectl describe nodes || true
+              echo "--- k3s server log ---"
+              docker logs "k3d-$CLUSTER-server-0" 2>&1 | tail -80 || true
+              exit 1
+            fi
+            sleep 2
+          done
+          kubectl get nodes -o wide
       # Every chart reaching this step is one the exclusion filter let through,
       # so the script's SKIP branch is never taken here - it exists for local
       # runs. The variables below are empty for every chart but the one that
@@ -302,6 +531,10 @@ jobs:
           FREESAILARR_WG_KEY: ${{ steps.load-freesailarr-vpn.outputs.FREESAILARR_WG_KEY }}
           FREESAILARR_WG_ADDRESSES: ${{ steps.load-freesailarr-vpn.outputs.FREESAILARR_WG_ADDRESSES }}
         run: ci/run-install-test.sh "${{ matrix.chart }}"
+      # Must carry the same per-leg name as the create step above: a blanket
+      # cleanup, or the old fixed name, would tear down the neighbouring leg's
+      # cluster on a runner that shares one Docker daemon - which is precisely
+      # the half of the collision that turned one red leg into two.
       - name: "Delete k3d cluster"
         if: always()
-        run: k3d cluster delete install-test || true
+        run: k3d cluster delete "${{ matrix.chart }}" || true
